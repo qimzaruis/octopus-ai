@@ -20,6 +20,9 @@ export type SessionUser = {
 
 export const DEMO_SESSION_COOKIE = "octopus_demo_session";
 
+// ถ้า DB เข้าถึงไม่ได้ ให้ข้ามการ query ไปชั่วคราว (circuit breaker) เพื่อไม่ให้ทุกหน้าค้าง
+let dbUnavailableUntil = 0;
+
 /**
  * ดึง user ปัจจุบัน:
  * - มี Supabase session จริง → ใช้ session นั้น + แถว users ใน DB (role/credits)
@@ -54,6 +57,22 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   }
 
   const meta = (user.user_metadata ?? {}) as Record<string, string | undefined>;
+
+  // circuit breaker: ถ้า DB เพิ่งล้ม ให้ใช้ fallback profile ทันที
+  if (Date.now() < dbUnavailableUntil) {
+    console.warn("[auth] DB ถูกข้ามชั่วคราว (circuit breaker) → ใช้ profile จาก session");
+    return {
+      id: user.id,
+      email: user.email ?? "",
+      name: meta.full_name ?? meta.name ?? (user.email ?? "ผู้ใช้"),
+      avatarUrl: meta.avatar_url ?? meta.picture ?? null,
+      role: "user",
+      credits: 0,
+      plan: "free",
+      banned: false,
+      bannedReason: "",
+    };
+  }
 
   try {
     // จำกัดเวลา DB query ไม่ให้ค้างนานเมื่อ DB เข้าถึงไม่ได้ (fallback profile)
@@ -103,6 +122,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   } catch (err) {
     // DB ยังไม่พร้อม (เช่น ยังไม่รัน setup.sql / connection ล้ม) — อย่าให้ทั้งหน้าล่ม
     // ใช้โปรไฟล์จาก session ของ Supabase ไปพลาง ๆ
+    dbUnavailableUntil = Date.now() + 60_000;
     console.error("[auth] อ่าน/สร้าง profile จาก DB ไม่สําเร็จ:", err);
     return {
       id: user.id,
