@@ -1,0 +1,28 @@
+node_modules/
+.next/
+out/
+build/
+.env
+.env.local
+.env*.local
+.env*.local.*
+.env.bak*
+*.env.bak
+drizzle/meta/
+*.tsbuildinfo
+next-env.d.ts
+
+# ไฟล์ชั่วคราว/ล็อกที่สคริปต์สร้างระหว่างพัฒนา
+# (.tmp-* อยู่ในโปรเจกต์ได้ แต่ห้าม commit — และควรเขียน log ออกนอกโปรเจกต์ด้วย
+#  เพราะ Next dev watcher จับไฟล์ที่เปลี่ยนในโปรเจกต์แล้ว trigger refresh วนได้)
+.tmp-*
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# misc
+*.log

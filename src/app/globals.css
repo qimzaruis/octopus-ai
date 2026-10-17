@@ -1,0 +1,163 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-ink-950 font-sans text-body text-fg antialiased;
+}
+
+::selection {
+  @apply bg-brand-500/35 text-fg;
+}
+
+/* โฟกัสมองเห็นชัด (คีย์บอร์ดเท่านั้น — ไม่โผล่ตอนคลิกเมาส์) */
+:where(a, button, input, select, textarea, summary):focus-visible {
+  @apply outline-none ring-2 ring-brand-400/70 ring-offset-2 ring-offset-ink-950;
+}
+
+:where(section[id], div[id]) {
+  scroll-margin-top: 5.5rem;
+}
+
+/* เคารพผู้ใช้ที่ปิดอนิเมชัน — ปิดทุกอย่างแล้วให้เนื้อหาปรากฏครบทันที */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@layer components {
+  /* ============================================================
+     พื้นผิว: แยกชั้นด้วย "ระดับสีพื้น" เป็นหลัก ไม่ใช่เส้นขอบ
+     base (ink-950) → section (ink-900) → floating (ink-850)
+     เส้นขอบใช้เฉพาะงานที่ต้องมีขอบจริง: input, เส้นคั่นตาราง, focus
+     ============================================================ */
+  .surface {
+    @apply rounded-lg bg-ink-900;
+  }
+
+  .surface-raised {
+    @apply rounded-lg bg-ink-850 shadow-raised;
+  }
+
+  /* คงชื่อ .card ไว้ให้โค้ดเดิม แต่เปลี่ยนจาก "ขอบทุกใบ" เป็น "ยกด้วยสี+เงา" */
+  .card {
+    @apply rounded-lg bg-ink-850 shadow-raised;
+  }
+
+  /* เส้นคั่นแบบบาง สำหรับตาราง/รายการที่ต้องการขอบจริง */
+  .rule {
+    @apply border-white/[0.07];
+  }
+
+  /* ---- ปุ่ม: หนึ่งสไตล์หลัก หนึ่งสไตล์รอง ---- */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-brand-500 px-5 py-2.5 text-body-sm font-semibold text-fg transition duration-base ease-enter hover:bg-brand-600 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-white/[0.06] px-4 py-2.5 text-body-sm font-medium text-fg transition duration-base ease-enter hover:bg-white/[0.11] active:scale-[0.985];
+  }
+
+  /* คงชื่อเดิมไว้ (โค้ดเก่าอ้างถึง) */
+  .btn-ghost {
+    @apply btn-secondary;
+  }
+
+  .btn-quiet {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-body-sm font-medium text-fg-muted transition duration-base hover:bg-white/5 hover:text-fg;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-rose-500/10 px-4 py-2 text-body-sm font-medium text-rose-300 transition hover:bg-rose-500/20;
+  }
+
+  /* ---- ฟอร์ม: ขอบจริงเพราะต้องเห็นขอบเขตการกรอก ---- */
+  .input {
+    @apply w-full rounded-lg bg-ink-950/60 px-3.5 py-2.5 text-body-sm text-fg ring-1 ring-inset ring-white/10 transition duration-base placeholder:text-fg-subtle hover:ring-white/20 focus:outline-none focus:ring-2 focus:ring-brand-400/70;
+  }
+
+  .label {
+    @apply mb-1.5 block text-caption font-medium text-fg-muted;
+  }
+
+  /* ---- ตัวแบ่งกลุ่ม/แท็บ ---- */
+  .segmented {
+    @apply inline-flex items-center gap-0.5 rounded-lg bg-white/[0.05] p-0.5;
+  }
+
+  .chip-toggle {
+    @apply rounded-md px-3 py-1.5 text-caption font-medium text-fg-muted transition hover:text-fg;
+  }
+
+  .chip-toggle-active {
+    @apply bg-white/[0.1] text-fg;
+  }
+
+  /* ---- ตาราง ---- */
+  .table-head {
+    @apply px-4 py-3 text-left text-label font-semibold uppercase tracking-[0.1em] text-fg-subtle;
+  }
+
+  .table-cell {
+    @apply px-4 py-3 text-body-sm text-fg-muted;
+  }
+
+  /* ตัวเลขในตาราง/สถิติ ใช้เลขความกว้างคงที่เพื่อให้คอลัมน์ตรงกัน */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    @apply font-mono;
+  }
+
+  /* ---- วิดีโอฮีโร่: พื้นหลังถูกลบจริง ----
+     alpha: VP9 มี alpha channel ในตัว — ไม่ต้องผสมสี
+     screen: MP4 ที่ premultiply ทับดํา — สูตร screen ทําให้ดํา = โปร่งใส
+     HeroVideo เลือกอย่างใดอย่างหนึ่ง ไม่ผสมพร้อมกัน */
+  .hero-video--alpha {
+    mix-blend-mode: normal;
+  }
+
+  .hero-video--screen {
+    mix-blend-mode: screen;
+  }
+
+  /* ---- ตัวอักษร ---- */
+  /* ไม่ใช้ gradient text (ห้ามตามเกต) — เน้นด้วยน้ำหนักและสีแบรนด์แทน */
+  .text-accent {
+    @apply text-brand-300;
+  }
+
+  .eyebrow {
+    @apply text-label font-semibold uppercase tracking-[0.18em] text-fg-subtle;
+  }
+}
+
+/* scrollbar บาง ๆ ธีมมืด */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply rounded-full bg-white/10;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-white/20;
+}
