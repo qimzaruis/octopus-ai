@@ -23,6 +23,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         { href: "/dashboard", label: "Dashboard", icon: "fa-solid fa-chart-pie" },
         { href: "/models", label: t("โมเดล"), icon: "fa-solid fa-cube" },
         { href: "/requests", label: t("ประวัติการเรียกใช้"), icon: "fa-solid fa-clock-rotate-left" },
+        { href: "/playground", label: "Playground", icon: "fa-solid fa-comments" },
       ],
     },
     {
