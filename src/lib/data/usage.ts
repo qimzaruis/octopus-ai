@@ -414,8 +414,8 @@ export async function getSpendInWindows(
   const userCond = scope === "all" ? sql`1=1` : sql`user_id = ${scope}`;
   const rows = await rawRows(sql`
     select
-      coalesce(sum(case when created_at >= ${windows.cycleSince} then cost_usd else 0 end), 0)::float8 as cycle_cost,
-      coalesce(sum(case when created_at >= ${windows.daySince} then cost_usd else 0 end), 0)::float8 as day_cost
+      coalesce(sum(case when created_at >= ${windows.cycleSince.toISOString()} then cost_usd else 0 end), 0)::float8 as cycle_cost,
+      coalesce(sum(case when created_at >= ${windows.daySince.toISOString()} then cost_usd else 0 end), 0)::float8 as day_cost
     from requests
     where ${userCond}
   `);
