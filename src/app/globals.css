@@ -8,6 +8,8 @@
 
 html {
   scroll-behavior: smooth;
+  /* ป้องกัน sticky header บัง focus/anchor target (WCAG 2.2 Focus Not Obscured) */
+  scroll-padding-top: 5.5rem;
 }
 
 body {

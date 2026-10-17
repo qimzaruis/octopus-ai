@@ -38,7 +38,10 @@ export default async function ToggleSwitch({
       <button
         type="submit"
         title={enabled ? onTitle : offTitle}
-        className={`relative inline-flex items-center rounded-full px-[3px] transition-colors ${
+        aria-label={enabled ? onTitle : offTitle}
+        role="switch"
+        aria-checked={enabled}
+        className={`relative inline-flex items-center rounded-full px-[3px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-950 ${
           enabled ? "bg-leaf/80" : "bg-white/10"
         }`}
         style={track}

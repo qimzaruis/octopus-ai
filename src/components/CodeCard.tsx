@@ -65,6 +65,7 @@ print(response.choices[0].message.content)`;
         </div>
         <button
           onClick={copy}
+          aria-label={copied ? t("คัดลอกแล้ว") : t("คัดลอก")}
           className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-caption text-fg-subtle transition-colors duration-fast hover:bg-white/[0.06] hover:text-fg"
         >
           {copied ? t("คัดลอกแล้ว") : t("คัดลอก")}
