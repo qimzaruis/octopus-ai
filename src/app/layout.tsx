@@ -51,6 +51,7 @@ export default async function RootLayout({
   return (
     <html
       lang={HTML_LANG[locale]}
+      data-scroll-behavior="smooth"
       className={`${grotesk.variable} ${thai.variable} ${mono.variable}`}
     >
       <body>

@@ -56,41 +56,50 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   const meta = (user.user_metadata ?? {}) as Record<string, string | undefined>;
 
   try {
-    const db = getDb();
-    const rows = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, user.id))
-      .limit(1);
+    // จำกัดเวลา DB query ไม่ให้ค้างนานเมื่อ DB เข้าถึงไม่ได้ (fallback profile)
+    const result = await Promise.race([
+      (async () => {
+        const db = getDb();
+        const rows = await db
+          .select()
+          .from(users)
+          .where(eq(users.id, user.id))
+          .limit(1);
 
-    let row = rows[0];
-    if (!row) {
-      // เข้าสู่ระบบครั้งแรก — สร้าง profile (คนแรกของระบบเป็น admin อัตโนมัติ)
-      const existingCount = await db.select({ id: users.id }).from(users).limit(1);
-      const inserted = await db
-        .insert(users)
-        .values({
-          id: user.id,
-          email: user.email ?? "",
-          name: meta.full_name ?? meta.name ?? (user.email ?? "ผู้ใช้"),
-          avatarUrl: meta.avatar_url ?? meta.picture ?? null,
-          role: existingCount.length === 0 ? "admin" : "user",
-        })
-        .returning();
-      row = inserted[0];
-    }
+        let row = rows[0];
+        if (!row) {
+          // เข้าสู่ระบบครั้งแรก — สร้าง profile (คนแรกของระบบเป็น admin อัตโนมัติ)
+          const existingCount = await db.select({ id: users.id }).from(users).limit(1);
+          const inserted = await db
+            .insert(users)
+            .values({
+              id: user.id,
+              email: user.email ?? "",
+              name: meta.full_name ?? meta.name ?? (user.email ?? "ผู้ใช้"),
+              avatarUrl: meta.avatar_url ?? meta.picture ?? null,
+              role: existingCount.length === 0 ? "admin" : "user",
+            })
+            .returning();
+          row = inserted[0];
+        }
 
-    return {
-      id: row.id,
-      email: row.email,
-      name: row.name,
-      avatarUrl: row.avatarUrl,
-      role: row.role === "admin" ? "admin" : "user",
-      credits: Number(row.credits),
-      plan: row.plan,
-      banned: row.banned,
-      bannedReason: row.bannedReason,
-    };
+        return {
+          id: row.id,
+          email: row.email,
+          name: row.name,
+          avatarUrl: row.avatarUrl,
+          role: (row.role === "admin" ? "admin" : "user") as "user" | "admin",
+          credits: Number(row.credits),
+          plan: row.plan,
+          banned: row.banned,
+          bannedReason: row.bannedReason,
+        };
+      })(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("DB query timeout (6s)")), 6000),
+      ),
+    ]);
+    return result;
   } catch (err) {
     // DB ยังไม่พร้อม (เช่น ยังไม่รัน setup.sql / connection ล้ม) — อย่าให้ทั้งหน้าล่ม
     // ใช้โปรไฟล์จาก session ของ Supabase ไปพลาง ๆ

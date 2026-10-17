@@ -19,6 +19,10 @@ export function getDb() {
     client = postgres(normalizeDbUrl(raw), {
       prepare: false,
       max: 10,
+      // ถ้า DB เข้าถึงไม่ได้ ให้ล้มเร็วแทนที่จะค้าง 20+ วินาที (fallback profile ใน auth.ts)
+      connect_timeout: 5,
+      idle_timeout: 20,
+      max_lifetime: 60 * 30,
     });
   }
   return drizzle(client, { schema });
