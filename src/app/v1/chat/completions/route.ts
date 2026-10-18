@@ -28,6 +28,7 @@ import {
   type InvokeResult,
   type UpstreamMessage,
 } from "@/lib/gateway";
+import { createPublicSseFilter, publicCompletion } from "@/lib/public-response";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -233,12 +234,15 @@ export async function POST(req: NextRequest) {
           outputTokens: estimateTokens(typeof answer === "string" ? answer : ""),
         };
     log({ target: result.target, status: "success", httpStatus: 200, usage });
-    return Response.json({ ...json, model });
+    // ไม่ส่งฟิลด์อื่นของต้นทางออกมาเลย (id/metadata ของค่ายจะไม่โผล่ให้ผู้ใช้เห็น)
+    return Response.json(publicCompletion(json, model));
   }
 
-  // stream: ส่ง SSE ของค่ายต้นทางผ่านไปตามเดิม พร้อมนับ usage ไปด้วย
+  // stream: แปลง SSE ของต้นทางให้เหลือเฉพาะฟิลด์มาตรฐานก่อนถึงลูกค้า พร้อมนับ usage ไปด้วย
   const acc = createSseAccumulator(() => estimateTokensFromChars(chars));
+  const filter = createPublicSseFilter(model);
   const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
   const upstream = result.body;
   const passed = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -248,9 +252,13 @@ export async function POST(req: NextRequest) {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          acc.push(decoder.decode(value, { stream: true }));
-          controller.enqueue(value);
+          const text = decoder.decode(value, { stream: true });
+          acc.push(text);
+          const safe = filter.push(text);
+          if (safe) controller.enqueue(encoder.encode(safe));
         }
+        const tail = filter.flush();
+        if (tail) controller.enqueue(encoder.encode(`${tail}\n`));
       } catch (err) {
         failed = (err as Error).message;
       }

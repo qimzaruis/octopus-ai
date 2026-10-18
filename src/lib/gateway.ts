@@ -248,6 +248,22 @@ function joinUrl(baseUrl: string, path: string): string {
 const MAX_KEYS_PER_TARGET = 4;
 
 /**
+ * ปิดบังข้อมูลภายในก่อนเก็บลงตาราง requests ซึ่งผู้ใช้เปิดดูได้ที่หน้า /requests
+ *
+ * ชื่อค่ายต้นทางอาจหลุดมากับข้อความ error ดิบที่ค่ายตอบกลับ หรือ url ของค่าย
+ * ที่โผล่ใน error ของ fetch จึงลบออกทั้งชื่อ (ไม่สนตัวพิมพ์) และทั้งที่อยู่
+ */
+function maskInternals(text: string, names: string[]): string {
+  let out = text.replace(/https?:\/\/\S+/g, "[url]");
+  for (const name of names) {
+    const clean = name.trim();
+    if (clean.length < 3) continue;
+    out = out.replace(new RegExp(clean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "[ค่าย]");
+  }
+  return out;
+}
+
+/**
  * ไล่ยิงปลายทางตาม priority
  *
  * ต่อ 1 ปลายทาง จะลองคีย์ของค่ายนั้นตามลำดับ rotation จนกว่าจะสำเร็จ
@@ -273,12 +289,15 @@ export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> 
   let sawLimit = false;
   /** เจอ error แบบอื่นที่ไม่ใช่ลิมิต — ถ้ามี แสดงว่า 429 ไม่ใช่คำตอบที่ตรง */
   let sawOtherFailure = false;
+  /** ชื่อค่ายทั้งหมดของ route นี้ ใช้ปิดบังก่อนเก็บ error ลงตาราง requests */
+  const internalNames = all.map((t) => t.providerName);
 
   for (const target of targets) {
     const keys = await keysOf(target.providerId);
     const usable = keys.filter((k) => k.enabled && k.apiKey.trim());
     if (usable.length === 0) {
-      lastError = `${target.providerName}: ยังไม่ได้ตั้งค่า API key`;
+      console.error(`[gateway] ${target.providerName}: ยังไม่ได้ตั้งค่า API key`);
+      lastError = "โมเดลปลายทางยังไม่ได้เชื่อมต่อ";
       continue;
     }
 
@@ -287,10 +306,12 @@ export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> 
     if (candidates.length === 0) {
       if (usable.every((k) => isKeyLimited(k))) {
         sawLimit = true;
-        lastError = `${target.providerName}: คีย์ทุกตัวติดลิมิตโควต้า (รอเวลารีเซตของค่าย)`;
+        console.error(`[gateway] ${target.providerName}: คีย์ทุกตัวติดลิมิตโควต้า`);
+        lastError = "โควต้าของโมเดลปลายทางครบแล้ว กำลังรอการรีเซต";
       } else {
         sawOtherFailure = true;
-        lastError = `${target.providerName}: คีย์ทุกตัวกำลังถูกพัก (cooldown)`;
+        console.error(`[gateway] ${target.providerName}: คีย์ทุกตัวกำลังถูกพัก`);
+        lastError = "โมเดลปลายทางกำลังถูกพักชั่วคราว";
       }
       continue;
     }
@@ -321,7 +342,11 @@ export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> 
         });
       } catch (err) {
         sawOtherFailure = true;
-        lastError = `${target.providerName}: ${(err as Error).message}`;
+        console.error(`[gateway] ${target.providerName} (${picked.label}) เรียกไม่สําเร็จ:`, err);
+        lastError = maskInternals(
+          `เครือข่ายของโมเดลปลายทาง: ${(err as Error).message}`,
+          internalNames,
+        );
         await markKey(picked.id, false);
         invalidateCache("keys:"); // ห้ามเลือกคีย์ที่เพิ่งพังกลับมาใช้ซ้ำจากแคชเก่า
         break; // เครือข่ายล่ม — ลองคีย์อื่นก็น่าจะพังเหมือนกัน ไปปลายทางถัดไป
@@ -335,12 +360,18 @@ export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> 
       }
 
       const detail = await res.text().catch(() => "");
+      console.error(
+        `[gateway] ${target.providerName} คีย์ "${picked.label}" ตอบกลับ ${res.status}: ${detail.slice(0, 500)}`,
+      );
       if (rule) {
         const reason = matchKeyLimit(res.status, detail, rule);
         if (reason) {
           const until = nextResetAt(rule);
           sawLimit = true;
-          lastError = `${target.providerName} คีย์ "${picked.label}" ติดลิมิต (${reason}) — จะกลับมาใช้อีกที ${until.toISOString()}`;
+          lastError = maskInternals(
+            `โควต้าของโมเดลปลายทางครบแล้ว (${reason}) จะกลับมาใช้อีกที ${until.toISOString()}`,
+            internalNames,
+          );
           await markLimited(picked.id, until, reason);
           invalidateCache("keys:");
           continue; // คีย์ถัดไปของค่ายเดียวกันยังใช้ได้
@@ -348,7 +379,10 @@ export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> 
       }
 
       sawOtherFailure = true;
-      lastError = `${target.providerName} ตอบกลับ ${res.status}: ${detail.slice(0, 300)}`;
+      lastError = maskInternals(
+        `โมเดลปลายทางตอบกลับ ${res.status}: ${detail.slice(0, 200)}`,
+        internalNames,
+      );
       await markKey(picked.id, res.status !== 400 && res.status !== 404);
       invalidateCache("keys:");
       break; // โมเดลไม่มีอยู่จริง / 5xx — เปลี่ยนปลายทางดีกว่าเปลี่ยนคีย์
@@ -405,7 +439,7 @@ export function userSafeMessage(err: unknown): string {
     case "no_provider_key":
       return "ยังไม่ได้ตั้งค่าการเชื่อมต่อโมเดลนี้ กรุณาแจ้งผู้ดูแลระบบ";
     case "keys_limited":
-      return "ผู้ให้บริการใช้โควต้าครบแล้วสำหรับรอบนี้ กรุณาลองใหม่ภายหลัง";
+      return "โควต้าของโมเดลปลายทางครบแล้วสําหรับรอบนี้ กรุณาลองใหม่ภายหลัง";
     case "upstream_error":
       return "โมเดลต้นทางตอบกลับผิดพลาด กรุณาลองใหม่";
     default:
@@ -539,9 +573,41 @@ async function bumpModelUptime(input: LogInput): Promise<void> {
   }
 }
 
+/**
+ * ชื่อ + host ของค่ายต้นทางทุกตัวที่ระบบรู้จัก
+ *
+ * ใช้ปิดบงข้อความ error ก่อนเขียนลงตาราง requests ซึ่งผู้ใช้เปิดดูได้ที่หน้า /requests
+ * (คอลัมน์ model/provider_name ยังเก็บของจริงไว้สำหรับแอดมิน แต่ข้อความต้องไม่มีชื่อค่าย)
+ */
+async function internalIdentities(): Promise<string[]> {
+  try {
+    return await cached("identities", CATALOG_TTL_MS, async () => {
+      if (isDemoMode) {
+        return getDemoStore()
+          .providers.flatMap((p) => [p.name, hostOf(p.baseUrl)]);
+      }
+      const rows = await getDb()
+        .select({ name: providers.name, baseUrl: providers.baseUrl })
+        .from(providers);
+      return rows.flatMap((r) => [r.name, hostOf(r.baseUrl)]);
+    });
+  } catch {
+    return [];
+  }
+}
+
+function hostOf(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return "";
+  }
+}
+
 /** เขียน request ลงฐานข้อมูล — ล้มเหลวได้แต่ห้ามทำให้ request ของลูกค้าพังตาม */
 export async function logRequest(input: LogInput): Promise<void> {
   const costUsd = costOf(input.target, input.usage);
+  const error = input.error ? maskInternals(input.error, await internalIdentities()) : null;
   const row = {
     userId: input.userId,
     apiKeyId: input.apiKeyId ?? null,
@@ -555,7 +621,7 @@ export async function logRequest(input: LogInput): Promise<void> {
     outputTokens: input.usage.outputTokens,
     latencyMs: input.latencyMs,
     costUsd,
-    error: input.error ?? null,
+    error,
     createdAt: new Date(),
   };
 

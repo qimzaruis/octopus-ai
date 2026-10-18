@@ -286,11 +286,6 @@ export const appPages = {
   "คลิกเพื่อปิด": "Click to disable",
   "คลิกเพื่อเปิด": "Click to enable",
 
-  // ---------- LiveUsagePanel ----------
-  "tokens / นาที": "tokens / min",
-  "คีย์เก็บฝั่ง server": "Keys stay server-side",
-  "fallback อัตโนมัติ": "Automatic fallback",
-
   // ---------- RankingList ----------
   "กรุณาเข้าสู่ระบบก่อน": "Please sign in first",
   "กรุณาตั้งชื่อคีย์ เช่น Development": "Please name the key, e.g. Development",

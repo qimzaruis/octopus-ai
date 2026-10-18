@@ -61,7 +61,6 @@ export const common = {
   "สูงสุด": "Maximum",
   "ต่ําสุด": "Minimum",
   "โมเดล": "Model",
-  "ผู้ให้บริการ": "Provider",
   "ผู้ใช้": "Users",
   "บัญชี": "Account",
   "เครดิต": "Credits",

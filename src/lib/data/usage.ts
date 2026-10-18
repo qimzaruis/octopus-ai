@@ -210,10 +210,12 @@ export async function getUsage(scope: Scope, range: RangeKey): Promise<UsageBuck
 // ---------------------------------------------------------------------------
 
 async function getModelRankingReal(scope: Scope, limit: number): Promise<ModelRank[]> {
-  const userFilter = scope === "all" ? sql`` : sql` where user_id = ${scope}`;
+  // นับเฉพาะแถวที่มี public_model — คอลัมน์ model เก็บ id ของปลายทางจริง
+  // ซึ่งบอกรหัสของค่ายต้นทาง จึงห้ามเอามาแสดงหน้าผู้ใช้เด็ดขาด
+  const where = scope === "all" ? sql`public_model <> ''` : sql`public_model <> '' and user_id = ${scope}`;
   const rows = await rawRows(sql`
     select
-      coalesce(nullif(public_model, ''), model) as model,
+      public_model as model,
       count(*)::int as requests,
       coalesce(sum(input_tokens), 0)::int as input_tokens,
       coalesce(sum(output_tokens), 0)::int as output_tokens,
@@ -221,8 +223,8 @@ async function getModelRankingReal(scope: Scope, limit: number): Promise<ModelRa
       coalesce(sum(cost_usd), 0)::float8 as cost,
       coalesce(sum(case when status != 'success' then 1 else 0 end), 0)::int as errors
     from requests
-    ${userFilter}
-    group by coalesce(nullif(public_model, ''), model)
+    where ${where}
+    group by public_model
     order by coalesce(sum(input_tokens + output_tokens), 0) desc
     limit ${limit}
   `);
@@ -243,7 +245,8 @@ function getModelRankingDemo(scope: Scope, limit: number): ModelRank[] {
   const list = store.requests.filter((r) => scope === "all" || r.userId === scope);
   const map = new Map<string, ModelRank & { latencySum: number }>();
   for (const r of list) {
-    const key = r.publicModel || r.model;
+    const key = r.publicModel;
+    if (!key) continue; // ไม่มี route ของผู้ใช้ — ข้ามไปเลย กัน id ปลายทางโผล่บนหน้า
     const cur =
       map.get(key) ??
       ({

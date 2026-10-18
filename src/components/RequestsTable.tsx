@@ -79,8 +79,8 @@ export default function RequestsTable({ items }: { items: RequestDTO[] }) {
                   {formatTime(r.createdAt)}
                 </td>
                 <td className="table-cell">
-                  {/* แสดง "route" ที่ผู้ใช้เรียกจริง ไม่เปิดเผยโมเดล/ค่ายต้นทาง */}
-                  <span className="font-medium text-fg">{r.publicModel || r.model}</span>
+                  {/* แสดง "route" ที่ผู้ใช้เรียกจริง — คอลัมน์ model เป็น id ปลายทาง จึงไม่ใช้ */}
+                  <span className="font-medium text-fg">{r.publicModel || "—"}</span>
                 </td>
                 <td className="table-cell text-fg-muted">{r.agent}</td>
                 <td className="table-cell">
@@ -128,7 +128,7 @@ export default function RequestsTable({ items }: { items: RequestDTO[] }) {
               </span>
             </DetailRow>
             <DetailRow icon="fa-solid fa-cube" label={t("โมเดล")}>
-              {selected.publicModel || selected.model}
+              {selected.publicModel || "—"}
             </DetailRow>
             <DetailRow icon="fa-solid fa-user-astronaut" label="Agent">
               {selected.agent || "—"}

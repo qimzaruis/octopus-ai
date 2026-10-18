@@ -1,6 +1,6 @@
 import { asc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { models, providers, requests, routeTargets, routes } from "@/db/schema";
+import { models, providers, routeTargets, routes } from "@/db/schema";
 import { isDemoMode } from "@/lib/config";
 import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
 import { demoSource } from "@/lib/demo/store";
@@ -18,13 +18,17 @@ export type PlanRequirement = {
   requiredPlanLabel: string | null;
 };
 
-/** โมเดลที่ผู้ใช้เห็นได้ (enabled + visibleToUsers) */
-export type PublicModelDTO = {
+/**
+ * โมเดลทั้งหมดสําหรับหน้า admin เท่านั้น
+ *
+ * มีชื่อ provider ต้นทางอยู่ในนี้ — ห้ามส่งออกจาก route ที่ผู้ใช้เรียกโดยตรง
+ */
+export type AdminModelDTO = {
   id: number;
   modelId: string;
   displayName: string;
-  providerName: string;
   providerId: number;
+  providerName: string;
   contextWindow: number;
   supportsVision: boolean;
   inputPricePerM: number;
@@ -33,10 +37,9 @@ export type PublicModelDTO = {
   logoUrl: string | null;
   /** ค่าใช้จ่ายต่อ request โดยประมาณ (1,000 in + 500 out tokens) */
   sampleCostUsd: number;
+  enabled: boolean;
+  visibleToUsers: boolean;
 } & PlanRequirement;
-
-/** โมเดลทั้งหมดสําหรับหน้า admin (รวมที่ซ่อนจากผู้ใช้) */
-export type AdminModelDTO = PublicModelDTO & { enabled: boolean; visibleToUsers: boolean };
 
 /**
  * รายการที่ผู้ใช้เห็นในหน้า /models — อ้างอิง "route" เป็นหลัก
@@ -69,7 +72,11 @@ type ModelRow = {
   logoUrl: string | null;
 };
 
-function toPublicDTO(m: ModelRow, providerName: string, req: PlanRequirement): PublicModelDTO {
+function toAdminDTO(
+  m: ModelRow,
+  providerName: string,
+  req: PlanRequirement,
+): Omit<AdminModelDTO, "enabled" | "visibleToUsers"> {
   return {
     id: m.id,
     providerId: m.providerId,
@@ -107,118 +114,6 @@ function routeRequirement(
     : NO_REQ;
 }
 
-/** รายการโมเดลที่ผู้ใช้เรียกใช้ได้จริง */
-export async function listPublicModels(): Promise<PublicModelDTO[]> {
-  const reqs = await modelPlanRequirements();
-  const reqOf = (id: number) => {
-    const r = reqs.get(id);
-    return r ? { requiredPlanTier: r.tier, requiredPlanLabel: r.label } : NO_REQ;
-  };
-
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    return store.models
-      .filter((m) => m.enabled && m.visibleToUsers)
-      .map((m) =>
-        toPublicDTO(
-          m,
-          store.providers.find((p) => p.id === m.providerId)?.name ?? "?",
-          reqOf(m.id),
-        ),
-      )
-      .sort(
-        (a, b) =>
-          a.providerName.localeCompare(b.providerName) || a.modelId.localeCompare(b.modelId),
-      );
-  }
-
-  try {
-    const db = getDb();
-    const [modelRows, providerRows] = await Promise.all([
-      db
-        .select()
-        .from(models)
-        .where(eq(models.visibleToUsers, true))
-        .orderBy(asc(models.providerId), asc(models.modelId)),
-      db.select().from(providers),
-    ]);
-    return modelRows
-      .filter((m) => m.enabled)
-      .map((m) =>
-        toPublicDTO(m, providerRows.find((p) => p.id === m.providerId)?.name ?? "?", reqOf(m.id)),
-      );
-  } catch (err) {
-    markDbUnavailable(err);
-    return listPublicModels();
-  }
-}
-
-/** โมเดลสาธารณะพร้อมสัดส่วนการใช้งานจริง 7 วันล่าสุด */
-export type TopModelDTO = PublicModelDTO & {
-  /** เทียบกับตัวอันดับหนึ่ง (0–100) — ใช้วาดแถบโดยไม่เปิดตัวเลขใช้งานจริงต่อสาธารณะ */
-  share: number;
-};
-
-const TOP_TTL_MS = 5 * 60_000;
-
-/**
- * โมเดลที่เปิดใช้อยู่ เรียงตามการใช้งานจริงล่าสุด (tokens รวม 7 วัน)
- *
- * หน้า landing ใช้-list นี้แทนรายการ hardcode เพื่อให้เป็น "top ตอนนี้" จริง
- * ตัวเลขดิบไม่ถูกส่งออกมา เพราะเป็นสถิติรวมของทั้งระบบ — มีแค่สัดส่วนเทียบอันดับหนึ่ง
- */
-export async function listTopUsedModels(): Promise<TopModelDTO[]> {
-  if (isDemoMode) return loadTopUsedModels();
-  return cached("topModels", TOP_TTL_MS, loadTopUsedModels);
-}
-
-async function loadTopUsedModels(): Promise<TopModelDTO[]> {
-  // listPublicModels มี fallback เป็นชุดข้อมูลภายในอยู่แล้ว ส่วน query สถิติ
-  // เป็นแค่ตัวจัดลำดับ ถ้าพังให้เรียงตามแคตตาล็อกแทน (หน้า landing ห้าม 500 ตาม)
-  const catalog = await listPublicModels();
-  let used = new Map<string, number>();
-  try {
-    used = await usedTokensByModel();
-  } catch (err) {
-    markDbUnavailable(err);
-  }
-  const withUsage = catalog
-    .map((m) => ({ m, tokens: used.get(m.modelId) ?? 0 }))
-    .sort(
-      (a, b) =>
-        b.tokens - a.tokens ||
-        a.m.providerName.localeCompare(b.m.providerName) ||
-        a.m.modelId.localeCompare(b.m.modelId),
-    );
-  const top = withUsage[0]?.tokens ?? 0;
-  return withUsage.map(({ m, tokens }) => ({
-    ...m,
-    share: top > 0 ? Math.round((tokens / top) * 100) : 0,
-  }));
-}
-
-/** ผลรวม tokens ของแต่ละโมเดลปลายทางใน 7 วันล่าสุด (โหมด demo นับจากข้อมูลตัวอย่าง) */
-async function usedTokensByModel(): Promise<Map<string, number>> {
-  if (isDemoMode || isDbUnavailable()) {
-    const cutoff = Date.now() - 7 * 86_400_000;
-    const map = new Map<string, number>();
-    for (const r of demoSource().requests) {
-      if (r.createdAt.getTime() < cutoff) continue;
-      map.set(r.model, (map.get(r.model) ?? 0) + r.inputTokens + r.outputTokens);
-    }
-    return map;
-  }
-  const rows = await getDb()
-    .select({
-      model: requests.model,
-      tokens: sql<string>`coalesce(sum(input_tokens + output_tokens), 0)`,
-    })
-    .from(requests)
-    .where(sql`${requests.createdAt} > now() - interval '7 days'`)
-    .groupBy(requests.model);
-  return new Map(rows.map((r) => [r.model, Number(r.tokens)]));
-}
-
 /**
  * รายการ route ที่ผู้ใช้เห็นในหน้า /models
  *
@@ -243,11 +138,37 @@ if (!isDemoMode && process.env.DATABASE_URL) {
   void listPublicRoutes().catch(() => undefined);
 }
 
+/**
+ * ชื่อปลายทางที่จะแสดงต่อผู้ใช้
+ *
+ * displayName/modelId ที่แอดมินกรอกอาจมียี่ห้อค่ายต้นทางปนอยู่ (เช่น "GPT-5 (Tenixe)"
+ * หรือ "xai/grok-4.5") ซึ่งเราไม่เปิดเผยเด็ดขาด จึงตัดชื่อค่ายและ namespace หน้า
+ * สlash ออกก่อน แล้วเก็บเฉพาะตระกูลโมเดลที่เหลือ
+ */
+function publicTargetLabel(displayName: string, modelId: string, names: string[]): string {
+  let out = displayName || modelId || "";
+  for (const name of names) {
+    const clean = name.trim();
+    if (clean.length < 3) continue;
+    out = out.replace(new RegExp(clean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "");
+  }
+  out = out
+    .replace(/\/[a-z0-9._-]+/gi, (m) => m.slice(1)) // "xai/grok-4.5" → "grok-4.5"
+    .replace(/[([][\s)*-]*[)\]]/g, "") // วงเล็บที่กลายเป็นช่องว่าง
+    .replace(/[\s()*-]{2,}/g, " ")
+    .replace(/^[\s()*-]+|[\s()*-]+$/g, "")
+    .trim();
+  if (out) return out;
+  const tail = (modelId || "").split("/").pop()?.trim() ?? "";
+  return tail || "ปลายทาง";
+}
+
 async function loadPublicRoutes(): Promise<PublicRouteDTO[]> {
   const reqs = await modelPlanRequirements();
 
   if (isDemoMode || isDbUnavailable()) {
     const store = demoSource();
+    const names = store.providers.map((p) => p.name);
     return store.routes
       .filter((r) => r.enabled)
       .map((r) => {
@@ -266,7 +187,7 @@ async function loadPublicRoutes(): Promise<PublicRouteDTO[]> {
           targets: targets.map((t) => {
             const m = store.models.find((x) => x.id === t.modelRefId);
             return {
-              label: m?.displayName || m?.modelId || "?",
+              label: publicTargetLabel(m?.displayName ?? "", m?.modelId ?? "", names),
               contextWindow: m?.contextWindow ?? 0,
               supportsVision: m?.supportsVision ?? false,
             };
@@ -278,11 +199,13 @@ async function loadPublicRoutes(): Promise<PublicRouteDTO[]> {
 
   try {
     const db = getDb();
-    const [routeRows, targetRows, modelRows] = await Promise.all([
+    const [routeRows, targetRows, modelRows, providerRows] = await Promise.all([
       db.select().from(routes).where(eq(routes.enabled, true)).orderBy(asc(routes.id)),
       db.select().from(routeTargets).orderBy(asc(routeTargets.priority)),
       db.select().from(models),
+      db.select().from(providers),
     ]);
+    const names = providerRows.map((p) => p.name);
 
     return routeRows.map((r) => {
       const targets = targetRows
@@ -300,7 +223,7 @@ async function loadPublicRoutes(): Promise<PublicRouteDTO[]> {
         targets: targets.map((t) => {
           const m = modelRows.find((x) => x.id === t.modelRefId);
           return {
-            label: m?.displayName || m?.modelId || "?",
+            label: publicTargetLabel(m?.displayName ?? "", m?.modelId ?? "", names),
             contextWindow: m?.contextWindow ?? 0,
             supportsVision: m?.supportsVision ?? false,
           };
@@ -325,7 +248,7 @@ export async function listAllModelsForAdmin(): Promise<AdminModelDTO[]> {
   if (isDemoMode || isDbUnavailable()) {
     const store = demoSource();
     return store.models.map((m) => ({
-      ...toPublicDTO(m, store.providers.find((p) => p.id === m.providerId)?.name ?? "?", reqOf(m.id)),
+      ...toAdminDTO(m, store.providers.find((p) => p.id === m.providerId)?.name ?? "?", reqOf(m.id)),
       enabled: m.enabled,
       visibleToUsers: m.visibleToUsers,
     }));
@@ -337,7 +260,7 @@ export async function listAllModelsForAdmin(): Promise<AdminModelDTO[]> {
       db.select().from(providers),
     ]);
     return modelRows.map((m) => ({
-      ...toPublicDTO(m, providerRows.find((p) => p.id === m.providerId)?.name ?? "?", reqOf(m.id)),
+      ...toAdminDTO(m, providerRows.find((p) => p.id === m.providerId)?.name ?? "?", reqOf(m.id)),
       enabled: m.enabled,
       visibleToUsers: m.visibleToUsers,
     }));

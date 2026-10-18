@@ -14,7 +14,8 @@ export default function DashboardMock() {
   const t = useT();
   const bars = [34, 45, 29, 52, 63, 48, 74, 88];
   const labels = ["08", "10", "12", "14", "16", "18", "20", "22"];
-  const providers = ["OpenAI", "Anthropic", "Google", "Groq"];
+  /** ชื่อ route ที่ผู้ใช้เรียก — ภาพจําลองไม่ให้รู้ว่าข้างหลังเป็นค่ายไหน */
+  const routeNames = ["octopus-fast", "octopus-pro", "octopus-vision", "octopus-code"];
 
   return (
     <div className="relative rounded-xl bg-ink-900 p-1.5 shadow-floating">
@@ -110,7 +111,7 @@ export default function DashboardMock() {
                 </div>
               </div>
 
-              {/* แผง provider */}
+              {/* แผง route ที่ผู้ใช้เรียก */}
               <div className="rounded-md bg-white/[0.03] p-4">
                 <p className="text-micro font-medium uppercase tracking-[0.14em] text-fg-subtle">
                   One connection
@@ -119,12 +120,12 @@ export default function DashboardMock() {
                   {t("ยิง request เดียว ถึงทุกโมเดล")}
                 </p>
                 <div className="mt-4 space-y-1.5">
-                  {providers.map((p, i) => (
+                  {routeNames.map((r, i) => (
                     <div
-                      key={p}
+                      key={r}
                       className="flex items-center justify-between rounded bg-ink-950/70 px-2.5 py-1.5"
                     >
-                      <span className="text-micro text-fg-muted">{p}</span>
+                      <span className="font-mono text-micro text-fg-muted">{r}</span>
                       <span
                         className={`h-1.5 w-1.5 rounded-full ${
                           i === 3 ? "bg-amber-glow" : "bg-leaf"
@@ -133,7 +134,7 @@ export default function DashboardMock() {
                     </div>
                   ))}
                   <p className="pt-1 text-center font-mono text-micro text-fg-subtle">
-                    +46 providers
+                    +50 routes
                   </p>
                 </div>
               </div>
