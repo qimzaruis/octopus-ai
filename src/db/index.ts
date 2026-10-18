@@ -8,7 +8,14 @@ export { normalizeDbUrl };
 let client: postgres.Sql | null = null;
 
 /**
- * Drizzle client สำหรับ Supabase Postgres — ใช้ฝั่ง server เท่านั้น
+ * Session pooler ของ Supabase ให้ถือ connection พร้อมกันได้แค่ pool_size (15)
+ * ซึ่งเครื่อง dev กับ lambda บน Vercel ใช้ quota ร่วมกันทั้งโครงการ
+ *
+ * เดิม idle_timeout 600 ทำให้ lambda ที่เพิ่งใช้งานเสร็จค้าง connection ไว้ 10 นาที
+ * และ max 2 ต่อ instance ยิ่งมีหลาย instance ก็ยิ่งกิน quota เร็ว — result คือ
+ * EMAXCONNSESSION แล้ว circuit breaker เปิด ทำให้หน้าเว็บอ่าน catalog ไม่ได้เลย
+ *
+ * ค่าเวลาทุกตัวในไฟล์นี้หน่วยเป็น "วินาที" (ตาม docs ของ postgres.js)
  */
 export function getDb() {
   const raw = process.env.DATABASE_URL;
@@ -16,21 +23,17 @@ export function getDb() {
     throw new Error("DATABASE_URL is not configured");
   }
   if (!client) {
-    // Session pooler ของ Supabase จำกัด client พร้อมกันไว้ที่ pool_size (ค่าเริ่มต้น 15) ซึ่ง
-    // เครื่อง dev กับ lambda บน Vercel ใช้ quota เดียวกัน — ตอน dev โมดูลถูก rebuild ซ้ำ ๆ
-    // แล้วแต่ละ instance ถือ connection ไว้ได้นาน 10 นาที ทั้งเครื่องจึงกิน quota จนหมด
-    // และ request ของ user จริงบนเว็บจะขอ connection ไม่ได้ (EMAXCONNSESSION)
+    // เครื่อง dev ต้องเผื่อ quota ให้เว็บจริงด้วย เพราะใช้ฐานข้อมูลโครงการเดียวกัน
     const isDevHost = (process.env.APP_ENV ?? process.env.NODE_ENV ?? "development") === "development";
     client = postgres(normalizeDbUrl(raw), {
       prepare: false,
-      // ไม่เปิด connection แต่ละ query ใหม่ เพราะการเปิดหนึ่งครั้งไป Supabase pooler วัดได้ ~2.5 วินาที
-      // (query ปกติบน connection ที่เปิดแล้วเพียง ~350ms) จึงใช้ connection น้อยตัวแต่เก็บไว้นาน
+      // ไม่เปิด connection ใหม่ทุก query เพราะการเปิดหนึ่งครั้งไป Supabase pooler วัดได้ ~2.5 วินาที
+      // (query ปกติบน connection ที่เปิดแล้วเพียง ~350ms) แต่ต้องถือไว้น้อยตัวที่สุด
       max: isDevHost ? 1 : 2,
-      // ถ้าปิด idle_timeout เดิม (20s) ทุกครั้งที่ผู้ใช้พิมพ์ช้ากว่า 20 วินาทีจะเจอค่าเปิดใหม่
-      // ตอน dev ใช้ค่าน้อยลงมาก เพราะ connection ที่ว่างคือ connection ที่เว็บจริงใช้ไม่ได้
-      idle_timeout: isDevHost ? 15 : 60 * 10,
-      max_lifetime: 60 * 30,
-      // ถ้า DB เข้าถึงไม่ได้ ให้ล้มเร็วแทนที่จะค้าง 20+ วินาที (fallback profile ใน auth.ts)
+      // คืน connection เร็วลงมาก ถ้าทิงไว้ lambda ตัวอื่นจะขอไม่ได้
+      idle_timeout: isDevHost ? 10 : 30,
+      max_lifetime: 60 * 10,
+      // DB เข้าถึงไม่ได้ให้ล้มเร็ว อย่าค้าง 20+ วินาที (auth.ts มี fallback profile อยู่แล้ว)
       connect_timeout: 5,
     });
   }

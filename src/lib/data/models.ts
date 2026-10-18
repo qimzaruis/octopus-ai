@@ -124,10 +124,15 @@ function routeRequirement(
  * (แอดมินบันทึกการตั้งค่าเมื่อไหร่ก็ล้างแคชทันทีใน revalidateAdmin)
  */
 export async function listPublicRoutes(): Promise<PublicRouteDTO[]> {
-  // ตอน DB ถูกข้าม อย่าเอาผลว่างไปใส่แคช เพราะจะค้างตาถึงครบอายุแม้ DB ฟื้นแล้ว
-  if (isDbUnavailable()) return [];
+  // DB อ่านไม่ออก (เช่น pooler เต็ม): คืน catalog ชุดจริงที่อ่านสำเร็จล่าสุด
+  // ของเก่าที่แคชไว้ยังดีกว่า "ไม่มีโมเดลเลย" ซึ่งทำให้หน้า /models กับแช báo ว่า
+  // route ที่ผู้ใช้เรียกหาไม่เจอ ทั้งที่ในฐานข้อมูลมีอยู่จริง
+  if (isDbUnavailable()) return lastGoodRoutes ?? [];
   return cached("public-routes", CATALOG_TTL_MS, loadPublicRoutes);
 }
+
+/** catalog ชุดสุดท้ายที่อ่านจาก DB สำเร็จ — ของจริง ไม่ใช่ข้อมูลตัวอย่าง */
+let lastGoodRoutes: PublicRouteDTO[] | null = null;
 
 /**
  * อุ่นแคชตั้งแต่ module ถูกโหลด — request แรกหลังเซิร์ฟเวอร์สตาร์ท/รีสตาร์ท
@@ -175,7 +180,7 @@ async function loadPublicRoutes(): Promise<PublicRouteDTO[]> {
     ]);
     const names = brandNames(providerRows);
 
-    return routeRows.map((r) => {
+    const out = routeRows.map((r) => {
       const targets = targetRows
         .filter((t) => t.routeId === r.id && t.enabled)
         .sort((a, b) => a.priority - b.priority);
@@ -199,9 +204,13 @@ async function loadPublicRoutes(): Promise<PublicRouteDTO[]> {
         ...routeRequirement(targets.map((t) => t.modelRefId), reqs),
       };
     });
+    lastGoodRoutes = out;
+    return out;
   } catch (err) {
     markDbUnavailable(err);
-    return [];
+    // อ่านไม่สำเร็จ (pool ล้น/DB ค้าง): ใช้ catalog ชุดล่าสุดที่เคยอ่านได้
+    // ดีกว่าคืนค่าว่างแล้วให้หน้าเว็บกับแชทสรุปว่า "โมเดลนี้ไม่มีอยู่"
+    return lastGoodRoutes ?? [];
   }
 }
 

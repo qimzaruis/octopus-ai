@@ -217,6 +217,13 @@ function joinUrl(baseUrl: string, path: string): string {
 const MAX_KEYS_PER_TARGET = 4;
 
 /**
+ * สถานะที่แปลว่า "คีย์นี้ใช้ไม่ได้ตอนนี้" ไม่ใช่ "ปลายทางนี้พัง"
+ * 401 = คีย์ถูกถอน/ผิด, 402 = เครดิตของคีย์หมด, 429 = rate limit ของคีย์
+ * เจอให้พักคีย์นั้นแล้วยิงคีย์ถัดไปของค่ายเดียวกันต่อ
+ */
+const KEY_REJECTED_STATUSES = new Set([401, 402, 429]);
+
+/**
  * ข้อมูลภายในของชุดปลายทางหนึ่งroute (ชื่อค่าย + host + id ปลายทาง)
  * ใช้ล้างข้อความก่อนถึงตาผู้ใช้ — อ่านจาก target ที่ resolve ไว้แล้ว ไม่ต้อง query ใหม่
  */
@@ -347,8 +354,20 @@ export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> 
         }
       }
 
+      // คีย์ถูกปฏิเสธ (โควต้าหมด / คีย์พัง / rate limit) เป็นปัญหาของคีย์ตัวนั้นตัวเดียว
+      // ค่ายหนึ่งมีหลายคีย์ จึงต้องพักคีย์นี้แล้วยิงคีย์ถัดไปของค่ายเดียวกัน
+      // เดิมจุดนี้ break ไปปลายทางอื่นทันที ทำให้เสียโมเดลดี ๆ ทั้งที่คีย์สำรองยังใช้ได้
+      // (ค่ายที่ไม่ได้ตั้งกฎลิมิตไว้ใน /admin/key-limits จะมาเข้าทางนี้)
+      if (KEY_REJECTED_STATUSES.has(res.status)) {
+        sawLimit = true;
+        lastError = `โควตาของโมเดลปลายทางครบแล้ว (${res.status}) กำลังลองคีย์อื่นของค่ายเดียวกัน`;
+        await markKey(picked.id, false); // ให้นับเป็นความล้มเหลวของคีย์นี้ (มี cooldown กันยิงซ้ำ)
+        invalidateCache("keys:");
+        continue;
+      }
+
       sawOtherFailure = true;
-      // เก็บแค่สถานะ — เนื้อหา error ดิบของค่ายถูก print ไว้ที่ log เซิร์ฟเวอร์อย่างเดียว
+      // เก็บแค่สถานะ — รายละเอียดดิบของค่ายเก็บไว้ที่ log ฝั่งเซิร์ฟเวอร์อย่างเดียว
       lastError = `โมเดลปลายทางตอบกลับ ${res.status}`;
       await markKey(picked.id, res.status !== 400 && res.status !== 404);
       invalidateCache("keys:");
