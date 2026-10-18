@@ -9,9 +9,7 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { apiKeys, users } from "@/db/schema";
-import { isDemoMode } from "@/lib/config";
 import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
-import { getDemoStore } from "@/lib/demo/store";
 import type { SessionUser } from "@/lib/auth";
 
 export type ApiPrincipal = {
@@ -34,28 +32,6 @@ export async function authenticateApiKey(
   const secret = bearerKey(req);
   if (!secret) return null;
 
-  if (isDemoMode) {
-    const store = getDemoStore();
-    const key = store.apiKeys.find((k) => k.secret === secret && !k.revoked);
-    if (!key) return null;
-    const u = store.users.find((x) => x.id === key.userId);
-    if (!u) return null;
-    return {
-      apiKeyId: key.id,
-      keyName: key.name,
-      user: {
-        id: u.id,
-        email: u.email,
-        name: u.name,
-        avatarUrl: u.avatarUrl,
-        role: u.role,
-        credits: u.credits,
-        plan: u.plan,
-        banned: u.banned,
-        bannedReason: u.bannedReason,
-      },
-    };
-  }
 
   if (isDbUnavailable()) return null;
 

@@ -136,7 +136,6 @@ export const appPages = {
 
   // ---------- Sidebar ----------
   "ผู้ดูแลระบบ": "Administrator",
-  "โหมด Demo — ข้อมูลตัวอย่าง": "Demo mode — sample data",
 
   // ---------- Dashboard ----------
   "สรุปการใช้งาน AI API ของคุณ — อัปเดตทุกครั้งที่เข้าหน้านี้":

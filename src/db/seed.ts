@@ -6,51 +6,10 @@
  * ทำสิ่งต่อไปนี้ (ข้ามถ้ามีข้อมูลอยู่แล้ว):
  *  - สร้าง providers + models ตัวอย่าง
  *  - สร้าง routes (octopus-fast / octopus-pro) พร้อม targets
- *  - ถ้าตั้ง SEED_DEMO_REQUESTS=1 จะสร้าง user ตัวอย่าง + requests ย้อนหลัง 30 วัน
- *    เพื่อให้ dashboard/กราฟมีข้อมูลให้ดูทันที
  */
 import "../lib/dotenv";
-import { sql } from "drizzle-orm";
 import { getDb } from "./index";
-import {
-  apiKeys,
-  models,
-  providerKeys,
-  providers,
-  requests,
-  routeTargets,
-  routes,
-  users,
-} from "./schema";
-
-function mulberry32(seed: number) {
-  let a = seed;
-  return () => {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-const DEMO_USER_ID = "11111111-1111-4111-8111-111111111111";
-
-/** ราคาต่อ 1M tokens (USD) สําหรับ seed */
-const PRICE: Record<string, { inP: number; outP: number }> = {
-  "gpt-4o-mini": { inP: 0.15, outP: 0.6 },
-  "gpt-4o": { inP: 2.5, outP: 10 },
-  "claude-3.5-sonnet": { inP: 3, outP: 15 },
-  "claude-3-haiku": { inP: 0.25, outP: 1.25 },
-  "gemini-1.5-pro": { inP: 1.25, outP: 5 },
-  "gemini-1.5-flash": { inP: 0.075, outP: 0.3 },
-  "llama-3.1-70b": { inP: 0.59, outP: 0.79 },
-};
-
-function costOf(model: string, inTok: number, outTok: number): number {
-  const p = PRICE[model] ?? { inP: 1, outP: 3 };
-  return (inTok / 1_000_000) * p.inP + (outTok / 1_000_000) * p.outP;
-}
+import { models, providerKeys, providers, routeTargets, routes } from "./schema";
 
 async function main() {
   const db = getDb();
@@ -127,92 +86,6 @@ async function main() {
       { routeId: pro.id, modelRefId: mid("gemini-1.5-pro"), priority: 3 },
     ]);
     console.log("✔ สร้าง routes (octopus-fast, octopus-pro) พร้อม fallback targets");
-  }
-
-  // ---------- ข้อมูล requests ตัวอย่าง (optional) ----------
-  if (process.env.SEED_DEMO_REQUESTS === "1") {
-    const existingUser = await db.select().from(users);
-    if (!existingUser.some((u) => u.id === DEMO_USER_ID)) {
-      await db.insert(users).values({
-        id: DEMO_USER_ID,
-        email: "demo.user@octopus.ai",
-        name: "Demo User",
-        role: "user",
-        credits: 12.5,
-        plan: "free",
-      });
-      await db.insert(apiKeys).values({
-        userId: DEMO_USER_ID,
-        name: "Development",
-        keyPrefix: "sk-oct-seed1",
-        secret: "sk-oct-seed1-REPLACE_ME",
-      });
-      console.log("✔ สร้าง user ตัวอย่าง (demo.user@octopus.ai)");
-    }
-
-    const countRows = await db.execute(
-      sql`select count(*)::int as c from requests where user_id = ${DEMO_USER_ID}`,
-    );
-    const existing = Number(
-      (countRows as unknown as { rows: { c: number }[] }).rows?.[0]?.c ?? 0,
-    );
-
-    if (existing === 0) {
-      const modelPool = [
-        { provider: "OpenAI", model: "gpt-4o-mini", weight: 34 },
-        { provider: "OpenAI", model: "gpt-4o", weight: 18 },
-        { provider: "Anthropic", model: "claude-3.5-sonnet", weight: 20 },
-        { provider: "Google AI", model: "gemini-1.5-pro", weight: 14 },
-        { provider: "Groq", model: "llama-3.1-70b", weight: 9 },
-        { provider: "Mistral", model: "mistral-large", weight: 5 },
-      ];
-      const agents = ["web-app", "octopus-cli", "mobile-app", "rag-worker", "slack-bot"];
-      const publicModels = ["octopus-fast", "octopus-pro", "octopus-chat"];
-      const rng = mulberry32(20261014);
-      const total = modelPool.reduce((s, m) => s + m.weight, 0);
-      const now = Date.now();
-      const batch: (typeof requests.$inferInsert)[] = [];
-
-      for (let i = 0; i < 500; i++) {
-        const daysAgo = Math.floor(Math.pow(rng(), 1.6) * 30);
-        const created = new Date(now - daysAgo * 86400_000);
-        created.setHours(
-          Math.floor(rng() * 24),
-          Math.floor(rng() * 60),
-          Math.floor(rng() * 60),
-          0,
-        );
-        let r = rng() * total;
-        const picked = modelPool.find((m) => (r -= m.weight) <= 0) ?? modelPool[0];
-        const roll = rng();
-        const status = roll > 0.94 ? "error" : roll > 0.88 ? "rate_limited" : "success";
-        const inTok = Math.floor(200 + rng() * 3800);
-        const outTok = status === "success" ? Math.floor(80 + rng() * 1600) : 0;
-        batch.push({
-          userId: DEMO_USER_ID,
-          apiKeyId: 1,
-          providerName: picked.provider,
-          model: picked.model,
-          publicModel: publicModels[Math.floor(rng() * publicModels.length)],
-          agent: agents[Math.floor(rng() * agents.length)],
-          status,
-          httpStatus: status === "success" ? 200 : status === "rate_limited" ? 429 : 500,
-          inputTokens: inTok,
-          outputTokens: outTok,
-          latencyMs: Math.floor(300 + rng() * 2700),
-          costUsd: costOf(picked.model, inTok, outTok),
-          error:
-            status === "error"
-              ? "upstream provider timeout after 30s"
-              : status === "rate_limited"
-                ? "429 Too Many Requests — cooldown 60s"
-                : null,
-          createdAt: created,
-        });
-      }
-      await db.insert(requests).values(batch);
-      console.log(`✔ สร้าง requests ตัวอย่าง ${batch.length} รายการ (ย้อนหลัง 30 วัน)`);
-    }
   }
 
   console.log("\n🎉 Seed เสร็จสิ้น — รีเฟรชหน้าเว็บเพื่อดูข้อมูล");

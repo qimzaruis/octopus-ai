@@ -1,9 +1,7 @@
 import { asc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { models, planModels, plans as plansTable, routes } from "@/db/schema";
-import { isDemoMode } from "@/lib/config";
 import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
-import { demoSource } from "@/lib/demo/store";
 import { DEFAULT_PLANS, CYCLE_DAY_OPTIONS, type Plan } from "@/lib/plans";
 import { cached } from "@/lib/catalog-cache";
 
@@ -12,7 +10,7 @@ const CATALOG_TTL_MS = 60_000;
 
 /**
  * แผนการใช้งาน — อ่าน/เขียนจากตาราง plans
- * ตอนอ่าน DB ไม่ได้ให้ตกกลับไปใช้ค่าเริ่มต้น เพื่อไม่ให้หน้าเว็บล่ม
+ * ตอนอ่าน DB ไม่ได้ให้ตกกลับไปใช้ DEFAULT_PLANS (ค่ากําหนดของระบบ ไม่ใช่ข้อมูลแต่งขึ้น)
  */
 
 function rowToPlan(r: typeof plansTable.$inferSelect): Plan {
@@ -35,13 +33,11 @@ function rowToPlan(r: typeof plansTable.$inferSelect): Plan {
  */
 export function listPlans(): Promise<Plan[]> {
   // อย่าแคชผลตอน DB ถูกข้าม (ของว่างจะค้างจนครบอายุแคช ทั้งที่ DB ฟื้นแล้ว)
-  if (isDemoMode || isDbUnavailable()) return loadPlans();
+  if (isDbUnavailable()) return Promise.resolve(Object.values(DEFAULT_PLANS));
   return cached("plans", CATALOG_TTL_MS, loadPlans);
 }
 
 async function loadPlans(): Promise<Plan[]> {
-  if (isDemoMode || isDbUnavailable()) return demoSource().plans;
-
   try {
     const rows = await getDb()
       .select()
@@ -87,21 +83,7 @@ export async function updatePlan(input: {
     return { ok: false, error: "โควต้าต่อวันต้องไม่เกินโควต้าต่อรอบ" };
   }
 
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    const p = store.plans.find((x) => x.key === input.key);
-    if (!p) return { ok: false, error: "ไม่พบแผนนี้" };
-    Object.assign(p, {
-      label,
-      cycleDays: input.cycleDays,
-      cycleQuotaUsd: input.cycleQuotaUsd,
-      dailyQuotaUsd: input.dailyQuotaUsd,
-      cycleRequests: input.cycleRequests,
-      concurrentModels: input.concurrentModels,
-      fallback: input.fallback,
-    });
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
 
   const db = getDb();
   const values = {
@@ -144,16 +126,7 @@ export async function updateRouteSettings(input: {
     return { ok: false, error: "ราคา output ต้องไม่ติดลบ" };
   }
 
-  if (isDemoMode || isDbUnavailable()) {
-    const r = demoSource().routes.find((x) => x.id === input.id);
-    if (!r) return { ok: false, error: "ไม่พบ route" };
-    r.displayMode = mode;
-    r.displayName = input.displayName.trim();
-    r.logoUrl = input.logoUrl;
-    r.inputPricePerM = input.inputPricePerM;
-    r.outputPricePerM = input.outputPricePerM;
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
 
   await getDb()
     .update(routes)
@@ -191,34 +164,29 @@ export async function modelPlanRequirements(): Promise<Map<number, PlanModelRequ
     }
   };
 
-  if (isDemoMode || isDbUnavailable()) {
-    collect(demoSource().planModels, demoSource().plans);
-    return map;
-  }
+  // DB อ่านไม่ได้ = ไม่มีข้อมูลสิทธิ์รายโมเดล คืน map ว่าง (ไม่บล็อกโมเดลใด)
+  if (isDbUnavailable()) return map;
   try {
     const [rows, plans] = await Promise.all([getDb().select().from(planModels), listPlans()]);
     collect(rows, plans);
     return map;
   } catch (err) {
     markDbUnavailable(err);
-    return modelPlanRequirements();
+    return map;
   }
 }
 
 /** โมเดลที่แอดมินกำหนดให้แต่ละแผน (planKey → model ids) สำหรับหน้า /admin/plans */
 export async function listPlanModelAssignments(): Promise<Record<string, number[]>> {
   const out: Record<string, number[]> = {};
-  if (isDemoMode || isDbUnavailable()) {
-    for (const pm of demoSource().planModels) (out[pm.planKey] ??= []).push(pm.modelRefId);
-    return out;
-  }
+  if (isDbUnavailable()) return out;
   try {
     const rows = await getDb().select().from(planModels);
     for (const r of rows) (out[r.planKey] ??= []).push(r.modelRefId);
     return out;
   } catch (err) {
     markDbUnavailable(err);
-    return listPlanModelAssignments();
+    return out;
   }
 }
 
@@ -229,12 +197,7 @@ export async function setPlanModels(
 ): Promise<ActionResult> {
   const ids = [...new Set(modelRefIds.filter((n) => Number.isFinite(n)))];
 
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    store.planModels = store.planModels.filter((pm) => pm.planKey !== planKey);
-    for (const id of ids) store.planModels.push({ planKey, modelRefId: id });
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
 
   const db = getDb();
   try {

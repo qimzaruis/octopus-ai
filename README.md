@@ -35,7 +35,7 @@ Providers / Models / Routes — จัดการแบบเดียวกั
 - หน้า **`/signin`** แบบ split screen — ฝั่งซ้ายเล่าแบรนด์พร้อมแผงการใช้งานจำลองที่ขยับได้จริง
   ฝั่งขวาฟอร์มในการ์ดเส้นขอบเรืองแสง (aurora)
 - **Nav และ Footer เป็นคอมโพเนนต์ร่วม** (`SiteNav`, `SiteFooter`) ใช้ชุดเดียวกันทุกหน้าสาธารณะ
-- เข้าสู่ระบบด้วย **Google ผ่าน Supabase** (`/auth/callback`) หรือโหมด Demo
+- เข้าสู่ระบบด้วย **Google ผ่าน Supabase** (`/auth/callback`)
 
 ### ประวัติการเรียกใช้ (`/requests`)
 - ค้นหา + กรองตามสถานะ + แบ่งหน้า
@@ -64,15 +64,18 @@ Providers / Models / Routes — จัดการแบบเดียวกั
 | Auth | Supabase Auth — **Google Sign-in** (`@supabase/ssr`) |
 | Deploy target | Vercel / Node 20+ |
 
-## 🚀 เริ่มใช้งานแบบเร็ว (โหมด Demo — ไม่ต้องตั้งค่าอะไร)
+## 🚀 เริ่มใช้งานแบบเร็ว
 
 ```bash
 npm install
+cp .env.example .env.local     # แล้วเติมค่า Supabase + DATABASE_URL ให้ครบ
 npm run dev
 ```
 
-เปิด http://localhost:3000 → กด "เริ่มใช้งาน" → เลือก **เข้าสู่ระบบเป็นผู้ใช้ทั่วไป (Demo)**
-หรือ **เข้าสู่ระบบเป็นแอดมิน (Demo)** — จะเห็น Dashboard/ประวัติ/Keys/Admin ครบพร้อมข้อมูลตัวอย่าง
+เปิด http://localhost:3000 → กด "เริ่มใช้งาน" → เข้าสู่ระบบด้วย Google
+(Dashboard/ประวัติ/Keys/Admin อ่านจาก Supabase + Postgres เสมอ — ดูหัวข้อถัดไป)
+
+ตั้งค่า env ไม่ครบ → หน้าที่ต้องล็อกอินจะฟ้องว่าต่อฐานข้อมูลไม่ได้ ไม่ได้แสดงตัวเลขปลอมให้ดู
 
 ## 🔧 ตั้งค่าของจริงด้วย Supabase
 
@@ -104,10 +107,8 @@ Copy **Connection string (URI)** จาก Project Settings → Database (แน
 ### 4) สร้างไฟล์ `.env.local`
 
 ```env
-# โหมดการทํางาน: development = ใช้ Demo ได้ทันที | production = บังคับของจริง
+# โหมดการทํางาน: development = เครื่อง dev | production = ของจริงบน host
 APP_ENV=development
-# บังคับทับโหมด: 1 = Demo, 0 = ของจริง (เว้นว่าง = ใช้ค่าเริ่มต้นของ APP_ENV)
-DEMO_MODE=
 
 NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_ANON_KEY
@@ -116,13 +117,13 @@ SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY   # ใช้ตอน seed
 ```
 
 > มีไฟล์ตัวอย่างที่ `.env.example`
-> - `APP_ENV=development` (ค่าเริ่มต้นตอน `npm run dev`) → เข้าใช้งานได้ทันทีด้วยปุ่ม Demo โดยไม่ต้องมี Google/DB
-> - อยากทดสอบ Google login + DB จริงในเครื่อง ให้ตั้ง `DEMO_MODE=0` (หรือ `APP_ENV=production`)
-> - `APP_ENV=production` → บังคับใช้ของจริง ถ้า env ไม่ครบระบบจะตกไป Demo เพื่อไม่ให้หน้าเว็บล่ม
+> - ทุกหน้าอ่านจาก Supabase + Postgres เสมอ — แอปไม่มีโหมดข้อมูลปลอม
+> - ตั้ง env ไม่ครบ → หน้าที่ต้องล็อกอินจะฟ้องว่าต่อฐานข้อมูลไม่ได้ (ไม่ใช่เด้งไปตัวเลขปลอม)
+> - บน host จริงให้ตั้ง `APP_ENV=production`
 > **คนแรกที่ login ด้วย Google จะได้ role `admin` อัตโนมัติ** (คนถัด ๆ ไปเป็น `user`)
 > จะเปลี่ยน role ก็แก้คอลัมน์ `users.role` ในตารางได้เลย
 
-### 5) สร้างตาราง + seed ข้อมูลตัวอย่าง
+### 5) สร้างตาราง + seed ข้อมูลเริ่มต้น
 
 ```bash
 # ทางเลือก A (ใช้ได้เสมอ): คัดลอก supabase/setup.sql ไปวางใน
@@ -134,9 +135,6 @@ npm run db:push
 
 # seed providers/models/routes ตัวอย่าง
 npm run db:seed
-
-# (ถ้าต้องการ) seed user ตัวอย่าง + requests ย้อนหลัง 30 วัน ให้กราฟมีข้อมูล
-SEED_DEMO_REQUESTS=1 npm run db:seed
 ```
 
 จากนั้น `npm run dev` แล้วล็อกอินด้วย Google ได้เลย
@@ -147,8 +145,8 @@ SEED_DEMO_REQUESTS=1 npm run db:seed
 src/
 ├── app/
 │   ├── page.tsx                  # Landing page (ใช้ SiteNav/SiteFooter ร่วม)
-│   ├── signin/                   # หน้าเข้าสู่ระบบ (Google + Demo) — split screen
-│   ├── auth/callback|demo|signout
+│   ├── signin/                   # หน้าเข้าสู่ระบบ (Google) — split screen
+│   ├── auth/callback|signout
 │   └── (app)/                    # โซนที่ต้องล็อกอิน (มี sidebar/topbar)
 │       ├── dashboard/            # กราฟ + สรุป + อันดับ + ล่าสุด
 │       ├── requests/             # ประวัติ + modal รายละเอียด
@@ -163,8 +161,8 @@ src/
 ├── db/                           # schema.ts (Drizzle), index.ts, seed.ts
 ├── lib/
 │   ├── auth.ts                   # session user (Supabase + DB profile)
-│   ├── config.ts                 # ตรวจว่าเป็นโหมด Demo ไหม
-│   ├── data/usage.ts             # aggregate usage (SQL จริง + demo)
+│   ├── config.ts                 # ตรวจ env ว่าครบหรือยัง + โหมดการทํางาน
+│   ├── data/usage.ts             # aggregate usage (SQL จริง)
 │   ├── data/keys.ts              # จัดการ API keys
 │   ├── data/admin.ts             # CRUD provider/model/route
 │   └── supabase/                 # client + server helpers
@@ -177,21 +175,19 @@ supabase/migrations/              # SQL migration จาก drizzle-kit
 | Path | คำอธิบาย |
 | --- | --- |
 | `/` | Landing page สาธารณะ |
-| `/signin` | เข้าสู่ระบบ / สมัคร (Google + Demo) |
+| `/signin` | เข้าสู่ระบบ / สมัคร (Google) |
 | `/auth/callback` | รับ code จาก Supabase OAuth |
-| `/auth/demo?role=user\|admin` | ล็อกอินจำลองสำหรับโหมด Demo |
 | `/auth/signout` | ออกจากระบบ |
 | `/dashboard`, `/requests`, `/keys`, `/credits` | พื้นที่ผู้ใช้ (ต้องล็อกอิน) |
 | `/admin`, `/admin/providers`, `/admin/routes` | พื้นที่แอดมิน (เฉพาะ role `admin`) |
 
 ## 🚀 Deploy ขึ้น Production
 
-**1) ตัวแปรแวดล้อมบน host** — ต้องครบ ไม่งั้น `src/lib/config.ts` จะตีความเป็น Demo mode
+**1) ตัวแปรแวดล้อมบน host** — ต้องครบ ไม่งั้น `src/lib/config.ts` จะถือว่ายังไม่ได้ต่อ Supabase/DB
 
 | ตัวแปร | ค่าบนเว็บจริง |
 | --- | --- |
 | `APP_ENV` | `production` |
-| `DEMO_MODE` | `0` |
 | `NEXT_PUBLIC_APP_URL` | `https://octopus-ai.devs.li` |
 | `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` | จาก Project Settings → API |
 | `DATABASE_URL` | connection string แบบ pooler (port 6543) |

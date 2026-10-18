@@ -1,8 +1,6 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { isDemoMode } from "@/lib/config";
 import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
-import { demoSource } from "@/lib/demo/store";
 import { bangkokDay, ensureUptimeColumns } from "@/lib/gateway";
 import { internalIdentities, maskInternals } from "@/lib/public-text";
 
@@ -80,7 +78,8 @@ export type PublicModelSummary = {
 export type Scope = string | "all";
 
 // ---------------------------------------------------------------------------
-// โหมดจริง: SQL ผ่าน Drizzle
+// สถิติทุกฟังก์ชันอ่านจากตาราง requests ด้วย SQL ผ่าน Drizzle เท่านั้น
+// DB อ่านไม่ได้ → คืนค่าว่าง/ศูนย์ ไม่มีตัวเลขสมมติส่งให้หน้าเว็บ
 // ---------------------------------------------------------------------------
 
 async function rawRows(query: ReturnType<typeof sql>): Promise<Record<string, unknown>[]> {
@@ -156,61 +155,13 @@ async function getUsageReal(scope: Scope, range: RangeKey): Promise<UsageBucket[
   }));
 }
 
-async function getUsageDemo(scope: Scope, range: RangeKey): Promise<UsageBucket[]> {
-  const store = demoSource();
-  const list = store.requests.filter((r) => scope === "all" || r.userId === scope);
-  const now = Date.now();
-
-  if (range === "hourly") {
-    const todayStart = new Date(now + TZ_OFFSET_MS);
-    todayStart.setUTCHours(0, 0, 0, 0);
-    const todayStartMs = todayStart.getTime() - TZ_OFFSET_MS;
-    const nowHourBkk = new Date(now + TZ_OFFSET_MS).getUTCHours();
-    const counts = new Array(24).fill(null).map(() => ({ requests: 0, tokens: 0, cost: 0 }));
-    for (const r of list) {
-      if (r.createdAt.getTime() < todayStartMs) continue;
-      const h = new Date(r.createdAt.getTime() + TZ_OFFSET_MS).getUTCHours();
-      counts[h].requests++;
-      counts[h].tokens += r.inputTokens + r.outputTokens;
-      counts[h].cost += r.costUsd ?? 0;
-    }
-    return counts.slice(0, nowHourBkk + 1).map((v, h) => {
-      const hh = String(h).padStart(2, "0");
-      return { label: `${hh}:00`, fullLabel: `วันนี้ ${hh}:00 น.`, ...v };
-    });
-  }
-
-  const days = range === "7d" ? 7 : 30;
-  const buckets: UsageBucket[] = [];
-  for (let i = days - 1; i >= 0; i--) {
-    const dayStartBkk = new Date(now + TZ_OFFSET_MS);
-    dayStartBkk.setUTCHours(0, 0, 0, 0);
-    const start = dayStartBkk.getTime() - TZ_OFFSET_MS - i * 86400_000;
-    const end = start + 86400_000;
-    const dayList = list.filter((r) => {
-      const t = r.createdAt.getTime();
-      return t >= start && t < end;
-    });
-    const d = new Date(start + TZ_OFFSET_MS);
-    const label = `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-    buckets.push({
-      label,
-      fullLabel: label,
-      requests: dayList.length,
-      tokens: dayList.reduce((s, r) => s + r.inputTokens + r.outputTokens, 0),
-      cost: dayList.reduce((s, r) => s + (r.costUsd ?? 0), 0),
-    });
-  }
-  return buckets;
-}
-
 export async function getUsage(scope: Scope, range: RangeKey): Promise<UsageBucket[]> {
-  if (isDemoMode || isDbUnavailable()) return getUsageDemo(scope, range);
+  if (isDbUnavailable()) return [];
   try {
     return await getUsageReal(scope, range);
   } catch (err) {
     markDbUnavailable(err);
-    return getUsageDemo(scope, range);
+    return [];
   }
 }
 
@@ -247,51 +198,13 @@ async function getModelRankingReal(scope: Scope, limit: number): Promise<ModelRa
   }));
 }
 
-function getModelRankingDemo(scope: Scope, limit: number): ModelRank[] {
-  const store = demoSource();
-  const list = store.requests.filter((r) => scope === "all" || r.userId === scope);
-  const map = new Map<string, ModelRank & { latencySum: number }>();
-  for (const r of list) {
-    const key = r.publicModel;
-    if (!key) continue; // ไม่มี route ของผู้ใช้ — ข้ามไปเลย กัน id ปลายทางโผล่บนหน้า
-    const cur =
-      map.get(key) ??
-      ({
-        model: key,
-        requests: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        totalTokens: 0,
-        avgLatencyMs: 0,
-        errors: 0,
-        costUsd: 0,
-        latencySum: 0,
-      } as ModelRank & { latencySum: number });
-    cur.requests++;
-    cur.inputTokens += r.inputTokens;
-    cur.outputTokens += r.outputTokens;
-    cur.totalTokens = cur.inputTokens + cur.outputTokens;
-    cur.errors += r.status !== "success" ? 1 : 0;
-    cur.costUsd += r.costUsd ?? 0;
-    cur.latencySum += r.latencyMs;
-    map.set(key, cur);
-  }
-  return [...map.values()]
-    .map(({ latencySum, ...m }) => ({
-      ...m,
-      avgLatencyMs: Math.round(latencySum / Math.max(1, m.requests)),
-    }))
-    .sort((a, b) => b.totalTokens - a.totalTokens)
-    .slice(0, limit);
-}
-
 export async function getModelRanking(scope: Scope, limit = 8): Promise<ModelRank[]> {
-  if (isDemoMode || isDbUnavailable()) return getModelRankingDemo(scope, limit);
+  if (isDbUnavailable()) return [];
   try {
     return await getModelRankingReal(scope, limit);
   } catch (err) {
     markDbUnavailable(err);
-    return getModelRankingDemo(scope, limit);
+    return [];
   }
 }
 
@@ -327,33 +240,25 @@ async function getOverviewReal(scope: Scope): Promise<Overview> {
   };
 }
 
-function getOverviewDemo(scope: Scope): Overview {
-  const store = demoSource();
-  const list = store.requests.filter((r) => scope === "all" || r.userId === scope);
-  const inputTokens = list.reduce((s, r) => s + r.inputTokens, 0);
-  const outputTokens = list.reduce((s, r) => s + r.outputTokens, 0);
-  const errors = list.filter((r) => r.status !== "success").length;
-  return {
-    requests: list.length,
-    inputTokens,
-    outputTokens,
-    tokens: inputTokens + outputTokens,
-    avgLatencyMs: list.length
-      ? Math.round(list.reduce((s, r) => s + r.latencyMs, 0) / list.length)
-      : 0,
-    errors,
-    successRate: list.length ? ((list.length - errors) / list.length) * 100 : 100,
-    costUsd: list.reduce((s, r) => s + (r.costUsd ?? 0), 0),
-  };
-}
+/** ค่า "ไม่มีข้อมูล" — เหมือนตาราง requests ว่าง ไม่ใช่ตัวเลขที่แต่งขึ้น */
+const EMPTY_OVERVIEW: Overview = {
+  requests: 0,
+  tokens: 0,
+  inputTokens: 0,
+  outputTokens: 0,
+  avgLatencyMs: 0,
+  errors: 0,
+  successRate: 100,
+  costUsd: 0,
+};
 
 export async function getOverview(scope: Scope): Promise<Overview> {
-  if (isDemoMode || isDbUnavailable()) return getOverviewDemo(scope);
+  if (isDbUnavailable()) return EMPTY_OVERVIEW;
   try {
     return await getOverviewReal(scope);
   } catch (err) {
     markDbUnavailable(err);
-    return getOverviewDemo(scope);
+    return EMPTY_OVERVIEW;
   }
 }
 
@@ -387,32 +292,16 @@ async function getUsageTotalsReal(scope: Scope, period: UsagePeriod): Promise<Us
   return { requests: num(r.requests), tokens: num(r.tokens), costUsd: num(r.cost) };
 }
 
-function getUsageTotalsDemo(scope: Scope, period: UsagePeriod): UsageTotals {
-  const store = demoSource();
-  let list = store.requests.filter((r) => scope === "all" || r.userId === scope);
-  if (period === "month") {
-    const nowBkk = new Date(Date.now() + TZ_OFFSET_MS);
-    const monthStartMs =
-      Date.UTC(nowBkk.getUTCFullYear(), nowBkk.getUTCMonth(), 1) - TZ_OFFSET_MS;
-    list = list.filter((r) => r.createdAt.getTime() >= monthStartMs);
-  }
-  return {
-    requests: list.length,
-    tokens: list.reduce((s, r) => s + r.inputTokens + r.outputTokens, 0),
-    costUsd: list.reduce((s, r) => s + (r.costUsd ?? 0), 0),
-  };
-}
-
 export async function getUsageTotals(
   scope: Scope,
   period: UsagePeriod,
 ): Promise<UsageTotals> {
-  if (isDemoMode || isDbUnavailable()) return getUsageTotalsDemo(scope, period);
+  if (isDbUnavailable()) return { requests: 0, tokens: 0, costUsd: 0 };
   try {
     return await getUsageTotalsReal(scope, period);
   } catch (err) {
     markDbUnavailable(err);
-    return getUsageTotalsDemo(scope, period);
+    return { requests: 0, tokens: 0, costUsd: 0 };
   }
 }
 
@@ -426,20 +315,9 @@ export async function getSpendInWindows(
   scope: Scope,
   windows: { cycleSince: Date; daySince: Date },
 ): Promise<{ cycleSpendUsd: number; dailySpendUsd: number }> {
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    const list = store.requests.filter((r) => scope === "all" || r.userId === scope);
-    const cycleMs = windows.cycleSince.getTime();
-    const dayMs = windows.daySince.getTime();
-    let cycle = 0;
-    let daily = 0;
-    for (const r of list) {
-      const t = r.createdAt.getTime();
-      if (t >= cycleMs) cycle += r.costUsd ?? 0;
-      if (t >= dayMs) daily += r.costUsd ?? 0;
-    }
-    return { cycleSpendUsd: cycle, dailySpendUsd: daily };
-  }
+  // ยอดใช้จ่ายเป็น 0 ชั่วคราวตอนที่อ่าน DB ไม่ได้ — ไม่ใช่ตัวเลขจริง
+  // request ยังยิงไม่ออกเพราะ catalog ของ route ว่างอยู่ดี (gateway ตอบ no_route)
+  if (isDbUnavailable()) return { cycleSpendUsd: 0, dailySpendUsd: 0 };
 
   try {
     const userCond = scope === "all" ? sql`1=1` : sql`user_id = ${scope}`;
@@ -454,7 +332,7 @@ export async function getSpendInWindows(
     return { cycleSpendUsd: num(r.cycle_cost), dailySpendUsd: num(r.day_cost) };
   } catch (err) {
     markDbUnavailable(err);
-    return getSpendInWindows(scope, windows);
+    return { cycleSpendUsd: 0, dailySpendUsd: 0 };
   }
 }
 
@@ -511,68 +389,16 @@ async function listRequestsReal(
   };
 }
 
-function listRequestsDemo(
-  scope: Scope,
-  filter: RequestFilter,
-): { items: RequestDTO[]; total: number } {
-  const store = demoSource();
-  const page = filter.page ?? 1;
-  const perPage = filter.perPage ?? 20;
-  let list = store.requests.filter((r) => scope === "all" || r.userId === scope);
-  if (filter.q) {
-    const q = filter.q.toLowerCase();
-    list = list.filter((r) =>
-      [r.agent, r.publicModel].some((v) => v.toLowerCase().includes(q)),
-    );
-  }
-  if (filter.status && filter.status !== "all") {
-    list = list.filter((r) => r.status === filter.status);
-  }
-  return {
-    items: list.slice((page - 1) * perPage, page * perPage).map(toRequestDTO),
-    total: list.length,
-  };
-}
-
-export function toRequestDTO(r: {
-  id: number;
-  publicModel: string;
-  agent: string;
-  status: string;
-  httpStatus: number;
-  inputTokens: number;
-  outputTokens: number;
-  latencyMs: number;
-  costUsd: number;
-  error: string | null;
-  createdAt: Date | string;
-}): RequestDTO {
-  return {
-    id: r.id,
-    publicModel: r.publicModel,
-    agent: r.agent,
-    status: r.status,
-    httpStatus: r.httpStatus,
-    inputTokens: r.inputTokens,
-    outputTokens: r.outputTokens,
-    latencyMs: r.latencyMs,
-    costUsd: r.costUsd,
-    error: r.error,
-    createdAt:
-      r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt),
-  };
-}
-
 export async function listRequests(
   scope: Scope,
   filter: RequestFilter = {},
 ): Promise<{ items: RequestDTO[]; total: number }> {
-  if (isDemoMode || isDbUnavailable()) return listRequestsDemo(scope, filter);
+  if (isDbUnavailable()) return { items: [], total: 0 };
   try {
     return await listRequestsReal(scope, filter);
   } catch (err) {
     markDbUnavailable(err);
-    return listRequestsDemo(scope, filter);
+    return { items: [], total: 0 };
   }
 }
 
@@ -605,31 +431,15 @@ async function getPublicModelUsageReal(
   return map;
 }
 
-function getPublicModelUsageDemo(
-  scope: Scope,
-): Map<string, { requests: number; tokens: number; costUsd: number }> {
-  const store = demoSource();
-  const list = store.requests.filter((r) => scope === "all" || r.userId === scope);
-  const map = new Map<string, { requests: number; tokens: number; costUsd: number }>();
-  for (const r of list) {
-    const cur = map.get(r.publicModel) ?? { requests: 0, tokens: 0, costUsd: 0 };
-    cur.requests++;
-    cur.tokens += r.inputTokens + r.outputTokens;
-    cur.costUsd += r.costUsd ?? 0;
-    map.set(r.publicModel, cur);
-  }
-  return map;
-}
-
 export async function getPublicModelUsage(
   scope: Scope,
 ): Promise<Map<string, { requests: number; tokens: number; costUsd: number }>> {
-  if (isDemoMode || isDbUnavailable()) return getPublicModelUsageDemo(scope);
+  if (isDbUnavailable()) return new Map();
   try {
     return await getPublicModelUsageReal(scope);
   } catch (err) {
     markDbUnavailable(err);
-    return getPublicModelUsageDemo(scope);
+    return new Map();
   }
 }
 
@@ -663,28 +473,13 @@ async function getKeyUsageReal(scope: Scope): Promise<Map<number, KeyUsage>> {
   return map;
 }
 
-function getKeyUsageDemo(scope: Scope): Map<number, KeyUsage> {
-  const store = demoSource();
-  const list = store.requests.filter((r) => scope === "all" || r.userId === scope);
-  const map = new Map<number, KeyUsage>();
-  for (const r of list) {
-    if (r.apiKeyId == null) continue;
-    const cur = map.get(r.apiKeyId) ?? { requests: 0, tokens: 0, costUsd: 0 };
-    cur.requests++;
-    cur.tokens += r.inputTokens + r.outputTokens;
-    cur.costUsd += r.costUsd ?? 0;
-    map.set(r.apiKeyId, cur);
-  }
-  return map;
-}
-
 export async function getKeyUsage(scope: Scope): Promise<Map<number, KeyUsage>> {
-  if (isDemoMode || isDbUnavailable()) return getKeyUsageDemo(scope);
+  if (isDbUnavailable()) return new Map();
   try {
     return await getKeyUsageReal(scope);
   } catch (err) {
     markDbUnavailable(err);
-    return getKeyUsageDemo(scope);
+    return new Map();
   }
 }
 
@@ -702,13 +497,6 @@ export type RouteHealth = {
   /** ไม่มีข้อมูลเลย (ยังไม่เคยถูกเรียก) */
   empty: boolean;
 };
-
-/** จุดเริ่ม "วันนี้" ตามเวลากรุงเทพฯ คืนเป็น timestamp UTC ที่เทียบเท่า */
-function todayStartUtcMs(now = Date.now()): number {
-  const d = new Date(now + TZ_OFFSET_MS);
-  d.setUTCHours(0, 0, 0, 0);
-  return d.getTime() - TZ_OFFSET_MS;
-}
 
 /**
  * สถิติวันนี้ของ route — อ่านจากคอลัมน์ uptime ในตาราง models ตรง ๆ
@@ -741,24 +529,8 @@ async function getRouteHealthReal(publicModel: string): Promise<RouteHealth> {
   };
 }
 
-function getRouteHealthDemo(publicModel: string): RouteHealth {
-  const since = todayStartUtcMs();
-  const list = demoSource().requests.filter(
-    (r) => r.publicModel === publicModel && r.createdAt.getTime() > since,
-  );
-  const ok = list.filter((r) => r.status === "success").length;
-  return {
-    requests: list.length,
-    successRate: list.length > 0 ? ok / list.length : 1,
-    avgLatencyMs:
-      list.length > 0 ? Math.round(list.reduce((s, r) => s + r.latencyMs, 0) / list.length) : 0,
-    totalTokens: list.reduce((s, r) => s + r.inputTokens + r.outputTokens, 0),
-    empty: list.length === 0,
-  };
-}
-
 /**
- * สถิติวันนี้ของ route — ถ้ายังไม่เคยถูกเรียกจะคืน empty เพื่อแสดง "ยังไม่มีข้อมูล"
+ * สถิติวันนี้ของ route — ยังไม่เคยถูกเรียก (หรืออ่าน DB ไม่ได้) คืน empty = "ยังไม่มีข้อมูล"
  *
  * แคชไว้สั้น ๆ เพราะกดเปิดกล่องรายละเอียดซ้ำไม่ควรยิง query ซ้ำทุกครั้ง
  * ตัวเลขในคอลัมน์ถูกบวกทุก request ที่จบ จึงค้างสุดแค่ช่วงสั้นเท่านั้น
@@ -766,8 +538,17 @@ function getRouteHealthDemo(publicModel: string): RouteHealth {
 const HEALTH_TTL_MS = 20_000;
 const healthCache = new Map<string, { at: number; value: RouteHealth }>();
 
+/** ค่า "ไม่มีข้อมูล" — เหมือน route ที่ยังไม่เคยถูกเรียก ไม่ได้แต่งตัวเลข */
+const NO_HEALTH: RouteHealth = {
+  requests: 0,
+  successRate: 1,
+  avgLatencyMs: 0,
+  totalTokens: 0,
+  empty: true,
+};
+
 export async function getRouteHealth(publicModel: string): Promise<RouteHealth> {
-  if (isDemoMode || isDbUnavailable()) return getRouteHealthDemo(publicModel);
+  if (isDbUnavailable()) return NO_HEALTH;
   const hit = healthCache.get(publicModel);
   if (hit && Date.now() - hit.at < HEALTH_TTL_MS) return hit.value;
   try {
@@ -776,6 +557,6 @@ export async function getRouteHealth(publicModel: string): Promise<RouteHealth> 
     return value;
   } catch (err) {
     markDbUnavailable(err);
-    return getRouteHealthDemo(publicModel);
+    return NO_HEALTH;
   }
 }

@@ -18,7 +18,6 @@ const ROLE_LABEL: Record<string, string> = { admin: "ผู้ดูแลระ
  * จอ >= lg: แถบข้าง sticky เต็มความสูง
  * จอเล็ก: drawer เลื่อนจากซ้าย + ปุ่มลอย
  * ไม่ใช้ backdrop-blur บนแถบข้าง (เป็นพื้นที่ขนาดใหญ่และอยู่นิ่ง ๆ ตลอด)
- * demoMode รับเป็น prop จาก server (isDemoMode อ้าง env ฝั่ง server เท่านั้น)
  */
 export default function Sidebar({
   sections,
@@ -27,7 +26,6 @@ export default function Sidebar({
   role,
   plan,
   credits,
-  demoMode,
 }: {
   sections: NavSection[];
   email: string;
@@ -35,13 +33,34 @@ export default function Sidebar({
   role: string;
   plan: string;
   credits: number;
-  demoMode: boolean;
 }) {
   const pathname = usePathname();
   const t = useT();
   const [open, setOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
+  const drawerRef = useRef<HTMLElement>(null);
+
+  /* drawer บนมือถือคือ modal จริง: Escape ปิด, ล็อกสครอลล์หลังผ้าม่าน,
+     ย้าย focus เข้าแผงตอนเปิดและคืนให้ปุ่มเดิมตอนปิด
+     (Dialog ทำอยู่แล้ว —Drawer ต้องเหมือนกัน ไม่งั้นผู้ใช้คีย์บอร์ดติดอยู่หลัง scrim) */
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    drawerRef.current?.focus();
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previous?.focus?.();
+    };
+  }, [open]);
 
   const isActive = (href: string) =>
     href === "/admin" ? pathname === "/admin" : pathname.startsWith(href);
@@ -75,14 +94,6 @@ export default function Sidebar({
         <span className="text-body-sm font-semibold tracking-tight text-fg">
           Octopus <span className="text-brand-300">AI</span>
         </span>
-        {demoMode && (
-          <span
-            title={t("โหมด Demo — ข้อมูลตัวอย่าง")}
-            className="ml-auto rounded bg-amber-glow/10 px-1.5 py-0.5 text-micro font-semibold text-amber-glow"
-          >
-            DEMO
-          </span>
-        )}
       </div>
 
       <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-5">
@@ -100,7 +111,7 @@ export default function Sidebar({
                       href={item.href}
                       onClick={() => setOpen(false)}
                       aria-current={active ? "page" : undefined}
-                      className={`relative flex items-center gap-3 rounded-md px-3 py-2.5 text-body-sm font-medium transition-colors duration-fast ${
+                      className={`touch-min relative flex items-center gap-3 rounded-md px-3 py-2.5 text-body-sm font-medium transition-colors duration-fast ${
                         active
                           ? "bg-white/[0.08] text-fg"
                           : "text-fg-muted hover:bg-white/[0.05] hover:text-fg"
@@ -217,10 +228,13 @@ export default function Sidebar({
         {navContent}
       </aside>
 
+      {/* fab-dock = เลื่อนพ้น home indicator และขอบจอแนวนอน (ห้ามใส่ bottom/left ซ้ำ) */}
       <button
         onClick={() => setOpen(true)}
         aria-label={t("เปิดเมนู")}
-        className="fixed bottom-5 left-5 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-brand-500 text-fg shadow-floating transition active:scale-95 lg:hidden"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        className="fab-dock fixed z-40 flex h-12 w-12 items-center justify-center rounded-full bg-brand-500 text-fg shadow-floating transition active:scale-95 lg:hidden"
       >
         <Icon name="fa-bars" />
       </button>
@@ -228,15 +242,24 @@ export default function Sidebar({
       {open && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div
-            className="absolute inset-0 bg-black/70"
+            className="animate-fade-in absolute inset-0 bg-black/70"
             onClick={() => setOpen(false)}
             aria-hidden
           />
-          <aside className="animate-fade-in absolute inset-y-0 left-0 flex w-72 flex-col border-r border-white/[0.07] bg-ink-900">
+          {/* w-[min(18rem,88vw)]: ที่ 360px แถบ 288px กินพื้นที่ 80% ของจอ
+              เหลือ scrim บางจนปิดเมนูผิดจังหวะ — 88vw เว้นมือจับไว้ชัดขึ้น */}
+          <aside
+            ref={drawerRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("เมนูหลัก")}
+            tabIndex={-1}
+            className="animate-drawer-in absolute inset-y-0 left-0 flex w-[min(18rem,88vw)] flex-col border-r border-white/[0.07] bg-ink-900 outline-none pt-[env(safe-area-inset-top)]"
+          >
             <button
               onClick={() => setOpen(false)}
               aria-label={t("ปิดเมนู")}
-              className="absolute right-3 top-4 z-10 rounded-md p-1.5 text-fg-subtle transition hover:text-fg"
+              className="touch-min-icon absolute right-3 top-[calc(0.75rem_+_env(safe-area-inset-top))] z-10 rounded-md p-1.5 text-fg-subtle transition hover:text-fg"
             >
               <Icon name="fa-xmark" />
             </button>

@@ -1,9 +1,7 @@
 import { asc, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { creditTransactions, users } from "@/db/schema";
-import { isDemoMode } from "@/lib/config";
 import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
-import { DEMO_EXTRA_USERS, DEMO_USERS, demoSource, type DemoUser } from "@/lib/demo/store";
 import { listPlans } from "@/lib/data/plans";
 import { getUserMetrics, type UserMetrics } from "@/lib/data/models";
 import { invalidateCache } from "@/lib/catalog-cache";
@@ -42,37 +40,13 @@ function toRole(r: string): "user" | "admin" {
 
 /** รายชื่อผู้ใช้ทั้งหมดพร้อมเมตริกการใช้งาน (สําหรับหน้า admin) */
 export async function listUsersWithMetrics(): Promise<AdminUserDTO[]> {
-  // ป้ายชื่อแผนอ่านจากตาราง plans จริง (แผนใหม่ที่แอดมินเพิ่มก็แสดงถูก)
-  const planLabels = new Map((await listPlans()).map((p) => [p.key, p.label || p.key]));
-  const labelOf = (key: string) => planLabels.get(key) ?? key;
-
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    const rows = store.users.length
-      ? store.users
-      : [DEMO_USERS.user, DEMO_USERS.admin, ...DEMO_EXTRA_USERS];
-    const out: AdminUserDTO[] = [];
-    for (const u of rows) {
-      const metrics = await getUserMetrics(u.id);
-      out.push({
-        id: u.id,
-        email: u.email,
-        name: u.name,
-        avatarUrl: u.avatarUrl,
-        role: toRole(u.role),
-        plan: u.plan,
-        planLabel: labelOf(u.plan),
-        credits: u.credits,
-        banned: u.banned,
-        bannedReason: u.bannedReason,
-        createdAt: new Date("2026-08-01").toISOString(),
-        metrics,
-      });
-    }
-    return out.sort((a, b) => b.metrics.costUsd - a.metrics.costUsd);
-  }
+  if (isDbUnavailable()) return [];
 
   try {
+    // ป้ายชื่อแผนอ่านจากตาราง plans จริง (แผนใหม่ที่แอดมินเพิ่มก็แสดงถูก)
+    const planLabels = new Map((await listPlans()).map((p) => [p.key, p.label || p.key]));
+    const labelOf = (key: string) => planLabels.get(key) ?? key;
+
     const db = getDb();
     const rows = await db.select().from(users).orderBy(desc(users.createdAt));
     const out: AdminUserDTO[] = [];
@@ -96,15 +70,12 @@ export async function listUsersWithMetrics(): Promise<AdminUserDTO[]> {
     return out;
   } catch (err) {
     markDbUnavailable(err);
-    return listUsersWithMetrics();
+    return [];
   }
 }
 
 export async function listCreditTransactions(userId: string, limit = 12): Promise<CreditTxDTO[]> {
-  if (isDemoMode || isDbUnavailable()) {
-    // ไม่มีข้อมูลธุรกรรมในเดโม — คืนค่าว่างเพื่อให้ UI แสดง empty state
-    return [];
-  }
+  if (isDbUnavailable()) return [];
   try {
     const db = getDb();
     const rows = await db
@@ -134,15 +105,7 @@ export async function setUserBanned(
   banned: boolean,
   reason: string,
 ): Promise<ActionResult> {
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    const u = store.users.find((x) => x.id === userId);
-    if (!u) return { ok: false, error: "ไม่พบผู้ใช้" };
-    if (u.role === "admin") return { ok: false, error: "ระงับบัญชีแอดมินไม่ได้" };
-    u.banned = banned;
-    u.bannedReason = banned ? reason.trim() : "";
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
   try {
     const db = getDb();
     const target = (await db.select().from(users).where(eq(users.id, userId)))[0];
@@ -162,16 +125,11 @@ export async function setUserBanned(
 
 /** เปลี่ยนแผนการใช้งาน */
 export async function setUserPlan(userId: string, plan: string): Promise<ActionResult> {
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
   // แผนต้องมีอยู่จริงในตาราง plans (แอดมินเพิ่ม/แก้ที่หน้า /admin/plans) — ไม่ hard code
   const { listPlans } = await import("@/lib/data/plans");
   const valid = (await listPlans()).some((p) => p.key === plan);
   if (!valid) return { ok: false, error: "แผนไม่ถูกต้อง" };
-  if (isDemoMode || isDbUnavailable()) {
-    const u = demoSource().users.find((x) => x.id === userId);
-    if (!u) return { ok: false, error: "ไม่พบผู้ใช้" };
-    u.plan = plan;
-    return { ok: true };
-  }
   try {
     await getDb().update(users).set({ plan }).where(eq(users.id, userId));
     invalidateSessionCache(userId);
@@ -191,13 +149,7 @@ export async function adjustUserCredits(
   if (!Number.isFinite(amount) || amount === 0) {
     return { ok: false, error: "กรอกจํานวนเครดิตที่จะปรับ" };
   }
-
-  if (isDemoMode || isDbUnavailable()) {
-    const u = demoSource().users.find((x) => x.id === userId);
-    if (!u) return { ok: false, error: "ไม่พบผู้ใช้" };
-    u.credits = Math.max(0, Number((u.credits + amount).toFixed(6)));
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
 
   try {
     const db = getDb();
@@ -218,5 +170,3 @@ export async function adjustUserCredits(
     return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
   }
 }
-
-export type { DemoUser };

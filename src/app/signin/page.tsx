@@ -7,7 +7,6 @@ import SiteNav from "@/components/SiteNav";
 import SiteFooter from "@/components/SiteFooter";
 import { getSessionUser } from "@/lib/auth";
 import { getT } from "@/lib/i18n/server";
-import { isDemoMode } from "@/lib/config";
 import Icon from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
@@ -40,10 +39,12 @@ export default async function SignInPage({
 
   return (
     /* overflow-x-clip เพื่อไม่ให้ sticky nav เสีย (เหมือนหน้าแรก) */
-    <div className="relative flex min-h-screen flex-col overflow-x-clip bg-ink-950">
+    <div className="relative flex min-h-dvh flex-col overflow-x-clip bg-ink-950">
       <SiteNav active="signin" />
 
-      <main className="relative flex min-h-[calc(100vh-4rem)] flex-1 items-center overflow-hidden">
+      {/* 100svh ไม่ใช่ 100vh: บน Chrome Android แถบ URL หด-ขยายทําให้ 100vh สูงกว่า
+          พื้นที่จริง การ์ดเลยถูกดันตกขอบล่างแล้ว scroll ไม่ถึง ("ฟอร์มหายครึ่งใบ") */}
+      <main className="relative flex min-h-[calc(100svh-4rem)] flex-1 items-center overflow-hidden">
         {/* ASCII art เต็มจอเป็นพื้นหลัง — จัดมาสคอตไว้ฝั่งซ้าย (focusX) */}
         <div aria-hidden className="pointer-events-none absolute inset-0">
           {asciiArt && (
@@ -56,9 +57,9 @@ export default async function SignInPage({
         {/* ---------- ฟอร์มเข้าสู่ระบบ ---------- */}
         {/* ขนาดจอต่ำกว่า xl (แท็บเล็ต/ไอแพด/จอเล็ก)การ์ดอยู่กึ่งกลาง
             เดสก์ท็อปเท่านั้นที่ย้ายไปฝั่งขวาเพื่อเว้นที่ให้มาสคอต */}
-        <div className="relative mx-auto w-full max-w-6xl px-6 py-14">
+        <div className="safe-inline relative mx-auto w-full max-w-6xl py-10 sm:py-14">
           <div className="animate-fade-up mx-auto w-full max-w-sm xl:mr-0">
-            <div className="rounded-xl bg-ink-900 p-7 shadow-[0_0_48px_-16px_rgba(139,92,246,0.45)] ring-1 ring-white/[0.06]">
+            <div className="rounded-xl bg-ink-900 p-5 shadow-[0_0_48px_-16px_rgba(139,92,246,0.45)] ring-1 ring-white/[0.06] sm:p-7">
               <h2 className="text-h3 font-semibold text-fg">{t("เข้าสู่ระบบ")}</h2>
               <p className="mt-1.5 text-body-sm text-fg-muted">
                 {t("ใช้อีเมลองค์กรหรือบัญชี Google ของคุณก็ได้")}
@@ -75,16 +76,9 @@ export default async function SignInPage({
               )}
 
               <div className="mt-6">
-                <LoginForm nextPath={nextPath} demoMode={isDemoMode} />
+                <LoginForm nextPath={nextPath} />
               </div>
             </div>
-
-            {isDemoMode && (
-              <p className="mt-4 text-center text-caption text-fg-subtle">
-                <Icon name="fa-flask" className="mr-1.5 text-amber-glow" />
-                {t("โหมด Demo — ทดลองได้โดยไม่ต้องตั้งค่า Supabase")}
-              </p>
-            )}
 
             <p className="mt-5 rounded-lg bg-ink-950/85 px-4 py-2.5 text-center text-caption leading-relaxed text-fg-subtle ring-1 ring-white/[0.08] backdrop-blur-sm">
               {t("ยังไม่มีบัญชี? การเข้าสู่ระบบด้วย Google จะสร้างบัญชีให้อัตโนมัติครั้งแรก")}

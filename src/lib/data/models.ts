@@ -1,9 +1,7 @@
 import { asc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { models, providers, routeTargets, routes } from "@/db/schema";
-import { isDemoMode } from "@/lib/config";
 import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
-import { demoSource } from "@/lib/demo/store";
 import { getPlan, cycleStart, dayStart, computeQuota, type QuotaUsage } from "@/lib/plans";
 import { getUsage, type UsageBucket } from "@/lib/data/usage";
 import { modelPlanRequirements } from "@/lib/data/plans";
@@ -127,7 +125,7 @@ function routeRequirement(
  */
 export async function listPublicRoutes(): Promise<PublicRouteDTO[]> {
   // ตอน DB ถูกข้าม อย่าเอาผลว่างไปใส่แคช เพราะจะค้างตาถึงครบอายุแม้ DB ฟื้นแล้ว
-  if (isDemoMode || isDbUnavailable()) return loadPublicRoutes();
+  if (isDbUnavailable()) return [];
   return cached("public-routes", CATALOG_TTL_MS, loadPublicRoutes);
 }
 
@@ -135,7 +133,7 @@ export async function listPublicRoutes(): Promise<PublicRouteDTO[]> {
  * อุ่นแคชตั้งแต่ module ถูกโหลด — request แรกหลังเซิร์ฟเวอร์สตาร์ท/รีสตาร์ท
  * จะได้ไม่ต้องรอการเชื่อมต่อใหม่กับ Supabase (วัดได้ ~5 วินาทีถ้าต้องรอแบบนั้น)
  */
-if (!isDemoMode && process.env.DATABASE_URL) {
+if (process.env.DATABASE_URL) {
   void listPublicRoutes().catch(() => undefined);
 }
 
@@ -166,37 +164,6 @@ function publicTargetLabel(displayName: string, modelId: string, names: string[]
 
 async function loadPublicRoutes(): Promise<PublicRouteDTO[]> {
   const reqs = await modelPlanRequirements();
-
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    const names = brandNames(store.providers);
-    return store.routes
-      .filter((r) => r.enabled)
-      .map((r) => {
-        const targets = store.routeTargets
-          .filter((t) => t.routeId === r.id && t.enabled)
-          .sort((a, b) => a.priority - b.priority);
-        return {
-          id: r.id,
-          publicModel: r.publicModel,
-          displayName: r.displayName || r.publicModel,
-          description: r.description,
-          displayMode: r.displayMode,
-          logoUrl: r.logoUrl ?? null,
-          inputPricePerM: Number(r.inputPricePerM ?? 0),
-          outputPricePerM: Number(r.outputPricePerM ?? 0),
-          targets: targets.map((t) => {
-            const m = store.models.find((x) => x.id === t.modelRefId);
-            return {
-              label: publicTargetLabel(m?.displayName ?? "", m?.modelId ?? "", names),
-              contextWindow: m?.contextWindow ?? 0,
-              supportsVision: m?.supportsVision ?? false,
-            };
-          }),
-          ...routeRequirement(targets.map((t) => t.modelRefId), reqs),
-        };
-      });
-  }
 
   try {
     const db = getDb();
@@ -234,26 +201,20 @@ async function loadPublicRoutes(): Promise<PublicRouteDTO[]> {
     });
   } catch (err) {
     markDbUnavailable(err);
-    return listPublicRoutes();
+    return [];
   }
 }
 
 /** โมเดลทั้งหมดสําหรับหน้า admin */
 export async function listAllModelsForAdmin(): Promise<AdminModelDTO[]> {
+  if (isDbUnavailable()) return [];
+
   const reqs = await modelPlanRequirements();
   const reqOf = (id: number) => {
     const r = reqs.get(id);
     return r ? { requiredPlanTier: r.tier, requiredPlanLabel: r.label } : NO_REQ;
   };
 
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    return store.models.map((m) => ({
-      ...toAdminDTO(m, store.providers.find((p) => p.id === m.providerId)?.name ?? "?", reqOf(m.id)),
-      enabled: m.enabled,
-      visibleToUsers: m.visibleToUsers,
-    }));
-  }
   try {
     const db = getDb();
     const [modelRows, providerRows] = await Promise.all([
@@ -267,7 +228,7 @@ export async function listAllModelsForAdmin(): Promise<AdminModelDTO[]> {
     }));
   } catch (err) {
     markDbUnavailable(err);
-    return listAllModelsForAdmin();
+    return [];
   }
 }
 
@@ -323,43 +284,25 @@ async function userMetricsReal(userId: string): Promise<UserMetrics> {
   };
 }
 
-function userMetricsDemo(userId: string): UserMetrics {
-  const store = demoSource();
-  const list = store.requests.filter((r) => r.userId === userId);
-  const byModel = new Map<string, number>();
-  const byAgent = new Map<string, number>();
-  let tokens = 0;
-  let cost = 0;
-  for (const r of list) {
-    tokens += r.inputTokens + r.outputTokens;
-    cost += r.costUsd ?? 0;
-    byModel.set(r.model, (byModel.get(r.model) ?? 0) + 1);
-    if (r.agent) byAgent.set(r.agent, (byAgent.get(r.agent) ?? 0) + 1);
-  }
-  const top = (m: Map<string, number>) => {
-    let best: { k: string; v: number } | null = null;
-    for (const [k, v] of m) if (!best || v > best.v) best = { k, v };
-    return best;
-  };
-  const tm = top(byModel);
-  const ta = top(byAgent);
+/** ค่า "ยังไม่มีข้อมูล" ตอนอ่าน DB ไม่ได้ — ศูนย์ล้วน ไม่ได้แต่งตัวเลข */
+function emptyUserMetrics(userId: string): UserMetrics {
   return {
     userId,
-    requests: list.length,
-    tokens,
-    costUsd: cost,
-    topModel: tm ? { model: tm.k, requests: tm.v } : null,
-    topAgent: ta ? { agent: ta.k, requests: ta.v } : null,
+    requests: 0,
+    tokens: 0,
+    costUsd: 0,
+    topModel: null,
+    topAgent: null,
   };
 }
 
 export async function getUserMetrics(userId: string): Promise<UserMetrics> {
-  if (isDemoMode || isDbUnavailable()) return userMetricsDemo(userId);
+  if (isDbUnavailable()) return emptyUserMetrics(userId);
   try {
     return await userMetricsReal(userId);
   } catch (err) {
     markDbUnavailable(err);
-    return userMetricsDemo(userId);
+    return emptyUserMetrics(userId);
   }
 }
 

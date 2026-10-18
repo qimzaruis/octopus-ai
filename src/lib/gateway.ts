@@ -22,10 +22,8 @@ import {
   routeTargets,
   routes,
 } from "@/db/schema";
-import { isDemoMode } from "@/lib/config";
-import { isDbUnavailable } from "@/lib/db-circuit";
+import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
 import { cached, invalidateCache } from "@/lib/catalog-cache";
-import { getDemoStore } from "@/lib/demo/store";
 import { isKeyLimited, orderedKeys, type RotatableKey } from "@/lib/rotation";
 import { keyLimitRule, matchKeyLimit, nextResetAt } from "@/lib/key-limit";
 import { internalIdentities, maskInternals, type InternalIdentities } from "@/lib/public-text";
@@ -102,7 +100,7 @@ export function resolveTargets(publicModel: string): Promise<GatewayTarget[]> {
   const name = publicModel.trim();
   if (!name) return Promise.resolve([]);
   // ตอน DB ถูกข้าม อย่าแคชผลว่างไว้ ไม่งั้น route จะหายไปจนครบอายุแคชทั้งที่ DB ฟื้นแล้ว
-  if (isDemoMode || isDbUnavailable()) return loadTargets(name);
+  if (isDbUnavailable()) return Promise.resolve([]);
   return cached(`targets:${name}`, CATALOG_TTL_MS, () => loadTargets(name));
 }
 
@@ -110,16 +108,23 @@ async function loadTargets(publicModel: string): Promise<GatewayTarget[]> {
   const name = publicModel.trim();
   if (!name) return [];
 
-  if (isDemoMode) {
-    const store = getDemoStore();
-    const route = store.routes.find((r) => r.publicModel === name && r.enabled);
+  try {
+    const db = getDb();
+    const [routeRows, targetRows, modelRows, providerRows] = await Promise.all([
+      db.select().from(routes).where(eq(routes.enabled, true)),
+      db.select().from(routeTargets).orderBy(asc(routeTargets.priority)),
+      db.select().from(models),
+      db.select().from(providers),
+    ]);
+    const route = routeRows.find((r) => r.publicModel === name);
     if (!route) return [];
-    return store.routeTargets
+
+    return targetRows
       .filter((t) => t.routeId === route.id && t.enabled)
       .sort((a, b) => a.priority - b.priority)
       .flatMap((t) => {
-        const m = store.models.find((x) => x.id === t.modelRefId && x.enabled);
-        const p = store.providers.find((x) => x.id === m?.providerId && x.enabled);
+        const m = modelRows.find((x) => x.id === t.modelRefId && x.enabled);
+        const p = providerRows.find((x) => x.id === m?.providerId && x.enabled);
         if (!m || !p) return [];
         return [
           {
@@ -135,39 +140,11 @@ async function loadTargets(publicModel: string): Promise<GatewayTarget[]> {
           },
         ];
       });
+  } catch (err) {
+    // DB อ่านไม่ออก (เช่น pooler เต็ม) = ไม่มีรายการปลายทาง ให้ caller ตอบติดขัดเอง
+    markDbUnavailable(err);
+    return [];
   }
-
-  const db = getDb();
-  const [routeRows, targetRows, modelRows, providerRows] = await Promise.all([
-    db.select().from(routes).where(eq(routes.enabled, true)),
-    db.select().from(routeTargets).orderBy(asc(routeTargets.priority)),
-    db.select().from(models),
-    db.select().from(providers),
-  ]);
-  const route = routeRows.find((r) => r.publicModel === name);
-  if (!route) return [];
-
-  return targetRows
-    .filter((t) => t.routeId === route.id && t.enabled)
-    .sort((a, b) => a.priority - b.priority)
-    .flatMap((t) => {
-      const m = modelRows.find((x) => x.id === t.modelRefId && x.enabled);
-      const p = providerRows.find((x) => x.id === m?.providerId && x.enabled);
-      if (!m || !p) return [];
-      return [
-        {
-          modelRefId: m.id,
-          modelId: m.modelId,
-          providerId: p.id,
-          providerName: p.name,
-          baseUrl: p.baseUrl,
-          inputPricePerM: Number(m.inputPricePerM),
-          outputPricePerM: Number(m.outputPricePerM),
-          supportsVision: m.supportsVision,
-          contextWindow: m.contextWindow,
-        },
-      ];
-    });
 }
 
 type UsableKey = RotatableKey & { apiKey: string; label: string };
@@ -180,41 +157,32 @@ type UsableKey = RotatableKey & { apiKey: string; label: string };
 const KEYS_TTL_MS = 30_000;
 
 function keysOf(providerId: number): Promise<UsableKey[]> {
-  if (isDemoMode) return loadKeys(providerId);
+  // ตอน DB ถูกข้าม อย่าเก็บผลว่างลงแคช 30 วินาที จะทำให้คีย์จริงหายไปทั้งชุด
+  if (isDbUnavailable()) return Promise.resolve([]);
   return cached(`keys:${providerId}`, KEYS_TTL_MS, () => loadKeys(providerId));
 }
 
 async function loadKeys(providerId: number): Promise<UsableKey[]> {
-  if (isDemoMode) {
-    return getDemoStore()
-      .providerKeys.filter((k) => k.providerId === providerId)
-      .map((k) => ({
-        id: k.id,
-        label: k.label,
-        enabled: k.enabled,
-        isPrimary: k.isPrimary,
-        failureCount: k.failureCount,
-        cooldownUntil: k.cooldownUntil,
-        lastUsedAt: k.lastUsedAt,
-        limitUntil: k.limitUntil,
-        apiKey: k.apiKey,
-      }));
+  try {
+    const rows = await getDb()
+      .select()
+      .from(providerKeys)
+      .where(eq(providerKeys.providerId, providerId));
+    return rows.map((k) => ({
+      id: k.id,
+      label: k.label,
+      enabled: k.enabled,
+      isPrimary: k.isPrimary,
+      failureCount: k.failureCount,
+      cooldownUntil: k.cooldownUntil,
+      lastUsedAt: k.lastUsedAt,
+      limitUntil: k.limitUntil,
+      apiKey: k.apiKey,
+    }));
+  } catch (err) {
+    markDbUnavailable(err);
+    return [];
   }
-  const rows = await getDb()
-    .select()
-    .from(providerKeys)
-    .where(eq(providerKeys.providerId, providerId));
-  return rows.map((k) => ({
-    id: k.id,
-    label: k.label,
-    enabled: k.enabled,
-    isPrimary: k.isPrimary,
-    failureCount: k.failureCount,
-    cooldownUntil: k.cooldownUntil,
-    lastUsedAt: k.lastUsedAt,
-    limitUntil: k.limitUntil,
-    apiKey: k.apiKey,
-  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -401,7 +369,7 @@ export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> 
   );
 }
 
-/** คีย์ล้มบ่อยถูกพักอัตโนมัติ — ในโหมด demo ใช้ store ใน memory */
+/** คีย์ล้มบ่อยถูกพักอัตโนมัติ — สถิตินี้เขียนลงตาราง provider_keys เท่านั้น */
 async function markKey(keyId: number, ok: boolean): Promise<void> {
   try {
     await recordKeyResult(keyId, ok);
@@ -596,12 +564,6 @@ export async function logRequest(input: LogInput): Promise<void> {
   };
 
   try {
-    if (isDemoMode) {
-      const store = getDemoStore();
-      const id = Math.max(0, ...store.requests.map((r) => r.id)) + 1;
-      store.requests.unshift({ ...row, id } as (typeof store.requests)[number]);
-      return;
-    }
     await getDb().insert(requests).values(row);
     await bumpModelUptime(input);
   } catch (err) {

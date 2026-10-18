@@ -3,7 +3,6 @@ import Link from "next/link";
 import { getSessionUser } from "@/lib/auth";
 import Sidebar, { type NavSection } from "@/components/Sidebar";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
-import { isDemoMode } from "@/lib/config";
 import { formatUsd } from "@/lib/format";
 import { getT } from "@/lib/i18n/server";
 import Icon from "@/components/Icon";
@@ -59,7 +58,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="min-h-screen bg-ink-950">
+    <div className="min-h-dvh bg-ink-950">
       <Sidebar
         sections={sections}
         email={user.email}
@@ -67,11 +66,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         role={user.role}
         plan={user.plan}
         credits={user.credits}
-        demoMode={isDemoMode}
       />
 
-      {/* Topbar — เบลอเฉพาะแถบเดียว (ไม่ใช่ทั้งหน้า) เพื่อลดภาระ GPU */}
-      <header className="sticky top-0 z-40 flex h-16 items-center gap-3 border-b border-white/[0.07] bg-ink-950/85 px-4 backdrop-blur-sm lg:ml-64 lg:pl-8 lg:pr-8">
+      {/* Topbar — เบลอเฉพาะแถบเดียว (ไม่ใช่ทั้งหน้า) เพื่อลดภาระ GPU
+          min-h-16 + pt(env): ในเบราว์เซอร์ค่าเป็น 0 จึงได้ 64px เท่าเดิม
+          แต่บน PWA ติดตั้งที่มีรอยบาก แถบจะไม่ทับ status bar */}
+      <header className="sticky top-0 z-40 flex min-h-16 items-center gap-3 border-b border-white/[0.07] bg-ink-950/85 px-4 pt-[env(safe-area-inset-top)] backdrop-blur-sm lg:ml-64 lg:pl-8 lg:pr-8">
         <div className="lg:hidden">
           <Link href="/dashboard" className="text-body-sm font-semibold text-fg">
             Octopus <span className="text-brand-300">AI</span>
@@ -99,7 +99,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </div>
       </header>
 
-      <main className="px-4 pb-24 pt-6 sm:px-6 lg:pb-10 lg:pl-72 lg:pr-8">{children}</main>
+      {/* pb = 6rem + safe-area: ที่ว่างใต้สุดต้องพ้นทั้งปุ่มเปิดเมนู (FAB)
+          และ gesture bar ของ iOS มิฉะนั้นการ์ดใบสุดท้ายกดไม่โดน */}
+      <main className="px-4 pb-[calc(6rem_+_env(safe-area-inset-bottom))] pt-6 sm:px-6 lg:pb-10 lg:pl-72 lg:pr-8">
+        {children}
+      </main>
     </div>
   );
 }

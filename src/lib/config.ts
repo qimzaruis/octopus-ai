@@ -1,12 +1,12 @@
 /**
  * กําหนดโหมดการทํางานของแอป
  *
- * APP_ENV=development  → โหมดพัฒนา: ใช้ข้อมูล Demo เป็นค่าเริ่มต้น (ไม่ต้องมี Google login
- *                        ก็เข้าใช้งานได้ทันที) เหมาะกับตอนที่ DB ยังไม่พร้อม
- * APP_ENV=production   → โหมดจริง: บังคับใช้ Supabase + Postgres เท่านั้น
+ * แอปนี้ไม่มีโหมดข้อมูลตัวอย่าง: ทุกหน้าอ่านจาก Supabase + Postgres เสมอ
+ * ถ้ายังไม่ได้ตั้ง env ครบ → getDb()/auth จะล้มพร้อมข้อความชัดเจน ดีกว่าแสดง
+ * ตัวเลขปลอมให้ผู้ใช้เห็น (ซึ่งเคยทําให้เข้าใจว่า route "octopus-free" ไม่มีอยู่จริง)
  *
- * DEMO_MODE=1 / DEMO_MODE=0 บังคับทับได้เสมอทุก APP_ENV
- *   DEMO_MODE=0 ในโหมดพัฒนา = ใช้ของจริง (Google login + DB) เพื่อทดสอบเต็มระบบ
+ * APP_ENV=development → เปิดใช้ cookie/flow ของเครื่อง dev
+ * APP_ENV=production  → ของจริงเท่านั้น
  */
 
 /** ปฏิเสธค่าตัวอย่างที่ค้างมาจากไฟล์ template */
@@ -47,23 +47,6 @@ export const supabaseConfigured = Boolean(
 );
 
 export const databaseConfigured = Boolean(databaseUrl && !isPlaceholder(databaseUrl));
-
-/** ตัวเลือกบังคับโหมด: "1" = Demo, "0" = ของจริง */
-const demoOverride = process.env.DEMO_MODE?.trim();
-
-/**
- * โหมด Demo
- * - ตั้ง env จริงครบ (Supabase + DATABASE_URL) = ใช้ของจริงเสมอ แม้รัน `next dev`
- *   (เดิม development บังคับ Demo ตลอด ทำให้หน้า /models แสดงโมเดลตัวอย่าง
- *    ทั้งที่ฐานข้อมูลจริงมีข้อมูลอยู่แล้ว)
- * - ยังไม่ตั้ง env = Demo เพื่อให้อ่านหน้าเว็บได้ทันที
- * - DEMO_MODE=1 บังคับใช้ข้อมูลตัวอย่าง / DEMO_MODE=0 บังคับของจริง
- */
-export const isDemoMode = (() => {
-  if (demoOverride === "1") return true;
-  if (demoOverride === "0") return false;
-  return !(supabaseConfigured && databaseConfigured);
-})();
 
 /**
  * โดเมนที่ deploy จริง — ใช้เมื่อ host ไม่ได้ตั้ง NEXT_PUBLIC_APP_URL

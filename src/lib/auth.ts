@@ -1,8 +1,7 @@
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
-import { isDemoMode, supabaseConfigured } from "@/lib/config";
+import { supabaseConfigured } from "@/lib/config";
 import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
-import { DEMO_USERS } from "@/lib/demo/store";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { users } from "@/db/schema";
@@ -23,28 +22,19 @@ export type SessionUser = {
   bannedReason: string;
 };
 
-export const DEMO_SESSION_COOKIE = "octopus_demo_session";
-
 // ถ้า DB เข้าถึงไม่ได้ ให้ข้ามการ query ไปชั่วคราว (circuit breaker) เพื่อไม่ให้ทุกหน้าค้าง
 // (state กลางอยู่ใน @/lib/db-circuit)
 
 /**
  * ดึง user ปัจจุบัน:
  * - มี Supabase session จริง → ใช้ session นั้น + แถว users ใน DB (role/credits)
- * - ไม่มี session จริง แต่มี cookie เดโม (โหมด Demo) → ใช้ผู้ใช้ตัวอย่าง
  * คืน null ถ้าไม่ได้เข้าสู่ระบบ
  *
  * ลําดับนี้สําคัญ: ในโหมดพัฒนา ผู้ใช้อาจ login Google จริงได้ด้วย
- * ถ้ามี session จริงต้องให้ความสําคัญก่อน cookie เดโมเสมอ
  */
 export async function getSessionUser(): Promise<SessionUser | null> {
-  const demoRole = (await cookies()).get(DEMO_SESSION_COOKIE)?.value;
 
-  // ไม่ได้ตั้ง Supabase จริง → ใช้ได้แค่ cookie เดโม
   if (!supabaseConfigured) {
-    if (isDemoMode && (demoRole === "user" || demoRole === "admin")) {
-      return { ...DEMO_USERS[demoRole] };
-    }
     return null;
   }
 
@@ -54,10 +44,6 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    // ไม่มี session จริง — ตกไปใช้ cookie เดโมได้เฉพาะในโหมด Demo
-    if (isDemoMode && (demoRole === "user" || demoRole === "admin")) {
-      return { ...DEMO_USERS[demoRole] };
-    }
     return null;
   }
 

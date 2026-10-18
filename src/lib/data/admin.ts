@@ -11,10 +11,8 @@ import {
   type ProviderKey,
   type ProviderKeyLimit,
 } from "@/db/schema";
-import { isDemoMode } from "@/lib/config";
-import { isDbUnavailable } from "@/lib/db-circuit";
+import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
 import { invalidateCache } from "@/lib/catalog-cache";
-import { DEMO_MODEL_UPTIME, demoSource } from "@/lib/demo/store";
 import {
   cooldownMinutesLeft,
   cooldownUntilFrom,
@@ -121,27 +119,32 @@ function keyDTO(k: ProviderKey): ProviderKeyDTO {
   };
 }
 
-function modelLabel(m: ModelDTO, providerName: string): string {
-  return `${providerName} / ${m.modelId}`;
-}
-
 // ---------------------------------------------------------------------
 // อ่านข้อมูล
 // ---------------------------------------------------------------------
 
+/** DB อ่านไม่ได้ → คืนรายการว่าง ห้ามส่งข้อมูลสมมติให้หน้า admin */
 export async function listProvidersWithModels(): Promise<ProviderDTO[]> {
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    return store.providers.map((p) => ({
+  if (isDbUnavailable()) return [];
+
+  try {
+    const db = getDb();
+    const [providerRows, modelRows, keyRows] = await Promise.all([
+      db.select().from(providers).orderBy(asc(providers.id)),
+      db.select().from(models).orderBy(asc(models.id)),
+      db.select().from(providerKeys).orderBy(asc(providerKeys.id)),
+    ]);
+
+    return providerRows.map((p) => ({
       id: p.id,
       name: p.name,
       baseUrl: p.baseUrl,
       enabled: p.enabled,
-      keys: store.providerKeys
+      keys: keyRows
         .filter((k) => k.providerId === p.id)
         .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary) || a.id - b.id)
         .map(keyDTO),
-      models: store.models
+      models: modelRows
         .filter((m) => m.providerId === p.id)
         .map((m) => ({
           id: m.id,
@@ -157,40 +160,10 @@ export async function listProvidersWithModels(): Promise<ProviderDTO[]> {
           logoUrl: m.logoUrl ?? null,
         })),
     }));
+  } catch (err) {
+    markDbUnavailable(err);
+    return [];
   }
-
-  const db = getDb();
-  const [providerRows, modelRows, keyRows] = await Promise.all([
-    db.select().from(providers).orderBy(asc(providers.id)),
-    db.select().from(models).orderBy(asc(models.id)),
-    db.select().from(providerKeys).orderBy(asc(providerKeys.id)),
-  ]);
-
-  return providerRows.map((p) => ({
-    id: p.id,
-    name: p.name,
-    baseUrl: p.baseUrl,
-    enabled: p.enabled,
-    keys: keyRows
-      .filter((k) => k.providerId === p.id)
-      .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary) || a.id - b.id)
-      .map(keyDTO),
-    models: modelRows
-      .filter((m) => m.providerId === p.id)
-      .map((m) => ({
-        id: m.id,
-        providerId: m.providerId,
-        modelId: m.modelId,
-        displayName: m.displayName,
-        contextWindow: m.contextWindow,
-        supportsVision: m.supportsVision,
-        enabled: m.enabled,
-        visibleToUsers: m.visibleToUsers,
-        inputPricePerM: m.inputPricePerM,
-        outputPricePerM: m.outputPricePerM,
-        logoUrl: m.logoUrl ?? null,
-      })),
-  }));
 }
 
 export async function listRoutesWithTargets(): Promise<RouteDTO[]> {
@@ -231,35 +204,28 @@ export async function listRoutesWithTargets(): Promise<RouteDTO[]> {
         })),
     }));
 
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
+  if (isDbUnavailable()) return [];
+
+  try {
+    const db = getDb();
+    const [routeRows, targetRows, providerRows, modelRows] = await Promise.all([
+      db.select().from(routes).orderBy(asc(routes.id)),
+      db.select().from(routeTargets).orderBy(asc(routeTargets.priority)),
+      db.select().from(providers),
+      db.select().from(models),
+    ]);
+
     const lookup = (id: number) => {
-      const m = store.models.find((x) => x.id === id);
+      const m = modelRows.find((x) => x.id === id);
       if (!m) return "?";
-      const p = store.providers.find((x) => x.id === m.providerId);
-      return modelLabel(
-        { ...m } as ModelDTO,
-        p?.name ?? "?",
-      );
+      const p = providerRows.find((x) => x.id === m.providerId);
+      return `${p?.name ?? "?"} / ${m.modelId}`;
     };
-    return buildFrom(store.routes, store.routeTargets, lookup);
+    return buildFrom(routeRows, targetRows, lookup);
+  } catch (err) {
+    markDbUnavailable(err);
+    return [];
   }
-
-  const db = getDb();
-  const [routeRows, targetRows, providerRows, modelRows] = await Promise.all([
-    db.select().from(routes).orderBy(asc(routes.id)),
-    db.select().from(routeTargets).orderBy(asc(routeTargets.priority)),
-    db.select().from(providers),
-    db.select().from(models),
-  ]);
-
-  const lookup = (id: number) => {
-    const m = modelRows.find((x) => x.id === id);
-    if (!m) return "?";
-    const p = providerRows.find((x) => x.id === m.providerId);
-    return `${p?.name ?? "?"} / ${m.modelId}`;
-  };
-  return buildFrom(routeRows, targetRows, lookup);
 }
 
 // ---------------------------------------------------------------------
@@ -277,26 +243,8 @@ export async function upsertProvider(input: {
   const baseUrl = input.baseUrl.trim().replace(/\/+$/, "");
   if (!name || !baseUrl) return { ok: false, error: "กรอกชื่อและ Base URL ให้ครบ" };
 
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    if (input.id) {
-      const p = store.providers.find((x) => x.id === input.id);
-      if (!p) return { ok: false, error: "ไม่พบ provider" };
-      p.name = name;
-      p.baseUrl = baseUrl;
-    } else {
-      const id = Math.max(0, ...store.providers.map((x) => x.id)) + 1;
-      store.providers.push({
-        id,
-        name,
-        baseUrl,
-        apiKey: "",
-        enabled: true,
-        createdAt: new Date(),
-      });
-    }
-    return { ok: true };
-  }
+  // เขียนไม่ได้ = บอกผู้ใช้ตรง ๆ ห้ามตอบว่าสำเร็จทั้งที่ไม่ได้แตะ DB
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
 
   const db = getDb();
   if (input.id) {
@@ -322,28 +270,7 @@ export async function addProviderKey(input: {
   if (!input.providerId) return { ok: false, error: "ไม่พบ provider" };
   if (!apiKey) return { ok: false, error: "กรอก API key ก่อน" };
 
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    const siblings = store.providerKeys.filter((k) => k.providerId === input.providerId);
-    const id = Math.max(0, ...store.providerKeys.map((k) => k.id)) + 1;
-    store.providerKeys.push({
-      id,
-      providerId: input.providerId,
-      label,
-      apiKey,
-      enabled: true,
-      isPrimary: siblings.length === 0,
-      failureCount: 0,
-      cooldownUntil: null,
-      lastErrorAt: null,
-      lastUsedAt: null,
-      limitUntil: null,
-      limitReason: "",
-      lastLimitedAt: null,
-      createdAt: new Date(),
-    });
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
 
   const db = getDb();
   const siblings = await db
@@ -367,13 +294,7 @@ export async function updateProviderKey(input: {
 }): Promise<ActionResult> {
   const label = input.label.trim() || "main";
 
-  if (isDemoMode || isDbUnavailable()) {
-    const k = demoSource().providerKeys.find((x) => x.id === input.id);
-    if (!k) return { ok: false, error: "ไม่พบคีย์" };
-    k.label = label;
-    if (input.apiKey?.trim()) k.apiKey = input.apiKey.trim();
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
 
   const patch: { label: string; apiKey?: string } = { label };
   if (input.apiKey?.trim()) patch.apiKey = input.apiKey.trim();
@@ -382,29 +303,14 @@ export async function updateProviderKey(input: {
 }
 
 export async function toggleProviderKey(id: number, enabled: boolean): Promise<ActionResult> {
-  if (isDemoMode || isDbUnavailable()) {
-    const k = demoSource().providerKeys.find((x) => x.id === id);
-    if (!k) return { ok: false, error: "ไม่พบคีย์" };
-    k.enabled = enabled;
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
   await getDb().update(providerKeys).set({ enabled }).where(eq(providerKeys.id, id));
   return { ok: true };
 }
 
 /** ตั้งคีย์นี้เป็นคีย์หลัก — คีย์อื่นของ provider เดียวกันถูกถอดตําแหน่ง */
 export async function setPrimaryProviderKey(id: number): Promise<ActionResult> {
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    const k = store.providerKeys.find((x) => x.id === id);
-    if (!k) return { ok: false, error: "ไม่พบคีย์" };
-    store.providerKeys
-      .filter((x) => x.providerId === k.providerId)
-      .forEach((x) => {
-        x.isPrimary = x.id === id;
-      });
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
 
   const db = getDb();
   const k = (await db.select().from(providerKeys).where(eq(providerKeys.id, id)))[0];
@@ -418,17 +324,7 @@ export async function setPrimaryProviderKey(id: number): Promise<ActionResult> {
 }
 
 export async function deleteProviderKey(id: number): Promise<ActionResult> {
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    const k = store.providerKeys.find((x) => x.id === id);
-    store.providerKeys = store.providerKeys.filter((x) => x.id !== id);
-    // ถ้าลบตัวหลักไป ให้ตัวแรกที่เหลือเป็นหลักแทน เพื่อไม่ให้ provider ไม่มีคีย์หลัก
-    if (k?.isPrimary) {
-      const rest = store.providerKeys.filter((x) => x.providerId === k.providerId);
-      if (rest[0]) rest[0].isPrimary = true;
-    }
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
   await getDb().delete(providerKeys).where(eq(providerKeys.id, id));
   return { ok: true };
 }
@@ -449,22 +345,7 @@ export async function recordKeyResult(
 ): Promise<ActionResult> {
   const now = new Date();
 
-  if (isDemoMode || isDbUnavailable()) {
-    const k = demoSource().providerKeys.find((x) => x.id === keyId);
-    if (!k) return { ok: false, error: "ไม่พบคีย์" };
-    if (ok) {
-      k.failureCount = 0;
-      k.cooldownUntil = null;
-      k.limitUntil = null;
-      k.limitReason = "";
-      k.lastUsedAt = now;
-    } else {
-      k.failureCount += 1;
-      k.lastErrorAt = now;
-      k.cooldownUntil = cooldownUntilFrom(k.failureCount, now);
-    }
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
 
   const db = getDb();
   const k = (await db.select().from(providerKeys).where(eq(providerKeys.id, keyId)))[0];
@@ -502,15 +383,7 @@ export async function markKeyLimited(
 ): Promise<ActionResult> {
   const now = new Date();
 
-  if (isDemoMode || isDbUnavailable()) {
-    const k = demoSource().providerKeys.find((x) => x.id === keyId);
-    if (!k) return { ok: false, error: "ไม่พบคีย์" };
-    k.limitUntil = until;
-    k.limitReason = reason;
-    k.lastLimitedAt = now;
-    k.lastErrorAt = now;
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
 
   await getDb()
     .update(providerKeys)
@@ -522,13 +395,7 @@ export async function markKeyLimited(
 
 /** ปลดลิมิตก่อนเวลา — แอดมินกดเมื่อเติมเครดิต/อัปเกรดแผนแล้วไม่ต้องรอรีเซต */
 export async function clearKeyLimit(keyId: number): Promise<ActionResult> {
-  if (isDemoMode || isDbUnavailable()) {
-    const k = demoSource().providerKeys.find((x) => x.id === keyId);
-    if (!k) return { ok: false, error: "ไม่พบคีย์" };
-    k.limitUntil = null;
-    k.limitReason = "";
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
   await getDb()
     .update(providerKeys)
     .set({ limitUntil: null, limitReason: "" })
@@ -552,36 +419,29 @@ export type KeyLimitDTO = {
 
 /** ทุก provider เรียงตาม id (แถวไหนยังไม่มีกติกา = rule null) */
 export async function listKeyLimits(): Promise<KeyLimitDTO[]> {
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    return store.providers.map((p) => ({
+  if (isDbUnavailable()) return [];
+
+  try {
+    const db = getDb();
+    const [providerRows, keyRows, ruleRows] = await Promise.all([
+      db.select().from(providers).orderBy(asc(providers.id)),
+      db.select().from(providerKeys).orderBy(asc(providerKeys.id)),
+      db.select().from(providerKeyLimits),
+    ]);
+    return providerRows.map((p) => ({
       providerId: p.id,
       providerName: p.name,
       baseUrl: p.baseUrl,
-      rule: store.keyLimits.find((r) => r.providerId === p.id) ?? null,
-      keys: store.providerKeys
+      rule: ruleRows.find((r) => r.providerId === p.id) ?? null,
+      keys: keyRows
         .filter((k) => k.providerId === p.id)
         .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary) || a.id - b.id)
         .map(keyDTO),
     }));
+  } catch (err) {
+    markDbUnavailable(err);
+    return [];
   }
-
-  const db = getDb();
-  const [providerRows, keyRows, ruleRows] = await Promise.all([
-    db.select().from(providers).orderBy(asc(providers.id)),
-    db.select().from(providerKeys).orderBy(asc(providerKeys.id)),
-    db.select().from(providerKeyLimits),
-  ]);
-  return providerRows.map((p) => ({
-    providerId: p.id,
-    providerName: p.name,
-    baseUrl: p.baseUrl,
-    rule: ruleRows.find((r) => r.providerId === p.id) ?? null,
-    keys: keyRows
-      .filter((k) => k.providerId === p.id)
-      .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary) || a.id - b.id)
-      .map(keyDTO),
-  }));
 }
 
 /** ตั้ง/แก้กติกาของ provider หนึ่งราย — ต้องมีเงื่อนไขจับอย่างน้อยหนึ่งช่อง */
@@ -612,13 +472,7 @@ export async function upsertKeyLimit(input: {
     updatedAt: new Date(),
   };
 
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    const found = store.keyLimits.find((r) => r.providerId === input.providerId);
-    if (found) Object.assign(found, row);
-    else store.keyLimits.push({ providerId: input.providerId, ...row });
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
 
   const db = getDb();
   const exists = (
@@ -638,21 +492,19 @@ export async function upsertKeyLimit(input: {
 // ---------------------------------------------------------------------
 
 export async function listAssets(): Promise<AssetDTO[]> {
-  if (isDemoMode || isDbUnavailable()) {
-    return demoSource().assets.map((a) => ({
+  if (isDbUnavailable()) return [];
+  try {
+    const rows = await getDb().select().from(assets).orderBy(asc(assets.id));
+    return rows.map((a) => ({
       id: a.id,
       name: a.name,
       publicUrl: a.publicUrl,
       storagePath: a.storagePath,
     }));
+  } catch (err) {
+    markDbUnavailable(err);
+    return [];
   }
-  const rows = await getDb().select().from(assets).orderBy(asc(assets.id));
-  return rows.map((a) => ({
-    id: a.id,
-    name: a.name,
-    publicUrl: a.publicUrl,
-    storagePath: a.storagePath,
-  }));
 }
 
 export async function createAsset(input: {
@@ -665,23 +517,7 @@ export async function createAsset(input: {
   const name = input.name.trim();
   if (!name) return { ok: false, error: "ตั้งชื่อรูปก่อนบันทึก" };
 
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    const id = Math.max(0, ...store.assets.map((a) => a.id)) + 1;
-    store.assets.push({
-      id,
-      name,
-      storagePath: input.storagePath,
-      publicUrl: input.publicUrl,
-      mimeType: input.mimeType,
-      sizeBytes: input.sizeBytes,
-      createdAt: new Date(),
-    });
-    return {
-      ok: true,
-      asset: { id, name, publicUrl: input.publicUrl, storagePath: input.storagePath },
-    };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
 
   const inserted = await getDb()
     .insert(assets)
@@ -701,18 +537,7 @@ export async function createAsset(input: {
 }
 
 export async function deleteAsset(id: number): Promise<ActionResult> {
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    const a = store.assets.find((x) => x.id === id);
-    store.assets = store.assets.filter((x) => x.id !== id);
-    // โมเดลที่เคยใช้รูปนี้กลับไปใช้ตัวอักษรแทน
-    if (a) {
-      store.models.forEach((m) => {
-        if (m.logoUrl === a.publicUrl) m.logoUrl = null;
-      });
-    }
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
 
   const db = getDb();
   const a = (await db.select().from(assets).where(eq(assets.id, id)))[0];
@@ -725,34 +550,19 @@ export async function deleteAsset(id: number): Promise<ActionResult> {
 
 /** ตั้ง/ล้างโลโก้ของโมเดล (null = กลับไปแสดงตัวอักษรแรกของ provider) */
 export async function setModelLogo(id: number, logoUrl: string | null): Promise<ActionResult> {
-  if (isDemoMode || isDbUnavailable()) {
-    const m = demoSource().models.find((x) => x.id === id);
-    if (!m) return { ok: false, error: "ไม่พบโมเดล" };
-    m.logoUrl = logoUrl;
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
   await getDb().update(models).set({ logoUrl }).where(eq(models.id, id));
   return { ok: true };
 }
 
 export async function toggleProvider(id: number, enabled: boolean): Promise<ActionResult> {
-  if (isDemoMode || isDbUnavailable()) {
-    const p = demoSource().providers.find((x) => x.id === id);
-    if (!p) return { ok: false, error: "ไม่พบ provider" };
-    p.enabled = enabled;
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
   await getDb().update(providers).set({ enabled }).where(eq(providers.id, id));
   return { ok: true };
 }
 
 export async function deleteProvider(id: number): Promise<ActionResult> {
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    store.providers = store.providers.filter((x) => x.id !== id);
-    store.models = store.models.filter((m) => m.providerId !== id);
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
   await getDb().delete(providers).where(eq(providers.id, id));
   return { ok: true };
 }
@@ -774,30 +584,7 @@ export async function addModel(input: {
     return { ok: false, error: "กรอก model ID ให้ครบ" };
   }
 
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    const dup = store.models.some(
-      (m) => m.providerId === input.providerId && m.modelId === modelId,
-    );
-    if (dup) return { ok: false, error: "มีโมเดลนี้ใน provider แล้ว" };
-    const id = Math.max(0, ...store.models.map((m) => m.id)) + 1;
-    store.models.push({
-      id,
-      providerId: input.providerId,
-      modelId,
-      displayName: input.displayName.trim() || modelId,
-      contextWindow: input.contextWindow || 128000,
-      supportsVision: input.supportsVision,
-      enabled: true,
-      visibleToUsers: true,
-      inputPricePerM: 0,
-      outputPricePerM: 0,
-      logoUrl: input.logoUrl ?? null,
-      ...DEMO_MODEL_UPTIME,
-      createdAt: new Date(),
-    });
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
 
   const db = getDb();
   try {
@@ -816,34 +603,20 @@ export async function addModel(input: {
 }
 
 export async function toggleModel(id: number, enabled: boolean): Promise<ActionResult> {
-  if (isDemoMode || isDbUnavailable()) {
-    const m = demoSource().models.find((x) => x.id === id);
-    if (!m) return { ok: false, error: "ไม่พบโมเดล" };
-    m.enabled = enabled;
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
   await getDb().update(models).set({ enabled }).where(eq(models.id, id));
   return { ok: true };
 }
 
 export async function deleteModel(id: number): Promise<ActionResult> {
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    store.models = store.models.filter((m) => m.id !== id);
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
   await getDb().delete(models).where(eq(models.id, id));
   return { ok: true };
 }
 
 /** เปิด/ปิดการมองเห็นโมเดลในหน้าผู้ใช้ (visible_to_users) */
 export async function setModelVisibility(id: number, visible: boolean): Promise<ActionResult> {
-  if (isDemoMode || isDbUnavailable()) {
-    const m = demoSource().models.find((x) => x.id === id);
-    if (!m) return { ok: false, error: "ไม่พบโมเดล" };
-    m.visibleToUsers = visible;
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
   await getDb().update(models).set({ visibleToUsers: visible }).where(eq(models.id, id));
   return { ok: true };
 }
@@ -856,13 +629,7 @@ export async function setModelOptions(
   id: number,
   opts: { enabled: boolean; visibleToUsers: boolean },
 ): Promise<ActionResult> {
-  if (isDemoMode || isDbUnavailable()) {
-    const m = demoSource().models.find((x) => x.id === id);
-    if (!m) return { ok: false, error: "ไม่พบโมเดล" };
-    m.enabled = opts.enabled;
-    m.visibleToUsers = opts.visibleToUsers;
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
   await getDb()
     .update(models)
     .set({ enabled: opts.enabled, visibleToUsers: opts.visibleToUsers })
@@ -882,13 +649,7 @@ export async function setModelPricing(
   if (inputPricePerM < 0 || outputPricePerM < 0) {
     return { ok: false, error: "ราคาต้องไม่ติดลบ" };
   }
-  if (isDemoMode || isDbUnavailable()) {
-    const m = demoSource().models.find((x) => x.id === id);
-    if (!m) return { ok: false, error: "ไม่พบโมเดล" };
-    m.inputPricePerM = inputPricePerM;
-    m.outputPricePerM = outputPricePerM;
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
   await getDb()
     .update(models)
     .set({ inputPricePerM, outputPricePerM })
@@ -908,38 +669,7 @@ export async function upsertRoute(input: {
   const publicModel = input.publicModel.trim().toLowerCase().replace(/\s+/g, "-");
   if (!publicModel) return { ok: false, error: "กรอกชื่อโมเดลสาธารณะ" };
 
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    const dup = store.routes.some(
-      (r) => r.publicModel === publicModel && r.id !== input.id,
-    );
-    if (dup) return { ok: false, error: "มีชื่อ route นี้แล้ว" };
-    if (input.id) {
-      const r = store.routes.find((x) => x.id === input.id);
-      if (!r) return { ok: false, error: "ไม่พบ route" };
-      r.publicModel = publicModel;
-      r.description = input.description.trim();
-    } else {
-      const id = Math.max(0, ...store.routes.map((r) => r.id)) + 1;
-      store.routes.push({
-        id,
-        publicModel,
-        description: input.description.trim(),
-        // ค่าเริ่มต้น: ใช้ชื่อจาก publicModel และโหมด router (แสดงเป็นรายการเดียว)
-        displayMode: "router",
-        displayName: publicModel
-          .split("-")
-          .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
-          .join(" "),
-        logoUrl: null,
-        inputPricePerM: 0,
-        outputPricePerM: 0,
-        enabled: true,
-        createdAt: new Date(),
-      });
-    }
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
 
   const db = getDb();
   try {
@@ -965,23 +695,13 @@ export async function upsertRoute(input: {
 }
 
 export async function toggleRoute(id: number, enabled: boolean): Promise<ActionResult> {
-  if (isDemoMode || isDbUnavailable()) {
-    const r = demoSource().routes.find((x) => x.id === id);
-    if (!r) return { ok: false, error: "ไม่พบ route" };
-    r.enabled = enabled;
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
   await getDb().update(routes).set({ enabled }).where(eq(routes.id, id));
   return { ok: true };
 }
 
 export async function deleteRoute(id: number): Promise<ActionResult> {
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    store.routes = store.routes.filter((r) => r.id !== id);
-    store.routeTargets = store.routeTargets.filter((t) => t.routeId !== id);
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
   await getDb().delete(routes).where(eq(routes.id, id));
   return { ok: true };
 }
@@ -994,22 +714,7 @@ export async function addRouteTarget(input: {
     return { ok: false, error: "เลือกโมเดลปลายทางก่อน" };
   }
 
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    const existing = store.routeTargets.filter((t) => t.routeId === input.routeId);
-    if (existing.some((t) => t.modelRefId === input.modelRefId)) {
-      return { ok: false, error: "โมเดลนี้อยู่ใน route แล้ว" };
-    }
-    const id = Math.max(0, ...store.routeTargets.map((t) => t.id)) + 1;
-    store.routeTargets.push({
-      id,
-      routeId: input.routeId,
-      modelRefId: input.modelRefId,
-      priority: existing.length + 1,
-      enabled: true,
-    });
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
 
   const db = getDb();
   const existing = await db
@@ -1028,21 +733,7 @@ export async function addRouteTarget(input: {
 }
 
 export async function moveRouteTarget(targetId: number, direction: -1 | 1): Promise<ActionResult> {
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    const target = store.routeTargets.find((t) => t.id === targetId);
-    if (!target) return { ok: false, error: "ไม่พบ target" };
-    const siblings = store.routeTargets
-      .filter((t) => t.routeId === target.routeId)
-      .sort((a, b) => a.priority - b.priority);
-    const idx = siblings.findIndex((t) => t.id === targetId);
-    const swapWith = siblings[idx + direction];
-    if (!swapWith) return { ok: true };
-    const tmp = target.priority;
-    target.priority = swapWith.priority;
-    swapWith.priority = tmp;
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
 
   const db = getDb();
   const target = (
@@ -1070,22 +761,13 @@ export async function toggleRouteTarget(
   targetId: number,
   enabled: boolean,
 ): Promise<ActionResult> {
-  if (isDemoMode || isDbUnavailable()) {
-    const t = demoSource().routeTargets.find((x) => x.id === targetId);
-    if (!t) return { ok: false, error: "ไม่พบ target" };
-    t.enabled = enabled;
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
   await getDb().update(routeTargets).set({ enabled }).where(eq(routeTargets.id, targetId));
   return { ok: true };
 }
 
 export async function removeRouteTarget(targetId: number): Promise<ActionResult> {
-  if (isDemoMode || isDbUnavailable()) {
-    const store = demoSource();
-    store.routeTargets = store.routeTargets.filter((t) => t.id !== targetId);
-    return { ok: true };
-  }
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
   await getDb().delete(routeTargets).where(eq(routeTargets.id, targetId));
   return { ok: true };
 }

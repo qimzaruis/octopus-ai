@@ -9,8 +9,6 @@ export const publicPages = {
   "สู่ทุกโมเดล AI": "to every AI model",
   "เริ่มใช้งานด้วย Google": "Get started with Google",
   "ดูตัวอย่าง API": "See API example",
-  "โหมด Demo — เข้าสู่ระบบเพื่อชมแดชบอร์ดพร้อมข้อมูลตัวอย่าง":
-    "Demo mode — sign in to explore the dashboard with sample data",
   "เริ่มต้นฟรี ไม่ต้องใช้บัตรเครดิต": "Free to start — no credit card required",
   "Agent ที่รองรับ": "Supported agents",
 
@@ -76,8 +74,6 @@ export const publicPages = {
   "การยืนยันตัวตนไม่สําเร็จ กรุณาลองอีกครั้ง": "Authentication failed. Please try again",
   "เข้าสู่ระบบแสดงว่าคุณยอมรับข้อกําหนดการใช้งานและนโยบายความเป็นส่วนตัว":
     "By signing in you accept the terms of service and privacy policy",
-  "โหมด Demo — ทดลองได้โดยไม่ต้องตั้งค่า Supabase":
-    "Demo mode — try it without configuring Supabase",
   "ยังไม่มีบัญชี? การเข้าสู่ระบบด้วย Google จะสร้างบัญชีให้อัตโนมัติครั้งแรก":
     "No account yet? Signing in with Google creates one automatically on first use",
 
@@ -85,9 +81,6 @@ export const publicPages = {
   "เชื่อมต่อ Google ไม่สําเร็จ กรุณาลองใหม่": "Could not connect to Google. Please try again",
   "เกิดข้อผิดพลาดในการเข้าสู่ระบบ": "Something went wrong while signing in",
   "ดําเนินการต่อด้วย Google": "Continue with Google",
-  "หรือทดลองใช้โหมด Demo": "or try demo mode",
-  "เข้าสู่ระบบเป็นผู้ใช้ทั่วไป": "Sign in as a regular user",
-  "เข้าสู่ระบบเป็นแอดมิน": "Sign in as admin",
   "ตั้งค่า": "Set",
   "ใน .env.local เพื่อเปิด Google Sign-in": "in .env.local to enable Google sign-in",
 

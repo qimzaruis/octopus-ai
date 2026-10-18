@@ -290,7 +290,13 @@ export async function POST(req: NextRequest) {
   const model = (body.model || conversation.model || "").trim();
   const [plan, publicRoutes] = await Promise.all([getPlanByKey(user.plan), listPublicRoutes()]);
   const route = publicRoutes.find((r) => r.publicModel === model);
-  if (!route) return error(`ไม่พบโมเดล "${model}" ในรายการที่เปิดใช้`, 400);
+  if (!route) {
+    // catalog ว่าง = DB อ่านไม่ออก (pool เต็ม) ไม่ใช่ "ไม่มีโมเดลนี้" — ตอบ 503 ให้ client ลองใหม่
+    if (publicRoutes.length === 0) {
+      return error("ระบบกำลังติดขัดชั่วคราว อ่านรายการโมเดลไม่ได้ กรุณาลองใหม่ในไม่กี่วินาที", 503);
+    }
+    return error(`ไม่พบโมเดล "${model}" ในรายการที่เปิดใช้`, 400);
+  }
   if (route.requiredPlanTier != null && route.requiredPlanTier > plan.tier) {
     return error(`โมเดลนี้ต้องใช้แผน ${route.requiredPlanLabel} ขึ้นไป`, 403);
   }

@@ -14,9 +14,7 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { providerKeyLimits } from "@/db/schema";
-import { isDemoMode } from "@/lib/config";
 import { cached } from "@/lib/catalog-cache";
-import { getDemoStore } from "@/lib/demo/store";
 
 /** กติกาหนึ่งชุดของ provider ใด provider หนึ่ง */
 export type KeyLimitRule = {
@@ -43,7 +41,6 @@ const DAY_MS = 86_400_000;
  * และแถวที่ไม่มีการกรอกเงื่อนไขเลยถือเท่ากันกับ "ปิดอยู่" กันพลาดบล็อกคีย์ทั้งระบบ
  */
 export function keyLimitRule(providerId: number): Promise<KeyLimitRule | null> {
-  if (isDemoMode) return Promise.resolve(demoRule(providerId));
   return cached(`keylimit:${providerId}`, RULE_TTL_MS, () => loadRule(providerId).catch(() => null));
 }
 
@@ -51,19 +48,6 @@ async function loadRule(providerId: number): Promise<KeyLimitRule | null> {
   const row = (
     await getDb().select().from(providerKeyLimits).where(eq(providerKeyLimits.providerId, providerId))
   )[0];
-  if (!row) return null;
-  return toRule({
-    enabled: row.enabled,
-    httpStatuses: row.httpStatuses ?? [],
-    errorCodes: row.errorCodes ?? [],
-    keywords: row.keywords ?? [],
-    resetTime: row.resetTime,
-    resetTimezone: row.resetTimezone,
-  });
-}
-
-function demoRule(providerId: number): KeyLimitRule | null {
-  const row = getDemoStore().keyLimits.find((r) => r.providerId === providerId);
   if (!row) return null;
   return toRule({
     enabled: row.enabled,

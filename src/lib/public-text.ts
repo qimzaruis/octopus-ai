@@ -11,9 +11,7 @@
 
 import { getDb } from "@/db";
 import { models, providers } from "@/db/schema";
-import { isDemoMode } from "@/lib/config";
 import { cached } from "@/lib/catalog-cache";
-import { getDemoStore } from "@/lib/demo/store";
 
 const IDENTITIES_TTL_MS = 60_000;
 
@@ -42,18 +40,9 @@ export type InternalIdentities = {
  * อ่านไม่สำเร็จให้ถือว่าไม่มี (ห้ามทำให้การส่งข้อความให้ผู้ใช้พังตาม)
  */
 export function internalIdentities(): Promise<InternalIdentities> {
-  if (isDemoMode) return Promise.resolve(demoIdentities());
   return cached("internal-identities", IDENTITIES_TTL_MS, () =>
     loadIdentities().catch(() => ({ brands: [], targets: [] })),
   );
-}
-
-function demoIdentities(): InternalIdentities {
-  const store = getDemoStore();
-  return {
-    brands: store.providers.flatMap((p) => [p.name, hostOf(p.baseUrl)]),
-    targets: store.models.flatMap((m) => [m.modelId, m.displayName]),
-  };
 }
 
 async function loadIdentities(): Promise<InternalIdentities> {
@@ -87,6 +76,9 @@ const replaceAll = (text: string, names: string[], token: string) =>
  * แล้วส่งต่อ ไม่ให้ยิง query ใหม่ทุกครั้งที่ลองล้ม
  */
 export function maskInternals(text: string, ids: InternalIdentities): string {
+  // ไม่มีรายชื่อค่ายให้บัง (อ่าน DB ไม่สำเร็จ) → ห้ามส่งข้อความดิบออก เพราะชื่อยี่ห้อจะหลุด
+  if (ids.brands.length === 0) return "เกิดข้อผิดพลาดจากโมเดลปลายทาง";
+
   const out = replaceAll(
     text.replace(/https?:\/\/\S+/g, "[url]").replace(BUNDLE_NOISE, "[ภายใน]"),
     ids.brands,
