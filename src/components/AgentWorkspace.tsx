@@ -1041,10 +1041,11 @@ export default function AgentWorkspace({
                 m.role === "user" ? "justify-end" : "justify-start"
               }`}
             >
-              {/* chat-row = กรอบที่ปุ่มคัดลอก/แก้ไขจะโผล่เมื่อชี้ (ดู .msg-actions ใน globals.css) */}
+              {/* chat-row = กรอบที่ปุ่มคัดลอก/แก้ไขจะโผล่เมื่อชี้ (ดู .msg-actions ใน globals.css)
+                  ฝั่ง assistant กระจายเต็มคอลัมน์ เพื่อให้กล่องโค้ด/กล่องกำลังคิดไม่หดเหลือเท่าความยาวบรรทัดสั้นสุด */}
               <div
                 className={`chat-row flex min-w-0 max-w-full flex-col ${
-                  m.role === "user" ? "items-end" : "items-start"
+                  m.role === "user" ? "items-end" : "w-full items-start"
                 }`}
               >
                 {/* ฝั่ง assistant ไม่มีพื้นหลังข้อความ (อ่านบนพื้นเว็บตรง ๆ) — ฝั่ง user ยังเป็นฟอง */}
@@ -1052,7 +1053,7 @@ export default function AgentWorkspace({
                   className={`max-w-full break-words text-body-sm [overflow-wrap:anywhere] ${
                     m.role === "user"
                       ? "rounded-2xl bg-brand-500/20 px-4 py-3 text-fg"
-                      : "px-0.5 py-1 leading-relaxed text-fg"
+                      : "w-full px-0.5 py-1 leading-relaxed text-fg"
                   }`}
                 >
                   {m.attachments.length > 0 && (
