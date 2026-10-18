@@ -178,7 +178,10 @@ export default function MessageBody({ text, live = false }: { text: string; live
         segment.kind === "code" ? (
           <CodeBlock key={`code-${i}`} segment={segment} live={live} />
         ) : (
-          <div key={`text-${i}`} className="whitespace-pre-wrap">
+          <div
+            key={`text-${i}`}
+            className="break-words whitespace-pre-wrap [overflow-wrap:anywhere]"
+          >
             <InlineText text={segment.text} />
           </div>
         ),

@@ -153,7 +153,7 @@ function ThinkingPanel({
                       : "text-leaf"
                 }`}
               />
-              <span className="truncate">{s.label}</span>
+              <span className="min-w-0 truncate">{s.label}</span>
             </p>
           ))}
         </div>
@@ -981,7 +981,7 @@ export default function AgentWorkspace({
 
       {/* Chat area */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-white/[0.07] px-3 sm:px-5">
+        <header className="flex h-11 shrink-0 items-center gap-2 px-3 sm:px-5">
           <button
             type="button"
             onClick={() => setDrawerOpen(true)}
@@ -990,12 +990,7 @@ export default function AgentWorkspace({
           >
             <Icon name="fa-bars" />
           </button>
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-body-sm font-semibold text-fg">{activeTitle}</h1>
-            <p className="truncate text-micro text-fg-subtle">
-              {t("แชทกับ AI พร้อมแนบไฟล์และรูปภาพ")}
-            </p>
-          </div>
+          <span className="flex-1" aria-hidden="true" />
           <Menu
             label={t("ตัวเลือกแชท")}
             items={[
@@ -1016,8 +1011,11 @@ export default function AgentWorkspace({
           />
         </header>
 
-        {/* Messages */}
-        <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-6 sm:px-6">
+        {/* Messages — เนื้อความอยู่ในกรอบเดียวกับกล่องพิมพ์: กันแถบเลื่อนกินพื้นที่ข้างเดียว (both-edges) */}
+        <div
+          ref={scrollRef}
+          className="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-clip px-3 py-6 [scrollbar-gutter:stable_both-edges] sm:px-6"
+        >
           {messages.length === 0 && (
             <div className="mx-auto mt-16 max-w-md text-center">
               <Logo size={46} className="mx-auto mb-4" />
@@ -1037,16 +1035,21 @@ export default function AgentWorkspace({
             const streaming = m.id === "streaming";
             const isLastUser = m.role === "user" && mi === lastUserIndex;
             return (
-            <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+            <div
+              key={m.id}
+              className={`mx-auto flex w-full max-w-4xl ${
+                m.role === "user" ? "justify-end" : "justify-start"
+              }`}
+            >
               {/* chat-row = กรอบที่ปุ่มคัดลอก/แก้ไขจะโผล่เมื่อชี้ (ดู .msg-actions ใน globals.css) */}
               <div
-                className={`chat-row flex max-w-[min(56rem,94%)] flex-col ${
+                className={`chat-row flex min-w-0 max-w-full flex-col ${
                   m.role === "user" ? "items-end" : "items-start"
                 }`}
               >
                 {/* ฝั่ง assistant ไม่มีพื้นหลังข้อความ (อ่านบนพื้นเว็บตรง ๆ) — ฝั่ง user ยังเป็นฟอง */}
                 <div
-                  className={`max-w-full text-body-sm ${
+                  className={`max-w-full break-words text-body-sm [overflow-wrap:anywhere] ${
                     m.role === "user"
                       ? "rounded-2xl bg-brand-500/20 px-4 py-3 text-fg"
                       : "px-0.5 py-1 leading-relaxed text-fg"
