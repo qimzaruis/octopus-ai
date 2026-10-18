@@ -10,6 +10,14 @@ html {
   scroll-behavior: smooth;
   /* ป้องกัน sticky header บัง focus/anchor target (WCAG 2.2 Focus Not Obscured) */
   scroll-padding-top: 5.5rem;
+  /* มือถือ: ห้ามเบราว์เซอร์ปรับขนาดตัวอักษรเอง + ลบกล่องเทาตอนแตะ (Android) */
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ตัดดีเลย์ tap 300ms บนจอสัมผัส และไม่ให้เกิด double-tap zoom บนปุ่ม */
+:where(a, button, input, select, textarea, summary, label, [role="button"]) {
+  touch-action: manipulation;
 }
 
 body {
@@ -89,13 +97,29 @@ body {
     @apply inline-flex items-center justify-center gap-2 rounded-lg bg-rose-500/10 px-4 py-2 text-body-sm font-medium text-rose-300 transition hover:bg-rose-500/20;
   }
 
-  /* ---- ฟอร์ม: ขอบจริงเพราะต้องเห็นขอบเขตการกรอก ---- */
+  /* ---- ฟอร์ม: ขอบจริงเพราะต้องเห็นขอบเขตการกรอก ----
+     ขนาดตัวอักษร 16px (text-body) เท่านั้น: Safari iOS จะ zoom เข้าเองทุกครั้งที่ focus
+     input ที่ฟอนต์เล็กกว่า 16px ทำให้ทั้งหน้าหลุดบนมือถือ */
   .input {
-    @apply w-full rounded-lg bg-ink-950/60 px-3.5 py-2.5 text-body-sm text-fg ring-1 ring-inset ring-white/10 transition duration-base placeholder:text-fg-subtle hover:ring-white/20 focus:outline-none focus:ring-2 focus:ring-brand-400/70;
+    @apply w-full rounded-lg bg-ink-950/60 px-3.5 py-2.5 text-body text-fg ring-1 ring-inset ring-white/10 transition duration-base placeholder:text-fg-subtle hover:ring-white/20 focus:outline-none focus:ring-2 focus:ring-brand-400/70;
   }
 
   .label {
     @apply mb-1.5 block text-caption font-medium text-fg-muted;
+  }
+
+  /* ---- ตัวควบคุมที่ไม่ได้อยู่ในชุด .btn-* ----
+     ลิงก์ในฟุตเตอร์ / ปุ่มไอคอนในแถว / ตัวสลับภาษา: เดิมเตี้ยกว่า 44px จับยากบนมือถือ
+     ตั้งแค่ min-* โดยไม่แตะ display จึง composite กับคลาสเดิมได้ปลอดภัย
+     (จอมีเมาส์คงความหนาแน่นเดิม, จอสัมผัสขยายเท่านั้น) */
+  @media (pointer: coarse) {
+    .touch-min {
+      min-height: 2.75rem;
+    }
+    .touch-min-icon {
+      min-height: 2.75rem;
+      min-width: 2.75rem;
+    }
   }
 
   /* ---- ตัวแบ่งกลุ่ม/แท็บ ---- */
@@ -103,12 +127,59 @@ body {
     @apply inline-flex items-center gap-0.5 rounded-lg bg-white/[0.05] p-0.5;
   }
 
+  /* whitespace-nowrap: ชิปข้อความสองคำ ("Rate limited") ขึ้นบรรทัดสองในแถบ segmented
+     ทำให้แท็บสูงไม่เท่ากันทั้งแถว — ให้ไปเลื่อนแนวนอนแทน (scroll-x) */
   .chip-toggle {
-    @apply rounded-md px-3 py-1.5 text-caption font-medium text-fg-muted transition hover:text-fg;
+    @apply whitespace-nowrap rounded-md px-3 py-1.5 text-caption font-medium text-fg-muted transition hover:text-fg;
   }
 
   .chip-toggle-active {
     @apply bg-white/[0.1] text-fg;
+  }
+
+  /* ---- พื้นที่ปลอดภัย (รอยบาก / home indicator / ขอบจอแนวนอน) ----
+     env(safe-area-inset-*) จะมีค่าจริงเมื่อ viewport-fit=cover (ตั้งใน src/app/layout.tsx)
+     ทุกคลาสตั้ง "ระยะปกติ + env()" ไว้ในตัวเอง จึงไม่ต้องบวก padding ซ้ำในจุดที่ใช้งาน
+     ข้อควรระวัง: ชั้น components แพ้ Tailwind utility — ธาตุที่ใช้ .safe-inline ห้ามใส่
+     px-* / pl-* / pr-* ซ้ำ (ส่วน .safe-* ห้ามใส่ pb-* ซ้ำ) มิฉะนั้น env จะถูกทับเงียบ ๆ */
+  .safe-inline {
+    padding-left: max(1.5rem, env(safe-area-inset-left));
+    padding-right: max(1.5rem, env(safe-area-inset-right));
+  }
+
+  .safe-bottom {
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+  }
+
+  .safe-bottom-lg {
+    padding-bottom: calc(1.5rem + env(safe-area-inset-bottom));
+  }
+
+  /* ปุ่มลอย (FAB เมนู / ปุ่มกลับลงล่าง) — เลื่อนตําแหน่งจริง ไม่ใช่เติม padding
+     ธาตุที่ใช้อย่าใส่ utility กําหนด left หรือ bottom ซ้ำ เพราะ utility จะทับคลาสนี้ */
+  .fab-dock {
+    left: calc(1.25rem + env(safe-area-inset-left));
+    bottom: calc(1.25rem + env(safe-area-inset-bottom));
+  }
+
+  /* bottom sheet (dialog ที่เลื่อนขึ้นจากขอบล่าง) — footer ต้องอยู่เหนือ gesture bar
+     ตั้งเฉพาะจอเล็ก เพราะบนจอใหญ่ dialog ลอยกลาง frame เดิมไม่ต้องมีระยะเพิ่ม */
+  @media (max-width: 639.98px) {
+    .sheet-safe-bottom {
+      padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+    }
+  }
+
+  /* ---- แถบแนวนอนที่เลื่อนได้บนมือถือ (ตาราง/แท็บ/ชิป) ----
+     เลื่อนได้ลื่นแต่ซ่อน scrollbar หนา ๆ ของธีม ให้เหลือที่ไว้ให้เนื้อหาจริง */
+  .scroll-x {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .scroll-x::-webkit-scrollbar {
+    display: none;
   }
 
   /* ---- ตาราง ---- */
@@ -166,6 +237,84 @@ body {
   .msg-actions:hover,
   .msg-actions:focus-within {
     opacity: 1;
+  }
+}
+
+/* ---- ปุ่มตัวเลือกของแถวในรายการแชท (⋮ แก้ชื่อ / ลบ) ----
+   กฎเดียวกับ .msg-actions: จอสัมผัสไม่มี hover ถ้าซ่อนไว้ ผู้ใช้จะเห็นแถว
+   เว้นที่ว่างไว้ด้านขวาโดยไม่มีอะไรให้กด แล้ว ALSO ไม่มีทางเข้าถึงเมนูนั้น */
+@media (hover: hover) and (pointer: fine) {
+  .row-actions {
+    opacity: 0;
+    transition: opacity 150ms ease;
+  }
+  .group\/item:hover .row-actions,
+  .row-actions:focus-within {
+    opacity: 1;
+  }
+}
+
+/* ---- จอสัมผัส: ขยาย 컨트롤ถึง 44px ตาม Apple HIG / Material ----
+   จับเฉพาะ (pointer: coarse) เพื่อคงความหนาแน่นแบบ desktop ไว้บนจอที่มีเมาส์
+   min-height ยังมีผลแม้จุดนั้นจะทับ py เดิมด้วย !py-* ก็ตาม */
+@media (pointer: coarse) {
+  .btn-primary,
+  .btn-secondary,
+  .btn-quiet,
+  .btn-danger,
+  .input,
+  .chip-toggle {
+    min-height: 2.75rem;
+  }
+
+  .table-head,
+  .table-cell {
+    padding-block: 0.8rem;
+  }
+}
+
+/* ---- บรรทัดไทยบนจอเล็ก ----
+   display/h1 ตั้ง line-height 1.05–1.15 ซึ่งพอสำหรับละติน แต่เครื่องหมายไทย
+   (วรรณยุกต์บน-ล่าง) ชนกันเองเมื่อหัวข้อต้องทบ 2–3 บรรทัดที่ 360px
+   จึงคลายทั้ง line-height และ tracking ด้านลบเฉพาะจอเล็ก+ภาษาไทย */
+@media (max-width: 639.98px) {
+  html[lang="th"] .text-display {
+    line-height: 1.22;
+    letter-spacing: -0.015em;
+  }
+  html[lang="th"] .text-h1 {
+    line-height: 1.3;
+    letter-spacing: -0.015em;
+  }
+  html[lang="th"] .text-h2 {
+    line-height: 1.38;
+  }
+}
+
+/* ---- ขั้นต่ําของตัวอักษรบนจอเล็ก ----
+   token micro = 10px ถูกใช้ราว 90 จุดทั้งโปรเจกต์ (badge, caption, ปุ่มเล็ก, โค้ด)
+   บนมือถือที่ถือห่างแขน 10px อ่านไม่ออก จึงยกเป็น 11px (= label) เฉพาะจอเล็ก
+   เขียนไว้นอก @layer เพราะ unlayered declaration ชนะ utility ที่อยู่ ใน layer
+   ถ้าไปใส่ใน @layer components จะถูก .text-micro ของ Tailwind ทับเงียบ ๆ */
+@media (max-width: 639.98px) {
+  .text-micro {
+    font-size: 0.6875rem;
+    line-height: 1.45;
+  }
+
+  /* ตัวเลขสถิติ (token stat = 26px mono): ในการ์ด 2 คอลัมน์ที่ 360px เหลือที่เขียนจริงราว 124px
+     "$1,234.56" กว้างราว 140px → ล้นขอบหรือทบบรรทัดใต้การ์ด จึงลดขั้นต่ําเป็น 20px บนจอเล็ก
+     (ยังเป็นตัวเลขที่ใหญ่กว่าเนื้อหาชัดตาม DESIGN_SYSTEM §4 และแก้ทั้งโปรเจกต์ที่จุดเดียว) */
+  .text-stat {
+    font-size: 1.25rem;
+  }
+
+  /* text-xs (12px) เป็นคลาสตกค้างจากสเกลของ Tailwind ไม่ใช่ token ของโปรเจกต์
+     (มีอยู่ 49 จุด ส่วนใหญ่ใน admin) — จอเล็กยกเป็น 13px = caption เท่ากับ token ที่ถูกต้อง
+     โดยไม่แตะไฟล์งาน 49 ไฟล์และไม่เปลี่ยนหน้าตาบนจอใหญ่ */
+  .text-xs {
+    font-size: 0.8125rem;
+    line-height: 1.5;
   }
 }
 

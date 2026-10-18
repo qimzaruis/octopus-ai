@@ -172,13 +172,15 @@ export default function ApiUsageTabs({ model = "octopus-free" }: { model?: strin
 
   return (
     <div>
-      <div className="flex flex-wrap gap-1.5">
+      {/* แถบรูปแบบ API: 3 ปุ่มยาว (OpenAI Chat Completions…) บีบกันไม่ได้ —
+          บนมือถือให้เป็นแถบเลื่อนแนวนอน (chip มี nowrap จากของเดิม) แล้วค่อย wrap บนจอใหญ่ */}
+      <div className="scroll-x -mx-1 flex gap-1.5 px-1 sm:mx-0 sm:flex-wrap sm:px-0">
         {FORMATS.map((f) => (
           <button
             key={f.id}
             type="button"
             onClick={() => setFormat(f.id)}
-            className={`rounded-md px-3 py-1.5 text-label font-medium transition ${
+            className={`touch-min shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-caption font-medium transition ${
               format === f.id
                 ? "bg-white/[0.12] text-fg"
                 : "text-fg-muted hover:bg-white/[0.06] hover:text-fg"
@@ -197,30 +199,37 @@ export default function ApiUsageTabs({ model = "octopus-free" }: { model?: strin
               key={l.id}
               type="button"
               onClick={() => setLang(l.id)}
-              className={`rounded-md px-2.5 py-1 text-label transition ${
+              className={`touch-min rounded-md px-2.5 py-1 text-caption transition ${
                 lang === l.id ? "bg-white/[0.1] text-fg" : "text-fg-muted hover:text-fg"
               }`}
             >
               {l.label}
             </button>
           ))}
-          <code className="ml-auto truncate font-mono text-micro text-fg-subtle">{active.path}</code>
+          {/* path ถูกตัดทิ้งบนจอเล็ก: มันคือข้อมูลที่ซ้ำกับบรรทัด curl ในโค้ดเอง
+              และ truncate เหลือ "…" ไม่มีประโยชน์ */}
+          <code className="ml-auto hidden max-w-[12rem] truncate font-mono text-label text-fg-subtle sm:block">
+            {active.path}
+          </code>
           <button
             type="button"
             onClick={copy}
+            aria-label={t("คัดลอก")}
             title={t("คัดลอก")}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-micro text-fg-muted transition hover:bg-white/[0.08] hover:text-fg"
+            className="touch-min ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-caption text-fg-muted transition hover:bg-white/[0.08] hover:text-fg sm:ml-2"
           >
             <Icon name={copied ? "fa-check" : "fa-copy"} className={copied ? "text-leaf" : ""} />
             {copied ? t("คัดลอกแล้ว") : t("คัดลอก")}
           </button>
         </div>
-        <pre className="max-h-80 overflow-auto px-3.5 py-3 text-micro leading-relaxed">
+        {/* 10px บนมือถืออ่านไม่ออก: ใช้ 13px ที่จอเล็ก แล้วกลับ 11px ตั้งแต่ sm
+            โค้ดยังเลื่อนแนวนอนได้ (scroll-x) ไม่ต้องตัดบรรทัดที่ทําให้อ่านไม่ออก */}
+        <pre className="scroll-x max-h-80 w-full min-w-0 overflow-y-auto px-3.5 py-3 text-caption leading-relaxed sm:text-label">
           <code className="whitespace-pre font-mono text-fg-muted">{code}</code>
         </pre>
       </div>
 
-      <p className="mt-2 text-label leading-relaxed text-fg-subtle">
+      <p className="mt-2 text-caption leading-relaxed text-fg-subtle">
         {t("ใส่คีย์ของคุณที่หน้า API Keys — ตั้ง stream: true เพื่อรับข้อความแบบทยอยมา (SSE) ได้ทุกรูปแบบ")}
       </p>
     </div>

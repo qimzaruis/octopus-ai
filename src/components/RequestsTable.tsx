@@ -41,7 +41,45 @@ export default function RequestsTable({ items }: { items: RequestDTO[] }) {
 
   return (
     <>
-      <div className="overflow-x-auto">
+      {/* มือถือ: ตาราง 8 คอลัมน์กว้าง min-w 760px = สองเท่าของจอ 360px
+          ผู้ใช้ต้องเลื่อนซ้าย-ขวาเพื่อดูสถานะของ request ที่ตัวเองสนใจ ซึ่งไม่มีใครทำบนมือถือ
+          รายการใบละ request จึงเป็นรูปที่ถูกต้องของข้อมูลชุดเดียวกัน (แตะทั้งใบ = เปิดรายละเอียด)
+          ตารางเต็มกลับมาที่ sm ขึ้นไป — ไม่ได้ตัดคอลัมน์ทิ้ง */}
+      <ul className="sm:hidden">
+        {items.length === 0 && (
+          <li className="px-4 py-10 text-center text-body-sm text-fg-subtle">
+            <Icon name="fa-magnifying-glass" className="mb-2 text-xl text-fg-subtle" />
+            <br />
+            {t("ไม่พบรายการที่ตรงกับเงื่อนไข")}
+          </li>
+        )}
+        {items.map((r) => (
+          <li key={r.id} className="border-b border-white/[0.07] last:border-0">
+            <button
+              type="button"
+              onClick={() => setSelected(r)}
+              className="w-full px-4 py-3.5 text-left transition active:bg-white/[0.05]"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <span className="min-w-0 truncate text-body-sm font-medium text-fg">
+                  {r.publicModel || "—"}
+                </span>
+                <StatusBadge status={r.status} />
+              </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-fg-subtle">
+                <span className="tnum">{formatTime(r.createdAt)}</span>
+                <span className="tnum">{formatLatency(r.latencyMs)}</span>
+                <span className="tnum">
+                  {formatNumber(r.inputTokens)} / {formatNumber(r.outputTokens)}
+                </span>
+                <span className="tnum">#{r.id}</span>
+              </div>
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      <div className="hidden overflow-x-auto sm:block">
         <table className="w-full min-w-[760px]">
           <thead>
             <tr className="border-b border-white/[0.07]">
@@ -94,7 +132,7 @@ export default function RequestsTable({ items }: { items: RequestDTO[] }) {
                 </td>
                 <td className="table-cell text-center">
                   <button
-                    className="rounded-lg border border-white/[0.07] bg-white/5 px-2.5 py-1 text-label text-fg-muted transition hover:border-brand-400/40 hover:text-fg"
+                    className="touch-min inline-flex items-center rounded-lg border border-white/[0.07] bg-white/5 px-2.5 py-1 text-label text-fg-muted transition hover:border-brand-400/40 hover:text-fg"
                     onClick={(e) => {
                       e.stopPropagation();
                       setSelected(r);

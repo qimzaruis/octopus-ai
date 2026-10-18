@@ -228,6 +228,9 @@ export default function AgentWorkspace({
   /** index ของข้อความที่กำลังแก้ — ดึงข้อความกลับมาพิมพ์ต่อในกล่องพิมพ์เลย (ไม่มี popup) */
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
+  /** ผู้ใช้ยังดูอยู่ตรงขอบล่างไหม — ตัวคุมว่า streaming จะเลื่อนตามหรือไม่ (ดู scrollToBottom) */
+  const [atBottom, setAtBottom] = useState(true);
+
   useEffect(() => {
     setFolderApi(canPickFolder());
     try {
@@ -244,6 +247,8 @@ export default function AgentWorkspace({
   const fileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const drawerRef = useRef<HTMLElement>(null);
 
   // เปลี่ยนห้องจากลิงก์ /c/<id> — React ใช้ component เดิมต่อ จึงต้อง sync state กับ props
   useEffect(() => {
@@ -257,16 +262,28 @@ export default function AgentWorkspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
 
-  // อ่านสถานะย่อ/ขยาย sidebar จาก localStorage (ครั้งแรก)
+  /* สถานะ "ย่อแถบข้าง" เป็นของจอใหญ่เท่านั้น ( sidebar ถาวร ) — บนมือถือมันคือ drawer
+     ที่ลากออกมา ถ้ายอมให้ค่าจาก localStorage มาบังคับด้วย ผู้ใช้ที่เคยย่อบนเดสก์ท็อป
+     จะได้อะไรที่กว้าง 288px แต่เหลือแค่ไอคอน และ "ประวัติแชท" หายไปทั้งบล็อก */
   useEffect(() => {
-    try {
-      setCollapsed(localStorage.getItem(COLLAPSE_KEY) === "1");
-    } catch {
-      /* ignore */
-    }
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const apply = () => {
+      let stored = false;
+      try {
+        stored = localStorage.getItem(COLLAPSE_KEY) === "1";
+      } catch {
+        /* ignore */
+      }
+      setCollapsed(mq.matches && stored);
+    };
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
   }, []);
 
   useEffect(() => {
+    // จอเล็กอย่าเขียนค่ากลับ ลงในคีย์ของจอใหญ่ (ไม่อย่างนั้นความชอบบนเดสก์ท็อปจะถูกลบ)
+    if (!window.matchMedia("(min-width: 1024px)").matches) return;
     try {
       localStorage.setItem(COLLAPSE_KEY, collapsed ? "1" : "0");
     } catch {
@@ -274,11 +291,91 @@ export default function AgentWorkspace({
     }
   }, [collapsed]);
 
-  const scrollToBottom = useCallback(() => {
-    requestAnimationFrame(() => {
-      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-    });
+  /**
+   * เลื่อนตามคำตอบที่กำลังไหล — แต่เฉพาะตอนที่ผู้ใช้ยังอยู่ใกล้ขอบล่าง
+   * เดิมเรียกตรง ๆ ทุก token ทำให้คนที่เลื่อนขึ้นไปอ่านบรรทัดก่อนหน้าโดนกระชากกลับลง
+   * และ smooth restart ทุก token = ภาพสั่น
+   */
+  const isNearBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 12 * 16;
   }, []);
+
+  const scrollToBottom = useCallback(
+    (force = false) => {
+      if (!force && !isNearBottom()) return;
+      setAtBottom(true);
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+      });
+    },
+    [isNearBottom],
+  );
+
+  /** ผู้ใช้เลื่อนขึ้นมาอ่านเอง → หยุดเลื่อนตาม แล้วโชว์ปุ่มลงข้างล่าง */
+  function handleScroll() {
+    const el = scrollRef.current;
+    if (!el) return;
+    setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 96 /* 6rem */);
+  }
+
+  /* กล่องพิมพ์โตตามเนื้อหา: ของเดิมล็อก rows=2 ทำให้กล่องสูงแค่ราว 59px
+     พิมพ์ยาวแล้วข้อความจะซ่อนอยู่ใน scrollbar ของตัวเอง และปุ่มส่งอยู่ใต้โคนนิ้วโป้ง
+     (ตั้ง height = scrollHeight แล้วให้ max-h-44 ในคลาสเป็นเพดานของ CSS เอง) */
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [input]);
+
+  /* iOS Safari ไม่ย่อ layout viewport ตอนคีย์บอร์ดเปิด (interactive-widget ใช้ไม่ได้กับมัน)
+     ถ้าปล่อยไว้ composer จมใต้คีย์บอร์ดถาวรบน iPhone จึงต้องหด container ตาม visualViewport เอง
+     Chrome Android ย่อให้แล้วเพราะเราตั้ง resizes-content ส่วนต่างจึงใกล้ 0 ไม่แตะอะไร
+     เกณฑ์ 80px กันกรณีแถบ URL หด-ขยายที่ทำให้ค่าขยับนิดหน่อย */
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const shell = shellRef.current;
+    if (!vv || !shell) return;
+    const apply = () => {
+      const keyboardUp = window.innerHeight - vv.height > 80;
+      shell.style.height = keyboardUp ? `${vv.height}px` : "";
+      if (keyboardUp) requestAnimationFrame(() => scrollToBottom(true));
+    };
+    vv.addEventListener("resize", apply);
+    vv.addEventListener("scroll", apply);
+    apply();
+    return () => {
+      vv.removeEventListener("resize", apply);
+      vv.removeEventListener("scroll", apply);
+    };
+  }, [scrollToBottom]);
+
+  /* เปิดห้องเก่า: ต้องเห็นข้อความล่าสุด ไม่ใช่จุดเริ่มต้นของบทสนทนา */
+  useEffect(() => {
+    requestAnimationFrame(() => scrollToBottom(true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId]);
+
+  /* drawer บนมือถือคือ modal: ต้องมี Escape, ล็อกสครอลล์หลังผ้าม่าน, ย้าย focus เข้าแผง
+     และคืน focus ตอนปิด — ไม่งั้นปุ่ม "ปิดเมนู" เป็นทางออกเดียวของคนใช้คีย์บอร์ด */
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    drawerRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDrawerOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previousOverflow;
+      previous?.focus?.();
+    };
+  }, [drawerOpen]);
 
   const remaining = Math.max(0, maxAttachments - attachments.length);
 
@@ -666,7 +763,9 @@ export default function AgentWorkspace({
     setNotes(notesLog);
     const controller = new AbortController();
     abortRef.current = controller;
-    scrollToBottom();
+    /* ผู้ใช้กดส่งเอง = ต้องเห็นข้อความของตัวเองเสมอ แม้จะเลื่อนขึ้นไปอ่านของเก่าอยู่
+       (จุดอื่นตอน stream ปล่อยให้ isNearBottom เป็นผู้ตัดสิน) */
+    scrollToBottom(true);
 
     let convId = activeId;
     if (!convId) {
@@ -830,12 +929,14 @@ export default function AgentWorkspace({
           >
             {titleOf(c)}
           </Link>
-          <span className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover/item:opacity-100 focus-within:opacity-100">
+          {/* row-actions: จอสัมผัสต้องเห็นเสมอ (ดู globals.css) — เดิม opacity-0 + group-hover
+              อย่างเดียว ทำให้บนมือถือเมนู ⋮ มองไม่เห็นแต่ยังกดถูก (ช่อง pr-10 เว้นไว้) */}
+          <span className="row-actions absolute right-1 top-1/2 -translate-y-1/2">
             <Menu
               label={t("ตัวเลือกแชท")}
               widthPx={176}
               placement="right"
-              triggerClassName="h-7 w-7 bg-ink-950/40"
+              triggerClassName="touch-min-icon h-7 w-7 bg-ink-950/40"
               items={[
                 {
                   icon: "fa-pen",
@@ -975,7 +1076,7 @@ export default function AgentWorkspace({
   const lastUserIndex = messages.map((m) => m.role).lastIndexOf("user");
 
   return (
-    <div className="flex h-dvh w-full overflow-hidden bg-ink-950">
+    <div ref={shellRef} className="flex h-dvh w-full overflow-hidden bg-ink-950">
       {/* Sidebar (desktop) */}
       <aside
         className={`hidden shrink-0 flex-col border-r border-white/[0.07] bg-ink-900 transition-[width] duration-200 lg:flex ${
@@ -989,12 +1090,19 @@ export default function AgentWorkspace({
       {drawerOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-black/70" onClick={() => setDrawerOpen(false)} aria-hidden />
-          <aside className="animate-fade-in absolute inset-y-0 left-0 flex w-72 flex-col border-r border-white/[0.07] bg-ink-900">
+          <aside
+            ref={drawerRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("เมนูแชทและประวัติ")}
+            tabIndex={-1}
+            className="animate-drawer-in absolute inset-y-0 left-0 flex w-[min(18rem,88vw)] flex-col border-r border-white/[0.07] bg-ink-900 outline-none pt-[env(safe-area-inset-top)]"
+          >
             <button
               type="button"
               onClick={() => setDrawerOpen(false)}
               aria-label={t("ปิดเมนู")}
-              className="absolute right-3 top-4 z-10 rounded-md p-1.5 text-fg-subtle transition hover:text-fg"
+              className="touch-min-icon absolute right-3 top-[calc(0.75rem_+_env(safe-area-inset-top))] z-10 rounded-md p-1.5 text-fg-subtle transition hover:text-fg"
             >
               <Icon name="fa-xmark" />
             </button>
@@ -1004,13 +1112,13 @@ export default function AgentWorkspace({
       )}
 
       {/* Chat area */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="relative flex min-w-0 flex-1 flex-col">
         <header className="flex h-11 shrink-0 items-center gap-2 px-3 sm:px-5">
           <button
             type="button"
             onClick={() => setDrawerOpen(true)}
             aria-label={t("เปิดเมนู")}
-            className="flex h-9 w-9 items-center justify-center rounded-md text-fg-muted transition hover:bg-white/[0.08] hover:text-fg lg:hidden"
+            className="touch-min-icon flex h-9 w-9 items-center justify-center rounded-md text-fg-muted transition hover:bg-white/[0.08] hover:text-fg lg:hidden"
           >
             <Icon name="fa-bars" />
           </button>
@@ -1038,7 +1146,8 @@ export default function AgentWorkspace({
         {/* Messages — เนื้อความอยู่ในกรอบเดียวกับกล่องพิมพ์: กันแถบเลื่อนกินพื้นที่ข้างเดียว (both-edges) */}
         <div
           ref={scrollRef}
-          className="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-clip px-3 py-6 [scrollbar-gutter:stable_both-edges] sm:px-6"
+          onScroll={handleScroll}
+          className="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-clip px-3 py-6 sm:px-6 sm:[scrollbar-gutter:stable_both-edges]"
         >
           {messages.length === 0 && (
             <div className="mx-auto mt-16 max-w-md text-center">
@@ -1111,13 +1220,13 @@ export default function AgentWorkspace({
                 </div>
                 {/* ปุ่มอยู่ใต้ฟอง นอกข้อความ — เล็กและโผล่เฉพาะตอนชี้ */}
                 {m.content && (
-                  <div className="msg-actions mt-1 flex items-center gap-0.5">
+                  <div className="msg-actions mt-1 flex items-center gap-1.5">
                     <button
                       type="button"
                       onClick={() => copyMessage(m)}
                       title={copiedId === m.id ? t("คัดลอกแล้ว") : t("คัดลอกข้อความ")}
                       aria-label={t("คัดลอกข้อความ")}
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-micro text-fg-subtle transition hover:bg-white/[0.07] hover:text-fg"
+                      className="touch-min-icon inline-flex h-7 w-7 items-center justify-center rounded-md text-label text-fg-subtle transition hover:bg-white/[0.07] hover:text-fg"
                     >
                       <Icon
                         name={copiedId === m.id ? "fa-check" : "fa-copy"}
@@ -1130,7 +1239,7 @@ export default function AgentWorkspace({
                         onClick={() => startEdit(m, mi)}
                         title={t("แก้ข้อความนี้แล้วส่งใหม่")}
                         aria-label={t("แก้ข้อความนี้แล้วส่งใหม่")}
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-micro text-fg-subtle transition hover:bg-white/[0.07] hover:text-fg"
+                        className="touch-min-icon inline-flex h-7 w-7 items-center justify-center rounded-md text-label text-fg-subtle transition hover:bg-white/[0.07] hover:text-fg"
                       >
                         <Icon name="fa-pen" />
                       </button>
@@ -1143,8 +1252,22 @@ export default function AgentWorkspace({
           })}
         </div>
 
-        {/* Composer — การ์ดลอยไม่ติดขอบ มีไฟล์แนบ ปุ่มแนบไฟล์ ตัวเลือกโมเดล และปุ่มส่งอยู่ในกรอบเดียว */}
-        <div className="relative shrink-0 px-3 pb-4 pt-2 sm:px-6">
+        {/* ผู้ใช้เลื่อนขึ้นอ่านแล้วคำตอบไหลต่อ → ให้มีทางลงแบบไม่ต้องลากนิ้วกลับ */}
+        {!atBottom && messages.length > 0 && (
+          <button
+            type="button"
+            onClick={() => scrollToBottom(true)}
+            aria-label={t("เลื่อนลงข้อความล่าสุด")}
+            className="touch-min-icon absolute bottom-[calc(9rem_+_env(safe-area-inset-bottom))] left-1/2 z-10 -translate-x-1/2 rounded-full bg-ink-850 text-fg shadow-floating ring-1 ring-white/[0.10] transition hover:bg-ink-800 active:scale-95"
+          >
+            <Icon name="fa-chevron-down" className="text-label" />
+          </button>
+        )}
+
+        {/* Composer — การ์ดลอยไม่ติดขอบ มีไฟล์แนบ ปุ่มแนบไฟล์ ตัวเลือกโมเดล และปุ่มส่งอยู่ในกรอบเดียว
+            safe-bottom = 1rem + env(safe-area-inset-bottom): ปลายนิ้วกดส่งต้องไม่ชน gesture bar
+            (ห้ามใส่ pb-* ซ้ำบนธาตุนี้ utility จะทับคลาส) */}
+        <div className="safe-bottom relative shrink-0 px-3 pt-2 sm:px-6">
           {/* ข้อความที่เลื่อนมาจากด้านบนจะได้จางลงก่อนชนการ์ด ไม่ใช่ตัดเป็นเส้นแข็ง */}
           <div
             className="pointer-events-none absolute inset-x-0 -top-12 h-12 bg-gradient-to-b from-transparent to-ink-950"

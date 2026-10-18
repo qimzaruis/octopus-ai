@@ -14,6 +14,9 @@ const NAV = [
   { hash: "developers", label: "นักพัฒนา" },
 ];
 
+/** id ของแผงเมนูมือถือ — ให้ปุ่มแฮมเบอร์เกอร์อ้างถึงด้วย aria-controls */
+const MENU_ID = "site-nav-menu";
+
 /**
  * SiteNav — แถบนําทางสาธารณะ (landing / signin)
  * sticky ตั้งแต่ต้น แต่จะได้พื้นหลังทึบ + เส้นคั่นก็ต่อเมื่อเลื่อนลงมาหรือเปิดเมนูมือถือ
@@ -39,6 +42,17 @@ export default function SiteNav({ active }: { active?: "signin" }) {
     setMenuOpen(false);
   }, [pathname]);
 
+  /* Escape ปิดเมนู — บนมือถือเมนูเป็นแผงเต็มความกว้าง การไม่มีทางปิดด้วยคีย์บอร์ด
+     ทำให้ keyboard/switch-access users ติดอยู่ในแถบ header */
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
+
   /** ถ้าอยู่หน้าแรกแล้ว เลื่อนหาส่วนนั้นเลย; ถ้าอยู่หน้าอื่นให้ Link พากลับหน้าแรกก่อน */
   function handleSectionClick(e: React.MouseEvent, hash: string) {
     if (pathname !== "/") return;
@@ -57,15 +71,18 @@ export default function SiteNav({ active }: { active?: "signin" }) {
           : "border-transparent bg-transparent"
       }`}
     >
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-6 px-6">
-        <Link href="/" className="flex shrink-0 items-center gap-2.5">
+      {/* safe-inline = gutter 1.5rem ที่บวก safe-area ด้านข้างให้ด้วย (จอแนวนอนที่มีรอยบาก)
+          gap-4 ที่จอเล็ก: แถวนี้เคย intrinsic ~374px > 312px ที่เหลือจริงที่ 360px
+          ทำให้ทั้งปุ่ม CTA และปุ่มแฮมเบอร์เกอร์ถูกดันหลุดจอ */}
+      <div className="safe-inline mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 sm:gap-6">
+        <Link href="/" className="touch-min flex shrink-0 items-center gap-2.5">
           <Logo size={28} />
           <span className="whitespace-nowrap text-body-sm font-semibold tracking-tight text-fg">
             Octopus <span className="text-brand-300">AI</span>
           </span>
         </Link>
 
-        <nav className="hidden items-center gap-1 md:flex">
+        <nav className="hidden items-center gap-1 md:flex" aria-label={t("นําทางหลัก")}>
           {NAV.map((l) => (
             <Link
               key={l.hash}
@@ -80,21 +97,30 @@ export default function SiteNav({ active }: { active?: "signin" }) {
 
         <div className="flex shrink-0 items-center gap-2">
           <LanguageSwitcher />
+          {/* ต่ำกว่า sm: ปุ่มหลักย้ายลงไปอยู่ในแผงเมนูแทน เพื่อไม่ให้แถว header ล้นขอบจอ */}
           {active === "signin" ? (
-            <Link href="/" className="btn-secondary whitespace-nowrap !px-4 !py-2 text-body-sm" aria-current="page">
+            <Link
+              href="/"
+              className="btn-secondary hidden whitespace-nowrap !px-4 !py-2 text-body-sm sm:inline-flex"
+              aria-current="page"
+            >
               <Icon name="fa-house" className="text-label" /> {t("หน้าแรก")}
             </Link>
           ) : (
-            <Link href="/signin" className="btn-primary whitespace-nowrap !px-4 !py-2 text-body-sm">
+            <Link
+              href="/signin"
+              className="btn-primary hidden whitespace-nowrap !px-4 !py-2 text-body-sm sm:inline-flex"
+            >
               {t("เริ่มใช้งาน")} <Icon name="fa-arrow-right" className="text-label" />
             </Link>
           )}
 
           <button
             onClick={() => setMenuOpen((v) => !v)}
-            aria-label={menuOpen ? "ปิดเมนู" : "เปิดเมนู"}
+            aria-label={menuOpen ? t("ปิดเมนู") : t("เปิดเมนู")}
             aria-expanded={menuOpen}
-            className="flex h-9 w-9 items-center justify-center rounded-md bg-white/[0.06] text-fg transition hover:bg-white/[0.11] md:hidden"
+            aria-controls={MENU_ID}
+            className="touch-min-icon flex h-10 w-10 items-center justify-center rounded-md bg-white/[0.06] text-fg transition hover:bg-white/[0.11] md:hidden"
           >
             <Icon name={menuOpen ? "fa-xmark" : "fa-bars"} className="text-sm" />
           </button>
@@ -102,17 +128,27 @@ export default function SiteNav({ active }: { active?: "signin" }) {
       </div>
 
       {menuOpen && (
-        <nav className="px-6 pb-3 pt-1 md:hidden">
+        <nav id={MENU_ID} aria-label={t("นําทางหลัก")} className="safe-inline pb-3 pt-1 md:hidden">
           {NAV.map((l) => (
             <Link
               key={l.hash}
               href={`/#${l.hash}`}
               onClick={(e) => handleSectionClick(e, l.hash)}
-              className="block rounded-md px-3 py-2.5 text-body-sm text-fg-muted transition hover:bg-white/[0.06] hover:text-fg"
+              className="touch-min block rounded-md px-3 text-body-sm text-fg-muted transition hover:bg-white/[0.06] hover:text-fg"
             >
               {t(l.label)}
             </Link>
           ))}
+
+          {active === "signin" ? (
+            <Link href="/" className="btn-secondary mt-3 w-full whitespace-nowrap">
+              <Icon name="fa-house" className="text-label" /> {t("หน้าแรก")}
+            </Link>
+          ) : (
+            <Link href="/signin" className="btn-primary mt-3 w-full whitespace-nowrap">
+              {t("เริ่มใช้งาน")} <Icon name="fa-arrow-right" className="text-label" />
+            </Link>
+          )}
         </nav>
       )}
     </header>

@@ -41,7 +41,9 @@ export default async function ToggleSwitch({
         aria-label={enabled ? onTitle : offTitle}
         role="switch"
         aria-checked={enabled}
-        className={`relative inline-flex items-center rounded-full px-[3px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-950 ${
+        /* ตัวสวิทช์เล็ก (18–22px) ตามที่ออกแบบ แต่เป้าแตะต้องถึง 44px
+           จึงขยาย hit area ด้วย ::after ที่ไม่กินพื้นที่ layout ของแถวตาราง */
+        className={`relative inline-flex items-center rounded-full px-[3px] transition-colors after:absolute after:-inset-3 after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-950 ${
           enabled ? "bg-leaf/80" : "bg-white/10"
         }`}
         style={track}

@@ -64,7 +64,9 @@ export default function DashboardMock() {
                 { label: t("อัตราสําเร็จ"), value: "99.2%" },
               ].map((s) => (
                 <div key={s.label} className="rounded-md bg-white/[0.04] p-3">
-                  <p className="text-micro text-fg-subtle">{s.label}</p>
+                  {/* 10px บนมือถืออ่านไม่ออก: ยกเป็น 11px ที่จอเล็กแล้วคืน micro ที่ sm
+                      (mock ต้องอ่านได้จริง ไม่ใช่เป็นแค่พื้นผิว) */}
+                  <p className="text-label text-fg-subtle sm:text-micro">{s.label}</p>
                   <p className="tnum mt-1 text-body-sm font-semibold text-fg">
                     <CountUp value={s.value} />
                   </p>
@@ -81,8 +83,10 @@ export default function DashboardMock() {
                 <div className="flex items-center justify-between">
                   <p className="text-label font-medium text-fg-muted">{t("ภาพรวมการใช้งาน")}</p>
                   <div className="segmented !p-0.5">
-                    <span className="rounded px-1.5 py-0.5 text-micro text-fg-subtle">7d</span>
-                    <span className="rounded bg-white/[0.1] px-1.5 py-0.5 text-micro text-fg">
+                    <span className="rounded px-1.5 py-0.5 text-label text-fg-subtle sm:text-micro">
+                      7d
+                    </span>
+                    <span className="rounded bg-white/[0.1] px-1.5 py-0.5 text-label text-fg sm:text-micro">
                       24h
                     </span>
                   </div>

@@ -56,7 +56,7 @@ export default function AgentToolsBar({
             ? t("เลือกโฟลเดอร์งานบนเครื่องของคุณ")
             : t("เบราว์เซอร์นี้ยังไม่รองรับการเลือกโฟลเดอร์ (ใช้ Chrome หรือ Edge)")
         }
-        className={`flex max-w-[10rem] items-center gap-1.5 rounded-full px-2.5 py-1.5 text-caption transition-colors duration-fast ${
+        className={`touch-min flex max-w-[10rem] items-center gap-1.5 rounded-full px-2.5 py-1.5 text-caption transition-colors duration-fast ${
           workspaceName
             ? "bg-leaf/10 text-leaf hover:bg-leaf/15"
             : "bg-white/[0.06] text-fg-muted hover:bg-white/[0.11] hover:text-fg"
@@ -75,13 +75,17 @@ export default function AgentToolsBar({
         aria-expanded={open}
         aria-label={t("ตั้งค่าเครื่องมือเอเจนต์")}
         title={t("ตั้งค่าเครื่องมือเอเจนต์")}
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-fg-muted transition hover:bg-white/[0.08] hover:text-fg"
+        className="touch-min-icon flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-fg-muted transition hover:bg-white/[0.08] hover:text-fg"
       >
         <Icon name="fa-gear" />
       </button>
 
       {open && (
-        <div className="animate-fade-in absolute bottom-[calc(100%+0.5rem)] left-0 z-30 w-[min(22rem,calc(100vw-2rem))] rounded-xl bg-ink-850 p-4 shadow-floating ring-1 ring-white/[0.07]">
+        /* แผงเปิดขึ้นจากแถบเครื่องมือซึ่งอยู่ชิดขอบล่าง: ต้องกว้างไม่เกินจอจริงเสมอ
+           (เดิม w-[min(22rem,calc(100vw-2rem))] — min() ครอบอยู่แล้ว แต่พอปุ่มถูกดัน
+           มาทางขวาสุดของคอมโพสเซอร์บนจอ 360px ขอบขวาของแผงยังเลยจอไป
+           max-w ที่ผูกกับ 100vw ทำให้ไม่มีทางถูกตัดออกนอก viewport) */
+        <div className="animate-fade-in absolute bottom-[calc(100%_+_0.5rem)] left-0 z-30 w-[22rem] max-w-[calc(100vw_-_2rem)] rounded-xl bg-ink-850 p-4 shadow-floating ring-1 ring-white/[0.07]">
           <p className="text-label font-semibold uppercase tracking-[0.14em] text-fg-subtle">
             {t("โฟลเดอร์งาน")}
           </p>
@@ -95,7 +99,7 @@ export default function AgentToolsBar({
               type="button"
               onClick={onPick}
               disabled={!canPick}
-              className="rounded-md bg-white/[0.07] px-2.5 py-1.5 text-caption text-fg transition hover:bg-white/[0.12] disabled:cursor-not-allowed disabled:opacity-40"
+              className="touch-min rounded-md bg-white/[0.07] px-2.5 py-1.5 text-caption text-fg transition hover:bg-white/[0.12] disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Icon name="fa-folder-open" className="mr-1.5 text-micro" />
               {workspaceName ? t("เปลี่ยนโฟลเดอร์") : t("เลือกโฟลเดอร์")}
@@ -104,7 +108,7 @@ export default function AgentToolsBar({
               <button
                 type="button"
                 onClick={onDisconnect}
-                className="rounded-md px-2.5 py-1.5 text-caption text-fg-muted transition hover:bg-white/[0.07] hover:text-rose-300"
+                className="touch-min rounded-md px-2.5 py-1.5 text-caption text-fg-muted transition hover:bg-white/[0.07] hover:text-rose-300"
               >
                 {t("ถอดการเชื่อมต่อ")}
               </button>
@@ -116,17 +120,17 @@ export default function AgentToolsBar({
               type="checkbox"
               checked={autoWrite}
               onChange={(ev) => onAutoWriteChange(ev.target.checked)}
-              className="mt-0.5 h-4 w-4 shrink-0 accent-brand-500"
+              className="mt-0.5 h-5 w-5 shrink-0 accent-brand-500 md:h-4 md:w-4"
             />
             <span>
               {t("เขียนไฟล์ได้ทันทีโดยไม่ต้องขออนุญาตทุกครั้ง")}
-              <span className="mt-0.5 block text-micro text-fg-subtle">
+              <span className="mt-0.5 block text-label text-fg-subtle">
                 {t("การลบไฟล์จะขอยืนยันเสมอ")}
               </span>
             </span>
           </label>
 
-          <p className="mt-3 border-t border-white/[0.07] pt-3 text-micro leading-relaxed text-fg-subtle">
+          <p className="mt-3 border-t border-white/[0.07] pt-3 text-label leading-relaxed text-fg-subtle">
             <Icon name="fa-magnifying-glass" className="mr-1.5" />
             {t("การค้นเว็บใช้โควตาของระบบ (Google ผ่าน Bright Data) ไม่ต้องใส่คีย์ในเครื่องคุณ")}
           </p>

@@ -46,7 +46,7 @@ export default function LanguageSwitcher({ variant = "nav" }: { variant?: "nav" 
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={t("เปลี่ยนภาษา")}
-        className={`flex items-center gap-1.5 rounded-md transition-colors duration-fast disabled:opacity-50 ${
+        className={`touch-min flex items-center gap-1.5 rounded-md transition-colors duration-fast disabled:opacity-50 ${
           isCompact
             ? "bg-white/[0.05] px-2.5 py-2 text-caption font-medium text-fg-muted hover:bg-white/[0.09] hover:text-fg"
             : "px-3 py-2 text-body-sm text-fg-muted hover:bg-white/[0.06] hover:text-fg"
@@ -75,7 +75,7 @@ export default function LanguageSwitcher({ variant = "nav" }: { variant?: "nav" 
                 role="menuitemradio"
                 aria-checked={l === locale}
                 onClick={() => choose(l)}
-                className={`flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-body-sm transition-colors duration-fast ${
+                className={`touch-min flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-body-sm transition-colors duration-fast ${
                   l === locale
                     ? "bg-white/[0.08] text-fg"
                     : "text-fg-muted hover:bg-white/[0.06] hover:text-fg"

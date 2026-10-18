@@ -141,7 +141,8 @@ function CodeBlock({ segment, live }: { segment: Segment; live: boolean }) {
             type="button"
             onClick={openInNewTab}
             title={t("เปิดดูในแท็บใหม่")}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-micro text-fg-muted transition hover:bg-white/[0.08] hover:text-fg"
+            aria-label={t("เปิดดูในแท็บใหม่")}
+            className="touch-min inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-caption text-fg-muted transition hover:bg-white/[0.08] hover:text-fg"
           >
             <Icon name="fa-arrow-up-right-from-square" />
             {t("เปิดดู")}
@@ -151,14 +152,19 @@ function CodeBlock({ segment, live }: { segment: Segment; live: boolean }) {
           type="button"
           onClick={copy}
           title={t("คัดลอกโค้ด")}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-micro text-fg-muted transition hover:bg-white/[0.08] hover:text-fg"
+          aria-label={t("คัดลอกโค้ด")}
+          className="touch-min inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-caption text-fg-muted transition hover:bg-white/[0.08] hover:text-fg"
         >
           <Icon name={copied ? "fa-check" : "fa-copy"} className={copied ? "text-leaf" : ""} />
           {copied ? t("คัดลอกแล้ว") : t("คัดลอก")}
         </button>
       </div>
-      {/* scroll ในกล่องโค้ดเท่านั้น ไม่ทำให้ทั้งแชทเลื่อนตาม */}
-      <pre ref={preRef} className="max-h-[22rem] overflow-auto px-3.5 py-3 text-micro leading-relaxed">
+      {/* scroll ในกล่องโค้ดเท่านั้น ไม่ทำให้ทั้งแชทเลื่อนตาม
+          13px บนมือถือ / 11px บนจอใหญ่: mono 10px แยก <> {} ออกจากกันไม่ออกตอนจอใกล้ตา */}
+      <pre
+        ref={preRef}
+        className="max-h-[22rem] overflow-auto px-3.5 py-3 text-caption leading-relaxed sm:px-4 sm:text-label"
+      >
         <code className="font-mono whitespace-pre text-fg-muted">{code}</code>
       </pre>
     </div>

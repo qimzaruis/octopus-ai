@@ -70,7 +70,11 @@ export default function Menu({
   }
 
   useLayoutEffect(() => {
-    if (open) place();
+    if (!open) return;
+    place();
+    /* วาดแล้ววัดจริงอีกครั้ง: ประมาณการ ITEM_H คลาดได้ (ฉลากไทยสองบรรทัด, จอสัมผัส 44px)
+       ถ้าคำนวณจากของประมาณ เมนูอาจล้นขอบล่างจอแล้วกดไม่ถึง */
+    requestAnimationFrame(place);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -84,17 +88,21 @@ export default function Menu({
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
-    const close = () => setOpen(false);
+    /* panel เป็น fixed ที่ผูกกับปุ่ม: ตอนเลื่อนต้อง "ตามไปวางใหม่" ไม่ใช่ปิด
+       เดิมปิดทุก scroll (capture=true) บนจอสัมผัสนิ้วปัดนิดเดียวก่อนแตะเมนูก็หายวับ
+       และคนที่เลื่อนดูรายการยาว ๆ จะเปิดเมนูซ้ำไม่ทัน */
+    const reposition = () => place();
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
-    window.addEventListener("scroll", close, true);
-    window.addEventListener("resize", close);
+    window.addEventListener("scroll", reposition, true);
+    window.addEventListener("resize", reposition);
     return () => {
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("scroll", close, true);
-      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", reposition, true);
+      window.removeEventListener("resize", reposition);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   return (
@@ -106,7 +114,7 @@ export default function Menu({
         aria-expanded={open}
         aria-label={label}
         title={label}
-        className={`flex h-8 w-8 items-center justify-center rounded-md text-fg-muted transition hover:bg-white/[0.08] hover:text-fg ${triggerClassName}`}
+        className={`touch-min-icon flex h-8 w-8 items-center justify-center rounded-md text-fg-muted transition hover:bg-white/[0.08] hover:text-fg ${triggerClassName}`}
       >
         <Icon name="fa-ellipsis-vertical" className="text-base" />
       </button>
@@ -120,7 +128,7 @@ export default function Menu({
             role="menu"
             aria-label={label}
             style={{ top: pos.top, left: pos.left, width: widthPx }}
-            className="animate-fade-in fixed z-[80] rounded-lg bg-ink-850 p-1.5 shadow-floating ring-1 ring-white/[0.1]"
+            className="animate-fade-in fixed z-[110] rounded-lg bg-ink-850 p-1.5 shadow-floating ring-1 ring-white/[0.1]"
           >
             {items.map((item) => (
               <button
@@ -132,7 +140,7 @@ export default function Menu({
                   setOpen(false);
                   item.onClick();
                 }}
-                className={`flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-caption transition-colors duration-fast disabled:cursor-not-allowed disabled:opacity-40 ${
+                className={`touch-min flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-caption transition-colors duration-fast disabled:cursor-not-allowed disabled:opacity-40 ${
                   item.tone === "danger"
                     ? "text-rose-300 hover:bg-rose-500/10"
                     : "text-fg-muted hover:bg-white/[0.06] hover:text-fg"

@@ -36,7 +36,7 @@ export default async function SiteFooter() {
 
   return (
     <footer className="bg-ink-900/60">
-      <div className="mx-auto max-w-6xl px-6 py-14">
+      <div className="safe-inline mx-auto max-w-6xl py-12 sm:py-14">
         <div className="flex flex-col gap-10 sm:flex-row sm:items-start sm:justify-between">
           <div className="max-w-xs">
             <div className="flex items-center gap-2.5">
@@ -50,9 +50,11 @@ export default async function SiteFooter() {
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-x-12 gap-y-8 sm:grid-cols-3">
+          {/* gap-x-12 ที่ 360px ทําให้เหลือคอลัมน์ละ ~132px จนลิงก์ตัดกลางคํา
+              บนจอเล็กจึงยุบเป็น 2 คอลัมน์ gutter 1.5rem แล้วคืน 3 คอลัมน์ที่ sm */}
+          <div className="grid grid-cols-2 gap-x-6 gap-y-8 sm:grid-cols-3 sm:gap-x-12">
             {COLUMNS.map((col) => (
-              <div key={col.title} className="space-y-2.5">
+              <div key={col.title} className="min-w-0 space-y-1 sm:space-y-2.5">
                 <p className="text-label font-semibold uppercase tracking-[0.14em] text-fg-subtle">
                   {col.title}
                 </p>
@@ -60,7 +62,7 @@ export default async function SiteFooter() {
                   <Link
                     key={l.href}
                     href={l.href}
-                    className="block text-body-sm text-fg-muted transition-colors duration-fast hover:text-fg"
+                    className="touch-min -mx-1 block break-words rounded-md px-1 text-body-sm text-fg-muted transition-colors duration-fast hover:text-fg"
                   >
                     {l.label}
                   </Link>
@@ -74,16 +76,18 @@ export default async function SiteFooter() {
           <p className="text-caption text-fg-subtle">
             © 2026 Octopus AI — One Gateway to Every AI
           </p>
-          <nav className="flex items-center gap-5">
+          {/* gap-5 + touch-min: เดิมน่ํา 20px และชิดกัน 20px กดผิดบ่อยบนนิ้วโป้ง
+              sm:gap-5 คืนระยะเดิมให้จอใหญ่ */}
+          <nav className="flex flex-wrap items-center justify-center gap-x-1 gap-y-0 sm:justify-end sm:gap-5">
             <Link
               href="/terms"
-              className="text-caption text-fg-subtle transition-colors duration-fast hover:text-fg"
+              className="touch-min -mx-1 rounded-md px-1 text-caption text-fg-subtle transition-colors duration-fast hover:text-fg"
             >
               {t("ข้อกําหนดการใช้งาน")}
             </Link>
             <Link
               href="/privacy"
-              className="text-caption text-fg-subtle transition-colors duration-fast hover:text-fg"
+              className="touch-min -mx-1 rounded-md px-1 text-caption text-fg-subtle transition-colors duration-fast hover:text-fg"
             >
               {t("นโยบายความเป็นส่วนตัว")}
             </Link>

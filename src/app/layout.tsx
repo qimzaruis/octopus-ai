@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Sans, IBM_Plex_Sans_Thai, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { getLocale } from "@/lib/i18n/server";
@@ -32,6 +32,19 @@ const mono = JetBrains_Mono({
   variable: "--font-mono",
   display: "swap",
 });
+
+/**
+ * viewport-fit=cover จำเป็นต่อให้ env(safe-area-inset-*) มีค่าจริงบนมือถือมีรอยบาก
+ * ถ้าไม่ตั้ง ค่า inset จะเป็น 0 ตลอด → แถบปinned/composer ทับ home indicator
+ * interactiveWidgets=resizes-content ให้หน้าแชทยก composer ขึ้นตอนคีย์บอร์ดมือถือเปิด
+ */
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#0B0F1A",
+  interactiveWidget: "resizes-content",
+};
 
 export const metadata: Metadata = {
   metadataBase: siteUrl ? new URL(siteUrl) : undefined,

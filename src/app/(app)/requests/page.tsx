@@ -76,7 +76,9 @@ export default async function RequestsPage({
           />
         </form>
 
-        <div className="segmented shrink-0">
+        {/* scroll-x + max-w-full: 4 แท็บสถานะ intrinsic ~370px ซึ่งกว้างกว่าการ์ดที่ 360px
+            เดิมไม่มีทางเลื่อนได้ (segmented เป็น inline-flex) แท็บสุดท้ายจึงถูกตัดหาย */}
+        <div className="segmented scroll-x max-w-full shrink-0">
           {/* ชื่อตัวแปรต้องไม่ใช่ t เพราะชนกับฟังก์ชันแปลที่ประกาศไว้ด้านบน */}
           {STATUS_TABS.map((tab) => (
             <Link

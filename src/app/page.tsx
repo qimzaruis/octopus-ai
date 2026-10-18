@@ -277,7 +277,7 @@ export default async function LandingPage() {
       {/* ============ Developer ============ */}
       <section id="developers" className="safe-inline py-16 lg:py-24">
         <div className="mx-auto grid max-w-6xl items-start gap-10 lg:grid-cols-[0.85fr_1.15fr] lg:gap-14">
-          <Reveal className="lg:sticky lg:top-24">
+          <Reveal className="min-w-0 lg:sticky lg:top-24">
             <h2 className="font-display text-h2 font-semibold text-fg">
               {t("คุ้นเคยตั้งแต่บรรทัดแรก")}
             </h2>
@@ -301,7 +301,7 @@ export default async function LandingPage() {
             </Link>
           </Reveal>
 
-          <Reveal delay={120}>
+          <Reveal delay={120} className="min-w-0">
             <div className="rounded-xl bg-ink-900 p-5 shadow-raised ring-1 ring-white/[0.06]">
               <ApiUsageTabs />
             </div>

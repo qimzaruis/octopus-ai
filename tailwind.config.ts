@@ -13,6 +13,13 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      // ---- Breakpoint เพิ่ม xs ตาม DESIGN_SYSTEM §5 (390) ----
+      // ค่า default ของ Tailwind เริ่มที่ sm=640 ซึ่งกว้างเกินไปสำหรับ "มือถือเครื่องเล็ก"
+      // xs ใช้กับตารางสถิติ 2 คอลัมน์ที่ยังไม่พอที่ 360–390px
+      screens: {
+        xs: "390px",
+      },
+
       // ---- สี: base 3 ระดับ + แบรนด์ 1 เฉด + สถานะ ----
       colors: {
         ink: {
@@ -108,6 +115,16 @@ const config: Config = {
           from: { opacity: "0", transform: "translateY(8px) scale(0.97)" },
           to: { opacity: "1", transform: "translateY(0) scale(1)" },
         },
+        /* drawer เมนูมือถือ: เลื่อนเข้าจากขอบซ้าย (fade อย่างเดียวอ่านเป็น "ภาพกระพริบ") */
+        "drawer-in": {
+          from: { transform: "translateX(-100%)" },
+          to: { transform: "translateX(0)" },
+        },
+        /* sheet จากขอบล่าง — ใช้กับ dialog จอสัมผัส */
+        "sheet-in": {
+          from: { transform: "translateY(100%)" },
+          to: { transform: "translateY(0)" },
+        },
         /* โลโก้เลื่อนวนซ้าย: เลื่อน -50% = 1 ชุด จาก 2 ชุดในราง (ดู REPEATS ใน AgentLogoBar)
            ต้องเป็น 100/REPEATS เสมอ ถ้าเปลี่ยนจํานวนชุดต้องแก้คู่นี้พร้อมกัน
            ก้าวพอดี 1 ชุด → ชุดที่ 2 เข้ามาที่ตําแหน่งเดิมของชุดที่ 1 = วนต่อไม่มีรอยต่อ */
@@ -120,6 +137,8 @@ const config: Config = {
         "fade-up": "fade-up 500ms cubic-bezier(0.22, 1, 0.36, 1) both",
         "fade-in": "fade-in 400ms cubic-bezier(0.22, 1, 0.36, 1) both",
         "pop-in": "pop-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both",
+        "drawer-in": "drawer-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both",
+        "sheet-in": "sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1) both",
         marquee: "marquee 45s linear infinite",
       },
 

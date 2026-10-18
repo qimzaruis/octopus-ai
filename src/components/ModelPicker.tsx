@@ -91,10 +91,14 @@ export function ModelPicker({
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} aria-hidden />
+          {/* ความกว้าง 19rem (304px) ชิดขอบซ้ายที่จอ 360px แล้วหลุดขอบขวา → ตัดท้าย
+              ทั้งเครื่องหมาย ✓ ที่เลือกไว้ จึงผูก max-w กับ 100vw ไว้ด้วย
+              max-h + scroll: รายการโมเดลยาวกว่าจอไม่ได้ โดยเฉพาะตอน drop="up"
+              ที่แผงบานขึ้นจากแถบเครื่องมือซึ่งอยู่ชิดขอบล่าง */}
           <div
             role="menu"
             aria-label={t("เลือกโมเดล")}
-            className={`animate-fade-in absolute z-20 w-[19rem] rounded-lg bg-ink-850 p-1.5 shadow-floating ring-1 ring-white/[0.07] ${
+            className={`animate-fade-in absolute z-20 max-h-[min(24rem,60dvh)] w-[19rem] max-w-[calc(100vw_-_1.5rem)] overflow-y-auto rounded-lg bg-ink-850 p-1.5 shadow-floating ring-1 ring-white/[0.07] ${
               drop === "up" ? "bottom-[calc(100%+0.5rem)]" : "top-[calc(100%+0.5rem)]"
             } ${align === "right" ? "right-0" : "left-0"}`}
           >
@@ -122,7 +126,7 @@ export function ModelPicker({
                     <span className="block truncate text-caption font-medium text-fg">
                       {m.label}
                     </span>
-                    <span className="block truncate font-mono text-micro text-fg-subtle">
+                    <span className="block truncate font-mono text-label text-fg-subtle">
                       {m.id}
                     </span>
                   </span>

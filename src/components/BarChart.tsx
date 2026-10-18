@@ -103,8 +103,15 @@ export default function BarChart({
             const y = chartH - h;
             const isHover = hovered === i;
             const isLast = i === bars - 1;
+            /* onPointerDown ด้วย: จอสัมผัสไม่มี mouseenter ถ้ามีแต่ hover
+               ค่าบนกราฟจะอ่านไม่ได้เลยบนมือถือ (ช่องแสดงค่าค้างที่ "Max" ตลอด) */
             return (
-              <g key={i} onMouseEnter={() => setHovered(i)} className="cursor-pointer">
+              <g
+                key={i}
+                onMouseEnter={() => setHovered(i)}
+                onPointerDown={() => setHovered(i)}
+                className="cursor-pointer"
+              >
                 <rect x={i * step} y={0} width={step} height={svgHeight} fill="transparent" />
                 {isHover && (
                   <rect

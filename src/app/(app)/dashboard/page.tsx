@@ -247,8 +247,28 @@ export default async function DashboardPage() {
               }
             />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[620px]">
+            <>
+              {/* มือถือ: 6 คอลัมน์ = เลื่อนซ้ายขวาเพื่อดูว่า request ไหนล้ม ซึ่งไม่ใช่งานของ dashboard
+                  หน้าแรกบนจอเล็กจึงแสดงเป็นรายการ "โมเดล + เวลา / สถานะ + latency" */}
+              <ul className="divide-y divide-white/[0.07] sm:hidden">
+                {recent.items.map((r) => (
+                  <li key={r.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-body-sm font-medium text-fg">
+                        {r.publicModel || "—"}
+                      </p>
+                      <p className="tnum mt-0.5 font-mono text-caption text-fg-subtle">
+                        {formatTime(r.createdAt)} · {formatLatency(r.latencyMs)} ·{" "}
+                        {formatNumber(r.inputTokens + r.outputTokens)} tk
+                      </p>
+                    </div>
+                    <StatusBadge status={r.status} />
+                  </li>
+                ))}
+              </ul>
+
+              <div className="hidden overflow-x-auto sm:block">
+                <table className="w-full min-w-[620px]">
                 <thead>
                   <tr className="border-b border-white/[0.07]">
                     <th className="table-head">{t("เวลา")}</th>
@@ -285,7 +305,8 @@ export default async function DashboardPage() {
                   ))}
                 </tbody>
               </table>
-            </div>
+              </div>
+            </>
           )}
         </section>
       </div>

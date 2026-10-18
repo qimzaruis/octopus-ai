@@ -69,10 +69,10 @@ export default async function TermsPage() {
   ];
 
   return (
-    <div className="flex min-h-screen flex-col bg-ink-950">
+    <div className="flex min-h-dvh flex-col overflow-x-clip bg-ink-950">
       <SiteNav />
       <main className="flex-1">
-        <article className="mx-auto max-w-3xl px-6 py-14">
+        <article className="safe-inline mx-auto max-w-3xl py-10 sm:py-14">
           <Badge tone="brand">Legal</Badge>
           <h1 className="mt-5 font-display text-h1 font-semibold text-fg">
             {t("ข้อกําหนดการใช้งาน")}

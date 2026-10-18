@@ -11,7 +11,7 @@ export default async function BannedPage() {
   const t = await getT();
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-ink-950 px-6">
+    <div className="safe-inline flex min-h-dvh flex-col items-center justify-center overflow-x-clip bg-ink-950">
       <div className="w-full max-w-md text-center">
         <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-xl bg-rose-500/10 text-rose-300">
           <Icon name="fa-ban" className="text-lg" />
@@ -32,9 +32,10 @@ export default async function BannedPage() {
           <a href="/auth/signout" className="btn-secondary w-full !py-3 text-body-sm sm:w-auto">
             <Icon name="fa-arrow-right-from-bracket" className="text-label" /> {t("ออกจากระบบ")}
           </a>
+          {/* ลิงก์ต้องขีดเส้นใต้ตลอด: จอสัมผัสไม่มี hover และนี่คือทางออกเดียวของหน้าดีดออก */}
           <Link
             href="/"
-            className="text-caption text-fg-subtle underline-offset-2 hover:text-fg hover:underline"
+            className="touch-min text-caption text-fg-subtle underline underline-offset-2 transition hover:text-fg"
           >
             {t("หน้าแรก")}
           </Link>

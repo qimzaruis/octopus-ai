@@ -58,7 +58,12 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
+  /* ไฟล์ static ไม่มีข้อมูลของผู้ใช้ใคร — กันออกจาก matcher เลย
+     (เดิมมีแค่ svg|png|jpg|jpeg|gif|webp|ico|css|js ทำให้ /media/octopus_hero.mp4
+     กับ .webm ของมาสคอตหน้าแรกโดนขอ session → 307 ไป /signin
+     คนที่เปิดหน้าแรกแบบยังไม่ล็อกอินจึงเห็นฮีโร่เงียบไม่มีวิดีโอ
+     และทุก request ถูกลากไปเรียก auth.getUser() โดยไม่จำเป็น) */
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|avif|ico|css|js|mp4|webm|mov|woff|woff2|ttf|txt|xml|json)$).*)",
   ],
 };

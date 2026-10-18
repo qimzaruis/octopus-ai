@@ -60,12 +60,15 @@ export function Dialog({
       }
     };
     document.addEventListener("keydown", onKeyDown);
-    // focus เข้ากล่องเพื่อให้พิมพ์/Tab ต่อได้ทันที
+    /* จอมือถือ: อย่า autofocus ช่องกรอก — คีย์บอร์ดจะเด้งบังปุ่มกดยืนยันของ sheet ทันที
+       ให้ focus ที่ตัว panel (Escape/Tab ยังทำงาน) แล้วให้ผู้ใช้แตะช่องเอง
+       จอมีเมาส์ยังเข้าช่องให้เลยตามเดิม เพราะพิมพ์ต่อได้ทันที */
     const focusTimer = window.setTimeout(() => {
+      const coarse = window.matchMedia("(pointer: coarse)").matches;
       const firstField = panelRef.current?.querySelector<HTMLElement>(
         "input, textarea, select",
       );
-      (firstField ?? panelRef.current)?.focus();
+      (coarse ? panelRef.current : (firstField ?? panelRef.current))?.focus();
     }, 30);
 
     return () => {
@@ -98,7 +101,7 @@ export function Dialog({
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className={`animate-pop-in relative w-full ${SIZES[size]} max-h-[92vh] overflow-y-auto rounded-t-2xl bg-ink-900 shadow-floating outline-none ring-1 ring-white/[0.07] sm:rounded-xl`}
+        className={`sheet-safe-bottom animate-pop-in relative w-full ${SIZES[size]} max-h-[85dvh] overflow-y-auto rounded-t-2xl bg-ink-900 shadow-floating outline-none ring-1 ring-white/[0.07] sm:rounded-xl`}
       >
         <div className="flex items-start gap-3 border-b border-white/[0.07] px-5 py-4">
           {icon && (
@@ -118,7 +121,7 @@ export function Dialog({
             type="button"
             onClick={onClose}
             aria-label="ปิด"
-            className="-mr-1 shrink-0 rounded-md p-1.5 text-fg-subtle transition hover:bg-white/[0.06] hover:text-fg"
+            className="touch-min-icon -mr-1 shrink-0 rounded-md p-1.5 text-fg-subtle transition hover:bg-white/[0.06] hover:text-fg"
           >
             <Icon name="fa-xmark" />
           </button>
@@ -224,7 +227,7 @@ export function ConfirmActionButton({
   title,
   message,
   confirmLabel,
-  className = "btn-danger !py-1.5 !px-3 text-xs",
+  className = "btn-danger !py-1.5 !px-3 text-caption",
   icon,
   children,
   onConfirm,

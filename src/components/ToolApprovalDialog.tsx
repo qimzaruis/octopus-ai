@@ -78,7 +78,7 @@ export default function ToolApprovalDialog({
               <p className="label mt-4">
                 {t("เนื้อหาที่จะเขียน ({n} ตัวอักษร)", { n: action.content.length })}
               </p>
-              <pre className="max-h-64 overflow-auto rounded-md bg-ink-950/60 p-3 text-micro leading-relaxed text-fg-muted">
+              <pre className="max-h-64 overflow-auto rounded-md bg-ink-950/60 p-3 text-caption leading-relaxed text-fg-muted sm:text-label">
                 {action.content.slice(0, PREVIEW_CHARS)}
                 {action.content.length > PREVIEW_CHARS ? "\n…" : ""}
               </pre>
