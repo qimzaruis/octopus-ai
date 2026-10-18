@@ -33,11 +33,18 @@ export const publicPages = {
 
   // ---------- Models table ----------
   "โมเดลยอดนิยม": "Popular models",
-  "เรียงตามการใช้งานจริง 7 วันล่าสุด ของโมเดลที่เปิดใช้อยู่ตอนนี้":
-    "Ranked by real usage over the last 7 days among the models live right now",
-  "การใช้งาน 7 วันล่าสุด": "Last 7 days",
-  "ยังไม่มีโมเดลที่เปิดใช้อยู่ตอนนี้": "No models are live right now",
-  "และอีก {n} โมเดลที่เรียกได้ผ่าน API เดียว": "Plus {n} more models through the same API",
+  "โมเดลระดับ frontier ของทุกแล็บใหญ่ เรียกได้ผ่าน endpoint เดียว":
+    "Frontier models from every major lab, callable through a single endpoint",
+  "ผู้พัฒนา": "Builder",
+  "เหมาะกับ": "Best for",
+  "ให้เหตุผลและงาน agent": "Reasoning and agent work",
+  "เขียนโค้ดและวิเคราะห์ลึก": "Coding and deep analysis",
+  "เอกสารยาวและมัลติโมดัล": "Long documents and multimodal",
+  "ตอบเร็ว เกาะข้อมูลล่าสุด": "Fast answers on the latest data",
+  "สมดุลระหว่างความเร็วกับต้นทุน": "Balance of speed and cost",
+  "โอเพนเวต ปรับแต่งเองได้": "Open weights, fine-tunable",
+  "และอีกหลายสิบโมเดลทั้งของค่ายใหญ่และโอเพนเวต — เพิ่มใหม่ได้ตลอดเวลา":
+    "Plus dozens more, from big labs and open weights — add new ones anytime",
   "ทุกโมเดลที่เปิดใช้อยู่เรียกผ่าน API เดียวกัน": "Every live model is reachable through one API",
 
   // ---------- Developer section ----------
