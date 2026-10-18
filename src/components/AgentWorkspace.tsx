@@ -225,12 +225,8 @@ export default function AgentWorkspace({
   const [notes, setNotes] = useState<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  /** คำถามที่กำลังแก้: index = ตำแหน่งข้อความในห้อง, attachments = ไฟล์เดิมของมัน */
-  const [editing, setEditing] = useState<{
-    index: number;
-    value: string;
-    attachments: ChatAttachment[];
-  } | null>(null);
+  /** index ของข้อความที่กำลังแก้ — ดึงข้อความกลับมาพิมพ์ต่อในกล่องพิมพ์เลย (ไม่มี popup) */
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
   useEffect(() => {
     setFolderApi(canPickFolder());
@@ -246,6 +242,7 @@ export default function AgentWorkspace({
   }, []);
 
   const fileRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // เปลี่ยนห้องจากลิงก์ /c/<id> — React ใช้ component เดิมต่อ จึงต้อง sync state กับ props
@@ -255,6 +252,7 @@ export default function AgentWorkspace({
     if (initialModel && models.some((m) => m.id === initialModel)) setModel(initialModel);
     setInput("");
     setAttachments([]);
+    setEditingIndex(null);
     setNotice(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
@@ -619,12 +617,35 @@ export default function AgentWorkspace({
    * ข้อความผู้ใช้ถูกบันทึกครั้งเดียวในรอบแรก และบันทึกคำตอบตอนรอบสุดท้ายที่ไม่มี
    * tool_calls — รอบกลางทาง (ข้อความเครื่องมือ) เป็นของชั่วคราวในเครื่องผู้ใช้เท่านั้น
    */
-  async function send(override?: { text: string; attachments: ChatAttachment[] }) {
-    const question = (override?.text ?? input).trim();
-    const files = override?.attachments ?? attachments;
+  async function send() {
+    const question = input.trim();
+    const files = attachments;
     if (loading) return;
     if (!question && files.length === 0) return;
     if (models.length === 0) return;
+
+    setInput("");
+    setAttachments([]);
+    setNotice(null);
+
+    /**
+     * กำลังแก้ข้อความเดิมอยู่ → เล็มประวัติตั้งแต่ข้อความเป็นต้นไป ทั้งบนจอและใน DB
+     * มิฉะนั้นโมเดลจะยังเห็นคำถามเก่าที่ผู้ใช้แก้ทิ้งไปแล้ว
+     */
+    const editFrom = editingIndex;
+    setEditingIndex(null);
+    if (editFrom !== null && activeId) {
+      setMessages((prev) => prev.slice(0, editFrom));
+      try {
+        await fetch(`/api/agent/conversations/${activeId}/trim`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ from: editFrom }),
+        });
+      } catch {
+        setNotice(t("เล็มประวัติไม่สำเร็จ แต่จะส่งข้อความที่แก้ใหม่ไปแทน"));
+      }
+    }
 
     const userMsg: UiMessage = {
       id: `local-${Date.now()}`,
@@ -638,9 +659,6 @@ export default function AgentWorkspace({
       userMsg,
       { id: "streaming", role: "assistant", content: "", attachments: [] },
     ]);
-    setInput("");
-    setAttachments([]);
-    setNotice(null);
     setLoading(true);
     const collected: ToolStep[] = [];
     const notesLog: string[] = [];
@@ -762,28 +780,34 @@ export default function AgentWorkspace({
     }
   }
 
-  /**
-   * แก้คำถามล่าสุดแล้วส่งใหม่ — ต้องเล็มประวัติทั้งใน DB และบนจอ
-   * มิฉะนั้นโมเดลจะยังเห็นคำถามเก่าที่ผู้ใช้แก้ทิ้งไปแล้ว
-   */
-  async function applyEdit() {
-    if (!editing || !activeId) return;
-    const { index, value, attachments: oldFiles } = editing;
-    setEditing(null);
-    setMessages((prev) => prev.slice(0, index));
-    try {
-      await fetch(`/api/agent/conversations/${activeId}/trim`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from: index }),
-      });
-    } catch {
-      setNotice(t("เล็มประวัติไม่สำเร็จ แต่จะส่งข้อความที่แก้ใหม่ไปแทน"));
-    }
-    await send({ text: value, attachments: oldFiles });
+  /** ดึงข้อความกลับมาพิมพ์ต่อในกล่องพิมพ์ — ส่งแล้วถึงเล็มประวัติ (ดู send) */
+  function startEdit(m: UiMessage, index: number) {
+    if (loading) return;
+    setEditingIndex(index);
+    setInput(m.content);
+    setAttachments(m.attachments);
+    setNotice(null);
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+      el.scrollTop = el.scrollHeight;
+    });
+  }
+
+  function cancelEdit() {
+    setEditingIndex(null);
+    setInput("");
+    setAttachments([]);
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Escape" && editingIndex !== null) {
+      e.preventDefault();
+      cancelEdit();
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (!loading) send();
@@ -1103,7 +1127,7 @@ export default function AgentWorkspace({
                     {isLastUser && !loading && (
                       <button
                         type="button"
-                        onClick={() => setEditing({ index: mi, value: m.content, attachments: m.attachments })}
+                        onClick={() => startEdit(m, mi)}
                         title={t("แก้ข้อความนี้แล้วส่งใหม่")}
                         aria-label={t("แก้ข้อความนี้แล้วส่งใหม่")}
                         className="inline-flex h-7 w-7 items-center justify-center rounded-md text-micro text-fg-subtle transition hover:bg-white/[0.07] hover:text-fg"
@@ -1163,18 +1187,40 @@ export default function AgentWorkspace({
                 </span>
               </div>
             )}
+            {editingIndex !== null && (
+              <div className="mb-1 flex items-center gap-2 rounded-lg bg-brand-500/10 px-2.5 py-1.5 text-label text-brand-200">
+                <Icon name="fa-pen" className="shrink-0 text-micro" />
+                <span className="min-w-0 flex-1 truncate">
+                  {t("กำลังแก้ข้อความนี้ — กดส่งเพื่อถามใหม่ คำตอบหลังจากนี้จะถูกลบ")}
+                </span>
+                <button
+                  type="button"
+                  onClick={cancelEdit}
+                  title={t("ยกเลิกการแก้")}
+                  aria-label={t("ยกเลิกการแก้")}
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-brand-200 transition hover:bg-white/[0.10] hover:text-fg"
+                >
+                  <Icon name="fa-xmark" className="text-micro" />
+                </button>
+              </div>
+            )}
             <label className="sr-only" htmlFor="agent-input">
               {t("พิมพ์ข้อความ")}
             </label>
             <textarea
               id="agent-input"
+              ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKeyDown}
               rows={2}
               disabled={models.length === 0}
               placeholder={
-                models.length === 0 ? t("ยังไม่มีโมเดลที่เปิดให้ใช้") : t("ถามได้เลย")
+                models.length === 0
+                  ? t("ยังไม่มีโมเดลที่เปิดให้ใช้")
+                  : editingIndex !== null
+                    ? t("แก้ข้อความแล้วกดส่ง")
+                    : t("ถามได้เลย")
               }
               className="block max-h-44 min-h-[3.25rem] w-full resize-none break-words bg-transparent px-2.5 py-2 text-body-sm leading-relaxed text-fg outline-none [overflow-wrap:anywhere] placeholder:text-fg-subtle focus-visible:ring-0 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-50"
             />
@@ -1401,41 +1447,6 @@ export default function AgentWorkspace({
           placeholder={t("ชื่อแชท")}
           aria-label={t("ชื่อแชท")}
           className="input"
-        />
-      </Dialog>
-
-      {/* แก้คำถามล่าสุดแล้วส่งใหม่ — ประวัติหลังข้อความนี้ถูกลบทั้งบนจอและในฐานข้อมูล */}
-      <Dialog
-        open={Boolean(editing)}
-        onClose={() => setEditing(null)}
-        title={t("แก้ข้อความนี้")}
-        description={t("คำตอบหลังจากข้อความนี้จะถูกลบออกจากประวัติแล้วถามใหม่")}
-        icon="fa-pen"
-        size="md"
-        footer={
-          <>
-            <button type="button" className="btn-quiet" onClick={() => setEditing(null)}>
-              {t("ยกเลิก")}
-            </button>
-            <button
-              type="button"
-              className="btn-primary"
-              disabled={!editing?.value.trim()}
-              onClick={applyEdit}
-            >
-              {t("ส่งใหม่")}
-            </button>
-          </>
-        }
-      >
-        <textarea
-          value={editing?.value ?? ""}
-          onChange={(e) =>
-            setEditing((prev) => (prev ? { ...prev, value: e.target.value } : prev))
-          }
-          rows={5}
-          aria-label={t("แก้ข้อความ")}
-          className="input resize-y leading-relaxed"
         />
       </Dialog>
 

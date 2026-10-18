@@ -124,8 +124,10 @@ export const appPages = {
   "แก้ข้อความนี้แล้วส่งใหม่": "Edit and resend this message",
   "แก้ข้อความนี้": "Edit this message",
   "แก้ข้อความ": "Edited message",
-  "คำตอบหลังจากข้อความนี้จะถูกลบออกจากประวัติแล้วถามใหม่":
-    "The answers after this message will be removed and the question asked again",
+  "กำลังแก้ข้อความนี้ — กดส่งเพื่อถามใหม่ คำตอบหลังจากนี้จะถูกลบ":
+    "Editing this message — press send to ask again, later answers will be removed",
+  "ยกเลิกการแก้": "Cancel editing",
+  "แก้ข้อความแล้วกดส่ง": "Edit then press send",
   "ส่งใหม่": "Resend",
   "เล็มประวัติไม่สำเร็จ แต่จะส่งข้อความที่แก้ใหม่ไปแทน":
     "Could not trim the history, but the edited message will still be sent",
