@@ -309,8 +309,8 @@ export const adminPages = {
     "Define what counts as “quota exhausted” for each provider. The key is paused until its reset time, then the next healthy key of the same provider is used automatically",
   "ตั้งแล้ว {a} จาก {b} ค่าย": "{a} of {b} providers configured",
   "{n} คีย์กำลังติดลิมิต": "{n} keys are quota-limited",
-  "ลิมิตของแต่ละค่ายไม่เหมือนกัน Tenixe ตอบ HTTP 402 พร้อม code insufficient_quota เมื่อเครดิตหมดและรีเซตทุกวัน 13:00 เวลาไทย ส่วนค่ายอื่นมักใช้ 429 จึงกรอกเงื่อนไขจับเองได้ (HTTP status / error code / คำในข้อความ) ถ้าช่องไหนว่างจะถือว่าไม่ใช้ช่องนั้น":
-    "Limits differ per provider. Tenixe replies HTTP 402 with code insufficient_quota when credits run out and resets daily at 13:00 Thailand time, while others usually use 429 — so set the match rules yourself (HTTP status / error code / message text). An empty field is not used.",
+  "ลิมิตของแต่ละค่ายไม่เหมือนกัน บางค่ายตอบ HTTP 402 พร้อม code insufficient_quota เมื่อเครดิตหมดและรีเซตเป็นเวลาประจำทุกวัน ส่วนค่ายอื่นมักใช้ 429 จึงกรอกเงื่อนไขจับเองได้ (HTTP status / error code / คำในข้อความ) ถ้าช่องไหนว่างจะถือว่าไม่ใช้ช่องนั้น":
+    "Limits differ per provider. Some reply HTTP 402 with code insufficient_quota when credits run out and reset at a fixed time each day, while others usually use 429 — so set the match rules yourself (HTTP status / error code / message text). An empty field is not used.",
   "เพิ่ม provider ในหน้า Providers ก่อน แล้วกลับมาตั้งกติกาการหมุนคีย์ที่นี่":
     "Add a provider on the Providers page first, then come back here to set its key rules",
   "ยังไม่ได้ตั้ง": "Not configured",

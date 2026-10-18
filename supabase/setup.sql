@@ -227,7 +227,7 @@ SET "display_name" = initcap(replace("public_model", '-', ' '))
 WHERE "display_name" = '';
 
 -- ---------- กติกา "คีย์ติดลิมิต" ต่อ provider (migration 0005) ----------
--- คีย์ที่โควต้าของค่ายหมด (เช่น Tenixe ตอบ 402 insufficient_quota) พักถึงเวลารีเซตของค่าย
+-- คีย์ที่โควต้าของค่ายหมด (บางค่ายตอบ 402 insufficient_quota) พักถึงเวลารีเซตของค่าย
 ALTER TABLE "provider_keys" ADD COLUMN IF NOT EXISTS "limit_until" timestamp with time zone;
 ALTER TABLE "provider_keys" ADD COLUMN IF NOT EXISTS "limit_reason" text DEFAULT '' NOT NULL;
 ALTER TABLE "provider_keys" ADD COLUMN IF NOT EXISTS "last_limited_at" timestamp with time zone;
@@ -252,7 +252,6 @@ INSERT INTO "provider_key_limits"
 SELECT p."id", true, '{402}', '{insufficient_quota}',
        '{"quota exceeded","enable overusage","upgrade your plan"}', '13:00', 'Asia/Bangkok'
 FROM "providers" p
-WHERE lower(p."name") LIKE '%tenixe%' OR lower(p."base_url") LIKE '%tenixe%'
 ON CONFLICT ("provider_id") DO NOTHING;
 
 -- ---------- ตรวจผล ----------

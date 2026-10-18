@@ -4,6 +4,7 @@ import { isDemoMode } from "@/lib/config";
 import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
 import { demoSource } from "@/lib/demo/store";
 import { bangkokDay, ensureUptimeColumns } from "@/lib/gateway";
+import { internalIdentities, maskInternals } from "@/lib/public-text";
 
 /** Timezone ที่ใช้ bucket ข้อมูลกราฟ */
 const APP_TZ = "Asia/Bangkok";
@@ -43,9 +44,15 @@ export type Overview = {
   costUsd: number;
 };
 
+/**
+ * ประวัติ request ที่ผู้ใช้เปิดดูได้ (หน้า /requests, /dashboard)
+ *
+ * ไม่มีคอลัมน์ `model` ของตาราง requests เพราะคอลัมน์นั้นเก็บ id ปลายทางจริงที่
+ * บอกรหัสของค่ายต้นทาง — ส่งให้ client เมื่อไรรวมถึง payload ของ RSC คือหลุดทันที
+ * ผู้ใช้จึงเห็นเฉพาะ `publicModel` (route ที่ตัวเองเรียก) เท่านั้น
+ */
 export type RequestDTO = {
   id: number;
-  model: string;
   publicModel: string;
   agent: string;
   status: string;
@@ -466,9 +473,8 @@ async function listRequestsReal(
   if (scope !== "all") conds.push(sql`user_id = ${scope}`);
   if (filter.q) {
     const like = `%${filter.q.toLowerCase()}%`;
-    conds.push(
-      sql`(lower(model) like ${like} or lower(agent) like ${like} or lower(public_model) like ${like})`,
-    );
+    // ไม่ค้นหาในคอลัมน์ model — เป็น id ปลายทางจริงที่ผู้ใช้ค้นเดาเพื่อ "ถาม" ระบบว่าคืออะไรได้
+    conds.push(sql`(lower(public_model) like ${like} or lower(agent) like ${like})`);
   }
   if (filter.status && filter.status !== "all") {
     conds.push(sql`status = ${filter.status}`);
@@ -477,18 +483,19 @@ async function listRequestsReal(
 
   const countRows = await rawRows(sql`select count(*)::int as c from requests where ${where}`);
   const rows = await rawRows(sql`
-    select id, model, public_model, agent, status, http_status,
+    select id, public_model, agent, status, http_status,
       input_tokens, output_tokens, latency_ms, cost_usd, error, created_at
     from requests
     where ${where}
     order by created_at desc
     limit ${perPage} offset ${(page - 1) * perPage}
   `);
+  // แถวเก่าที่เก็บก่อนมีกติกานียังมีชื่อค่ายค้างอยู่ในคอลัมน์ error — ล้างตอนอ่านด้วย
+  const ids = await internalIdentities();
 
   return {
     items: rows.map((r) => ({
       id: num(r.id),
-      model: String(r.model),
       publicModel: String(r.public_model ?? ""),
       agent: String(r.agent ?? ""),
       status: String(r.status),
@@ -497,7 +504,7 @@ async function listRequestsReal(
       outputTokens: num(r.output_tokens),
       latencyMs: num(r.latency_ms),
       costUsd: num(r.cost_usd),
-      error: r.error ? String(r.error) : null,
+      error: r.error ? maskInternals(String(r.error), ids) : null,
       createdAt: new Date(r.created_at as string).toISOString(),
     })),
     total: num(countRows[0]?.c),
@@ -515,9 +522,7 @@ function listRequestsDemo(
   if (filter.q) {
     const q = filter.q.toLowerCase();
     list = list.filter((r) =>
-      [r.model, r.agent, r.publicModel].some((v) =>
-        v.toLowerCase().includes(q),
-      ),
+      [r.agent, r.publicModel].some((v) => v.toLowerCase().includes(q)),
     );
   }
   if (filter.status && filter.status !== "all") {
@@ -531,7 +536,6 @@ function listRequestsDemo(
 
 export function toRequestDTO(r: {
   id: number;
-  model: string;
   publicModel: string;
   agent: string;
   status: string;
@@ -545,7 +549,6 @@ export function toRequestDTO(r: {
 }): RequestDTO {
   return {
     id: r.id,
-    model: r.model,
     publicModel: r.publicModel,
     agent: r.agent,
     status: r.status,

@@ -224,7 +224,7 @@ npm run start        # Node 20+ ; เปลี่ยนพอร์ตผ่า�
 
 **5) ตรวจหลัง deploy**
 - กด **เข้าสู่ระบบด้วย Google** จากโดเมนจริง → ต้องกลับมาที่ `https://<โดเมน>/dashboard`
-- บัญชี role `admin` → เข้า `/admin` แล้วเปิดเมนู **จำกัดคีย์** ต้องเห็น Tenixe พร้อมกฎ 402
+- บัญชี role `admin` → เข้า `/admin` แล้วเปิดเมนู **จำกัดคีย์** ต้องเห็นทุก provider พร้อมกฎ 402
 - `POST https://<โดเมน>/v1/chat/completions` ด้วย API key ผู้ใช้ → ต้องได้คำตอบและเห็นแถวใน `/requests`
 
 ## 📜 Scripts

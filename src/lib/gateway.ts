@@ -28,6 +28,7 @@ import { cached, invalidateCache } from "@/lib/catalog-cache";
 import { getDemoStore } from "@/lib/demo/store";
 import { isKeyLimited, orderedKeys, type RotatableKey } from "@/lib/rotation";
 import { keyLimitRule, matchKeyLimit, nextResetAt } from "@/lib/key-limit";
+import { internalIdentities, maskInternals, type InternalIdentities } from "@/lib/public-text";
 import { markKeyLimited, recordKeyResult } from "@/lib/data/admin";
 
 /** การเรียกเครื่องมือที่โมเดลขอ (OpenAI function calling) */
@@ -248,19 +249,22 @@ function joinUrl(baseUrl: string, path: string): string {
 const MAX_KEYS_PER_TARGET = 4;
 
 /**
- * ปิดบังข้อมูลภายในก่อนเก็บลงตาราง requests ซึ่งผู้ใช้เปิดดูได้ที่หน้า /requests
- *
- * ชื่อค่ายต้นทางอาจหลุดมากับข้อความ error ดิบที่ค่ายตอบกลับ หรือ url ของค่าย
- * ที่โผล่ใน error ของ fetch จึงลบออกทั้งชื่อ (ไม่สนตัวพิมพ์) และทั้งที่อยู่
+ * ข้อมูลภายในของชุดปลายทางหนึ่งroute (ชื่อค่าย + host + id ปลายทาง)
+ * ใช้ล้างข้อความก่อนถึงตาผู้ใช้ — อ่านจาก target ที่ resolve ไว้แล้ว ไม่ต้อง query ใหม่
  */
-function maskInternals(text: string, names: string[]): string {
-  let out = text.replace(/https?:\/\/\S+/g, "[url]");
-  for (const name of names) {
-    const clean = name.trim();
-    if (clean.length < 3) continue;
-    out = out.replace(new RegExp(clean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "[ค่าย]");
+function internalOf(targets: GatewayTarget[]): InternalIdentities {
+  const brands: string[] = [];
+  const tgt: string[] = [];
+  for (const t of targets) {
+    brands.push(t.providerName);
+    try {
+      brands.push(new URL(t.baseUrl).host);
+    } catch {
+      /* baseUrl ยังไม่ถูกตั้ง — ไม่มี host ให้ปิด */
+    }
+    tgt.push(t.modelId);
   }
-  return out;
+  return { brands, targets: tgt };
 }
 
 /**
@@ -290,7 +294,7 @@ export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> 
   /** เจอ error แบบอื่นที่ไม่ใช่ลิมิต — ถ้ามี แสดงว่า 429 ไม่ใช่คำตอบที่ตรง */
   let sawOtherFailure = false;
   /** ชื่อค่ายทั้งหมดของ route นี้ ใช้ปิดบังก่อนเก็บ error ลงตาราง requests */
-  const internalNames = all.map((t) => t.providerName);
+  const ids = internalOf(all);
 
   for (const target of targets) {
     const keys = await keysOf(target.providerId);
@@ -343,10 +347,7 @@ export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> 
       } catch (err) {
         sawOtherFailure = true;
         console.error(`[gateway] ${target.providerName} (${picked.label}) เรียกไม่สําเร็จ:`, err);
-        lastError = maskInternals(
-          `เครือข่ายของโมเดลปลายทาง: ${(err as Error).message}`,
-          internalNames,
-        );
+        lastError = "โมเดลปลายทางเชื่อมต่อไม่ได้";
         await markKey(picked.id, false);
         invalidateCache("keys:"); // ห้ามเลือกคีย์ที่เพิ่งพังกลับมาใช้ซ้ำจากแคชเก่า
         break; // เครือข่ายล่ม — ลองคีย์อื่นก็น่าจะพังเหมือนกัน ไปปลายทางถัดไป
@@ -370,7 +371,7 @@ export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> 
           sawLimit = true;
           lastError = maskInternals(
             `โควต้าของโมเดลปลายทางครบแล้ว (${reason}) จะกลับมาใช้อีกที ${until.toISOString()}`,
-            internalNames,
+            ids,
           );
           await markLimited(picked.id, until, reason);
           invalidateCache("keys:");
@@ -379,10 +380,8 @@ export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> 
       }
 
       sawOtherFailure = true;
-      lastError = maskInternals(
-        `โมเดลปลายทางตอบกลับ ${res.status}: ${detail.slice(0, 200)}`,
-        internalNames,
-      );
+      // เก็บแค่สถานะ — เนื้อหา error ดิบของค่ายถูก print ไว้ที่ log เซิร์ฟเวอร์อย่างเดียว
+      lastError = `โมเดลปลายทางตอบกลับ ${res.status}`;
       await markKey(picked.id, res.status !== 400 && res.status !== 404);
       invalidateCache("keys:");
       break; // โมเดลไม่มีอยู่จริง / 5xx — เปลี่ยนปลายทางดีกว่าเปลี่ยนคีย์
@@ -573,40 +572,11 @@ async function bumpModelUptime(input: LogInput): Promise<void> {
   }
 }
 
-/**
- * ชื่อ + host ของค่ายต้นทางทุกตัวที่ระบบรู้จัก
- *
- * ใช้ปิดบงข้อความ error ก่อนเขียนลงตาราง requests ซึ่งผู้ใช้เปิดดูได้ที่หน้า /requests
- * (คอลัมน์ model/provider_name ยังเก็บของจริงไว้สำหรับแอดมิน แต่ข้อความต้องไม่มีชื่อค่าย)
- */
-async function internalIdentities(): Promise<string[]> {
-  try {
-    return await cached("identities", CATALOG_TTL_MS, async () => {
-      if (isDemoMode) {
-        return getDemoStore()
-          .providers.flatMap((p) => [p.name, hostOf(p.baseUrl)]);
-      }
-      const rows = await getDb()
-        .select({ name: providers.name, baseUrl: providers.baseUrl })
-        .from(providers);
-      return rows.flatMap((r) => [r.name, hostOf(r.baseUrl)]);
-    });
-  } catch {
-    return [];
-  }
-}
-
-function hostOf(baseUrl: string): string {
-  try {
-    return new URL(baseUrl).host;
-  } catch {
-    return "";
-  }
-}
-
 /** เขียน request ลงฐานข้อมูล — ล้มเหลวได้แต่ห้ามทำให้ request ของลูกค้าพังตาม */
 export async function logRequest(input: LogInput): Promise<void> {
   const costUsd = costOf(input.target, input.usage);
+  // คอลัมน์ model/provider_name เก็บของจริงไว้ให้แอดมิน (อ่านจากหน้า /admin เท่านั้น)
+  // ส่วนคอลัมน์ error ผู้ใช้อ่านได้ที่หน้า /requests จึงล้างด้วยรายชื่อค่ายทั้งระบบ ไม่ใช่แค่ route นี้
   const error = input.error ? maskInternals(input.error, await internalIdentities()) : null;
   const row = {
     userId: input.userId,

@@ -2,7 +2,7 @@
  * Key limit — จับสัญญาณ "คีย์นี้โควต้าหมด" ตามกติกาของแต่ละ provider
  *
  * เหตุผลที่ไม่ hardcode ใน gateway: ลิมิตของโควต้าหน้าตาไม่เหมือนกันตามค่าย
- * Tenixe ตอบ HTTP 402 + code `insufficient_quota` ("Quota exceeded. Enable
+ * บางค่ายตอบ HTTP 402 + code `insufficient_quota` ("Quota exceeded. Enable
  * overusage or upgrade your plan to continue.") เมื่อเครดิตหมดและรีเซตทุกวัน
  * 13:00 เวลาไทย ส่วนค่ายอื่นมักใช้ 429 พร้อมรอบรีเซตคนละแบบ กติกาจึงเก็บเป็น
  * ข้อมูลต่อ provider (ตาราง provider_key_limits) แก้ได้จาก /admin/key-limits

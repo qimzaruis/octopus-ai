@@ -81,7 +81,7 @@ export default async function AdminKeyLimitsPage({
         <p className="flex items-start gap-2.5 text-xs leading-relaxed text-fg-muted">
           <Icon name="fa-circle-info" className="mt-0.5 shrink-0 text-brand-300" />
           {t(
-            "ลิมิตของแต่ละค่ายไม่เหมือนกัน Tenixe ตอบ HTTP 402 พร้อม code insufficient_quota เมื่อเครดิตหมดและรีเซตทุกวัน 13:00 เวลาไทย ส่วนค่ายอื่นมักใช้ 429 จึงกรอกเงื่อนไขจับเองได้ (HTTP status / error code / คำในข้อความ) ถ้าช่องไหนว่างจะถือว่าไม่ใช้ช่องนั้น",
+            "ลิมิตของแต่ละค่ายไม่เหมือนกัน บางค่ายตอบ HTTP 402 พร้อม code insufficient_quota เมื่อเครดิตหมดและรีเซตเป็นเวลาประจำทุกวัน ส่วนค่ายอื่นมักใช้ 429 จึงกรอกเงื่อนไขจับเองได้ (HTTP status / error code / คำในข้อความ) ถ้าช่องไหนว่างจะถือว่าไม่ใช้ช่องนั้น",
           )}
         </p>
       </div>

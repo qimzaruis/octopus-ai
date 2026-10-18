@@ -240,6 +240,13 @@ const UNKNOWN_TARGET = {
   contextWindow: 0,
 } satisfies GatewayTarget;
 
+/**
+ * ข้อความที่บันทึกแทน error ในประวัติแชทของผู้ใช้ — ห้ามเอาข้อความดิบมาเก็บ
+ * เพราะมันพาค่ายที่ระบบส่งต่อออกไปกับผู้ใช้อ่านได้
+ */
+const GENERIC_STREAM_ERROR =
+  "เกิดข้อผิดพลาดระหว่างการเชื่อมต่อ โมเดลตอบกลับมาไม่ครบ กรุณาส่งข้อความเป็นรอบใหม่";
+
 export async function POST(req: NextRequest) {
   // อ่าน session (ไป Supabase) พร้อมกับการ parse body — ไม่ต้องรอต่อกัน
   const [user, parsed] = await Promise.all([
@@ -445,6 +452,7 @@ export async function POST(req: NextRequest) {
         }
       } catch (err) {
         failed = (err as Error).message;
+        console.error(`[agent-chat] อ่าน stream ไม่สำเร็จ (${target.providerName}):`, err);
       }
 
       const answer = acc.text();
@@ -473,7 +481,9 @@ export async function POST(req: NextRequest) {
         await saveAssistantMessage(
           user.id,
           conversationId,
-          answer || (failed ? `เกิดข้อผิดพลาด: ${failed}` : ""),
+          // ข้อความ error ดิบของค่าย/ของ bundler ห้ามถูกบันทึกค้างในประวัติแชทของผู้ใช้
+          // เก็บไว้แค่ข้อความกลาง ๆ ส่วนรายละเอียดเต็มไปอยู่ใน log เซิร์ฟเวอร์กับตาราง requests
+          answer || (failed ? GENERIC_STREAM_ERROR : ""),
           conversation.title,
         );
       } finally {

@@ -268,7 +268,7 @@ export default async function DashboardPage() {
                       <td className="table-cell">
                         {/* แสดงเฉพาะ route ที่ผู้ใช้เรียก — ไม่เปิดเผยโมเดล/ค่ายปลายทาง */}
                         <span className="font-mono text-caption font-medium text-fg">
-                          {r.publicModel || r.model}
+                          {r.publicModel || "—"}
                         </span>
                       </td>
                       <td className="table-cell text-fg-muted">{r.agent}</td>

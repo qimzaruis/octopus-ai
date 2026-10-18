@@ -8,6 +8,7 @@ import { getPlan, cycleStart, dayStart, computeQuota, type QuotaUsage } from "@/
 import { getUsage, type UsageBucket } from "@/lib/data/usage";
 import { modelPlanRequirements } from "@/lib/data/plans";
 import { cached } from "@/lib/catalog-cache";
+import { brandNames } from "@/lib/public-text";
 
 /** อายุแคชของข้อมูล catalog (route/ปลายทาง/แผน) — ล้างทันทีที่แอดมินบันทึก */
 const CATALOG_TTL_MS = 60_000;
@@ -141,7 +142,7 @@ if (!isDemoMode && process.env.DATABASE_URL) {
 /**
  * ชื่อปลายทางที่จะแสดงต่อผู้ใช้
  *
- * displayName/modelId ที่แอดมินกรอกอาจมียี่ห้อค่ายต้นทางปนอยู่ (เช่น "GPT-5 (Tenixe)"
+ * displayName/modelId ที่แอดมินกรอกอาจมียี่ห้อค่ายต้นทางปนอยู่ (เช่น "GPT-5 (ชื่อยี่ห้อค่าย)"
  * หรือ "xai/grok-4.5") ซึ่งเราไม่เปิดเผยเด็ดขาด จึงตัดชื่อค่ายและ namespace หน้า
  * สlash ออกก่อน แล้วเก็บเฉพาะตระกูลโมเดลที่เหลือ
  */
@@ -168,7 +169,7 @@ async function loadPublicRoutes(): Promise<PublicRouteDTO[]> {
 
   if (isDemoMode || isDbUnavailable()) {
     const store = demoSource();
-    const names = store.providers.map((p) => p.name);
+    const names = brandNames(store.providers);
     return store.routes
       .filter((r) => r.enabled)
       .map((r) => {
@@ -205,7 +206,7 @@ async function loadPublicRoutes(): Promise<PublicRouteDTO[]> {
       db.select().from(models),
       db.select().from(providers),
     ]);
-    const names = providerRows.map((p) => p.name);
+    const names = brandNames(providerRows);
 
     return routeRows.map((r) => {
       const targets = targetRows
