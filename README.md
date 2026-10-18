@@ -85,8 +85,18 @@ npm run dev
 2. สร้าง OAuth Client ที่ [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
    - Authorized redirect URI: `https://<project-ref>.supabase.co/auth/v1/callback`
 3. นำ Client ID / Client Secret มาใส่ในหน้า provider ของ Supabase
-4. ที่ **Authentication → URL Configuration** ตั้ง Site URL เป็น `http://localhost:3000`
-   (และเพิ่ม `http://localhost:3000/auth/callback` ใน Redirect URLs)
+4. ที่ **Authentication → URL Configuration** ตั้ง **Site URL** และ **Redirect URLs**
+   ให้ตรงกับโดเมนที่จะใช้งานจริง มิฉะนั้น login ด้วย Google เสร็จแล้ว Supabase จะ
+   เด้งกลับไป Site URL (เช่นกลับไป `localhost:3000` ทั้งที่เปิดจากโดเมนจริง)
+
+   | สภาพแวดล้อม | Site URL | Additional Redirect URLs |
+   | --- | --- | --- |
+   | dev ในเครื่อง | `http://localhost:3000` | `http://localhost:3000/**` |
+   | production | `https://octopus-ai.flashhub.net` | `https://octopus-ai.flashhub.net/**` |
+
+   ตั้งได้ทั้งสองค่าพร้อมกัน (ใส่ `http://localhost:3000/**` ไว้ในรายการ redirect ด้วย
+   แอปส่ง `redirectTo` เป็น origin ของหน้าที่เปิดอยู่
+   ดังนั้นโดเมนที่ไม่อยู่ในรายการนี้จะถูกดีดกลับไป Site URL
 
 ### 3) ต่อฐานข้อมูล
 Copy **Connection string (URI)** จาก Project Settings → Database (แนะนำแบบ pooler port 6543)
@@ -173,6 +183,49 @@ supabase/migrations/              # SQL migration จาก drizzle-kit
 | `/auth/signout` | ออกจากระบบ |
 | `/dashboard`, `/requests`, `/keys`, `/credits` | พื้นที่ผู้ใช้ (ต้องล็อกอิน) |
 | `/admin`, `/admin/providers`, `/admin/routes` | พื้นที่แอดมิน (เฉพาะ role `admin`) |
+
+## 🚀 Deploy ขึ้น Production
+
+**1) ตัวแปรแวดล้อมบน host** — ต้องครบ ไม่งั้น `src/lib/config.ts` จะตีความเป็น Demo mode
+
+| ตัวแปร | ค่าบนเว็บจริง |
+| --- | --- |
+| `APP_ENV` | `production` |
+| `DEMO_MODE` | `0` |
+| `NEXT_PUBLIC_APP_URL` | `https://octopus-ai.flashhub.net` |
+| `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` | จาก Project Settings → API |
+| `DATABASE_URL` | connection string แบบ pooler (port 6543) |
+| `SUPABASE_SERVICE_ROLE_KEY` | ใช้ฝั่ง server เท่านั้น (seed / อ่าน quota) |
+
+- `NEXT_PUBLIC_*` ถูก bake ตอน build — แก้ค่าแล้วต้อง **build ใหม่** ไม่ใช่แค่ restart
+- ถ้าลืมตั้ง `NEXT_PUBLIC_APP_URL` โค้ดจะใช้โดเมน production เป็นค่าเริ่มต้น
+  (`PRODUCTION_SITE_URL` ใน `src/lib/config.ts`) เพื่อไม่ให้หน้าเว็บโชว์ `localhost:3000`
+
+**2) Supabase → Authentication → URL Configuration** (นี่คือต้นเหตุที่ login เสร็จแล้วเด้งกลับ localhost)
+- **Site URL** = `https://octopus-ai.flashhub.net`
+- **Additional Redirect URLs** = เพิ่ม `https://octopus-ai.flashhub.net/**`
+  (ใส่ `http://localhost:3000/**` ไว้ด้วยถ้ายังพัฒนาในเครื่องต่อ)
+
+แอปส่ง `redirectTo` เป็น origin ของหน้าที่เปิดอยู่จริง ([src/components/LoginForm.tsx](src/components/LoginForm.tsx))
+โดเมนที่ไม่อยู่ในรายการนี้จะถูก Supabase ดีดกลับไป Site URL ทันที
+
+**3) Schema** — วาง `supabase/setup.sql` ใน Supabase SQL Editor (idempotent) หรือรัน
+migration ใน `supabase/migrations/` ตามลําดับ แล้วตรวจว่าตาราง `provider_key_limits` มีอยู่
+
+**4) Build & run**
+
+```bash
+npm ci
+npm run build
+npm run start        # Node 20+ ; เปลี่ยนพอร์ตผ่าน env PORT
+```
+
+บน Vercel: Framework Preset = Next.js, ใส่ env ให้ครบแล้ว Deploy (แพลตฟอร์ม build ให้)
+
+**5) ตรวจหลัง deploy**
+- กด **เข้าสู่ระบบด้วย Google** จากโดเมนจริง → ต้องกลับมาที่ `https://<โดเมน>/dashboard`
+- บัญชี role `admin` → เข้า `/admin` แล้วเปิดเมนู **จำกัดคีย์** ต้องเห็น Tenixe พร้อมกฎ 402
+- `POST https://<โดเมน>/v1/chat/completions` ด้วย API key ผู้ใช้ → ต้องได้คำตอบและเห็นแถวใน `/requests`
 
 ## 📜 Scripts
 

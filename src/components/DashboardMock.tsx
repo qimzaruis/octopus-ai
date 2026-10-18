@@ -25,7 +25,7 @@ export default function DashboardMock() {
           <span className="h-2.5 w-2.5 rounded-full bg-amber-glow/50" />
           <span className="h-2.5 w-2.5 rounded-full bg-leaf/50" />
           <span className="ml-3 hidden font-mono text-label text-fg-subtle sm:block">
-            {siteHost("localhost:3000")}/dashboard
+            {siteHost()}/dashboard
           </span>
           <Badge tone="leaf" dot className="ml-auto !py-0.5 !text-micro">
             live

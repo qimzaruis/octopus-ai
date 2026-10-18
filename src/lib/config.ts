@@ -65,14 +65,23 @@ export const isDemoMode = (() => {
   return !(supabaseConfigured && databaseConfigured);
 })();
 
-const rawSiteUrl = (process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL ?? "").trim();
+/**
+ * โดเมนที่ deploy จริง — ใช้เมื่อ host ไม่ได้ตั้ง NEXT_PUBLIC_APP_URL
+ *
+ * ถ้าไม่มีค่า fallback นี้ metadata/OG จะไม่มี URL และ mockup ในหน้า landing จะ
+ * แสดง "localhost:3000" ของเครื่อง dev ออกไปบนเว็บจริง
+ */
+const PRODUCTION_SITE_URL = "https://octopus-ai.flashhub.net";
+
+const rawSiteUrl =
+  (process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL ?? "").trim() || PRODUCTION_SITE_URL;
 
 /**
  * URL ของเว็บนี้แบบไม่มี slash ท้าย (เช่น https://octopus-ai.flashhub.net)
  *
  * ใช้แทนการ hardcode ชื่อโดเมนใน system prompt ของเอเจนต์, ตัวอย่างโค้ดเรียก API
  * และ metadata ของหน้า — ตั้งผ่าน NEXT_PUBLIC_APP_URL (อ่านได้จากทั้งฝั่ง server และ client)
- * คืนค่าว่างถ้ายังไม่ตั้ง เพื่อให้ caller ไปใช้ origin ของเบราว์เซอร์แทน
+ * ถ้าไม่ตั้ง ใช้โดเมนที่ deploy จริง (PRODUCTION_SITE_URL) แทนที่จะปล่อยว่าง
  */
 export const siteUrl = rawSiteUrl.replace(/\/+$/, "");
 
