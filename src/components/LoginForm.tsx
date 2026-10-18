@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { supabaseConfigured } from "@/lib/config";
+import { siteUrl, supabaseConfigured } from "@/lib/config";
 import { useT } from "@/lib/i18n/client";
 import Icon from "@/components/Icon";
 
@@ -29,12 +29,19 @@ export default function LoginForm({
     if (!accepted) return;
     setLoading("google");
     setError(null);
+    // Supabase จะใช้ `redirectTo` เฉพาะ origin ที่อยู่ใน Redirect URLs เท่านั้น
+    // นอกนั้นมันดีดกลับ Site URL (เช่น http://localhost:3000) — จึงยึดโดเมนจริงที่
+    // ตั้งไว้เป็นฐาน เว้นแต่กำลังเปิดจากเครื่อง dev ให้ใช้ origin ปัจจุบัน
+    const fromDevMachine = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(
+      window.location.origin,
+    );
+    const authOrigin = !fromDevMachine && siteUrl ? siteUrl : window.location.origin;
     try {
       const supabase = createClient();
       const { error: err } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`,
+          redirectTo: `${authOrigin}/auth/callback?next=${encodeURIComponent(nextPath)}`,
         },
       });
       if (err) {

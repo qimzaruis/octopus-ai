@@ -92,7 +92,7 @@ npm run dev
    | สภาพแวดล้อม | Site URL | Additional Redirect URLs |
    | --- | --- | --- |
    | dev ในเครื่อง | `http://localhost:3000` | `http://localhost:3000/**` |
-   | production | `https://octopus-ai.flashhub.net` | `https://octopus-ai.flashhub.net/**` |
+   | production | `https://octopus-ai.devs.li` | `https://octopus-ai.devs.li/**` |
 
    ตั้งได้ทั้งสองค่าพร้อมกัน (ใส่ `http://localhost:3000/**` ไว้ในรายการ redirect ด้วย
    แอปส่ง `redirectTo` เป็น origin ของหน้าที่เปิดอยู่
@@ -192,7 +192,7 @@ supabase/migrations/              # SQL migration จาก drizzle-kit
 | --- | --- |
 | `APP_ENV` | `production` |
 | `DEMO_MODE` | `0` |
-| `NEXT_PUBLIC_APP_URL` | `https://octopus-ai.flashhub.net` |
+| `NEXT_PUBLIC_APP_URL` | `https://octopus-ai.devs.li` |
 | `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` | จาก Project Settings → API |
 | `DATABASE_URL` | connection string แบบ pooler (port 6543) |
 | `SUPABASE_SERVICE_ROLE_KEY` | ใช้ฝั่ง server เท่านั้น (seed / อ่าน quota) |
@@ -202,8 +202,8 @@ supabase/migrations/              # SQL migration จาก drizzle-kit
   (`PRODUCTION_SITE_URL` ใน `src/lib/config.ts`) เพื่อไม่ให้หน้าเว็บโชว์ `localhost:3000`
 
 **2) Supabase → Authentication → URL Configuration** (นี่คือต้นเหตุที่ login เสร็จแล้วเด้งกลับ localhost)
-- **Site URL** = `https://octopus-ai.flashhub.net`
-- **Additional Redirect URLs** = เพิ่ม `https://octopus-ai.flashhub.net/**`
+- **Site URL** = `https://octopus-ai.devs.li`
+- **Additional Redirect URLs** = เพิ่ม `https://octopus-ai.devs.li/**`
   (ใส่ `http://localhost:3000/**` ไว้ด้วยถ้ายังพัฒนาในเครื่องต่อ)
 
 แอปส่ง `redirectTo` เป็น origin ของหน้าที่เปิดอยู่จริง ([src/components/LoginForm.tsx](src/components/LoginForm.tsx))

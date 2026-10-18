@@ -71,13 +71,13 @@ export const isDemoMode = (() => {
  * ถ้าไม่มีค่า fallback นี้ metadata/OG จะไม่มี URL และ mockup ในหน้า landing จะ
  * แสดง "localhost:3000" ของเครื่อง dev ออกไปบนเว็บจริง
  */
-const PRODUCTION_SITE_URL = "https://octopus-ai.flashhub.net";
+const PRODUCTION_SITE_URL = "https://octopus-ai.devs.li";
 
 const rawSiteUrl =
   (process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL ?? "").trim() || PRODUCTION_SITE_URL;
 
 /**
- * URL ของเว็บนี้แบบไม่มี slash ท้าย (เช่น https://octopus-ai.flashhub.net)
+ * URL ของเว็บนี้แบบไม่มี slash ท้าย (เช่น https://octopus-ai.devs.li)
  *
  * ใช้แทนการ hardcode ชื่อโดเมนใน system prompt ของเอเจนต์, ตัวอย่างโค้ดเรียก API
  * และ metadata ของหน้า — ตั้งผ่าน NEXT_PUBLIC_APP_URL (อ่านได้จากทั้งฝั่ง server และ client)
