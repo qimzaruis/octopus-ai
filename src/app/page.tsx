@@ -3,7 +3,7 @@ import Logo from "@/components/Logo";
 import Badge from "@/components/Badge";
 import DashboardMock from "@/components/DashboardMock";
 import HeroVideo from "@/components/HeroVideo";
-import CodeCard from "@/components/CodeCard";
+import ApiUsageTabs from "@/components/ApiUsageTabs";
 import SiteNav from "@/components/SiteNav";
 import SiteFooter from "@/components/SiteFooter";
 import AgentLogoBar from "@/components/AgentLogoBar";
@@ -11,6 +11,7 @@ import Reveal from "@/components/Reveal";
 import CountUp from "@/components/CountUp";
 import { isDemoMode } from "@/lib/config";
 import { getT } from "@/lib/i18n/server";
+import Icon from "@/components/Icon";
 
 const STATS = [
   { value: "50+", label: "โมเดลจากทุกค่าย" },
@@ -52,6 +53,7 @@ const MODELS = [
 
 const DEV_POINTS = [
   "OpenAI-compatible chat completions",
+  "รองรับ Anthropic Messages และ OpenAI Responses API",
   "รองรับ streaming แบบเรียลไทม์",
   "Usage analytics และ metering ราย request",
   "Fallback อัตโนมัติเมื่อโมเดลใช้งานไม่ได้",
@@ -116,10 +118,10 @@ export default async function LandingPage() {
 
               <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row lg:justify-start">
                 <Link href="/signin" className="btn-primary w-full !px-6 !py-3 sm:w-auto">
-                  <i className="fa-brands fa-google" /> {t("เริ่มใช้งานด้วย Google")}
+                  <Icon name="fa-google" /> {t("เริ่มใช้งานด้วย Google")}
                 </Link>
                 <a href="#developers" className="btn-secondary w-full !px-6 !py-3 sm:w-auto">
-                  <i className="fa-solid fa-terminal text-label" /> {t("ดูตัวอย่าง API")}
+                  <Icon name="fa-terminal" className="text-label" /> {t("ดูตัวอย่าง API")}
                 </a>
               </div>
 
@@ -186,7 +188,7 @@ export default async function LandingPage() {
                     {String(i + 1).padStart(2, "0")}
                   </span>
                   <h3 className="flex items-center gap-3 text-h3 font-semibold text-fg">
-                    <i className={`${f.icon} text-[15px] text-brand-300`} />
+                    <Icon name={f.icon} className="text-[15px] text-brand-300" />
                     {f.title}
                   </h3>
                   <p className="text-body-sm leading-relaxed text-fg-muted">{t(f.desc)}</p>
@@ -209,7 +211,7 @@ export default async function LandingPage() {
                 </p>
               </div>
               <Link href="/signin" className="btn-secondary shrink-0">
-                {t("ดูทั้งหมด")} <i className="fa-solid fa-arrow-right text-label" />
+                {t("ดูทั้งหมด")} <Icon name="fa-arrow-right" className="text-label" />
               </Link>
             </div>
           </Reveal>
@@ -260,19 +262,21 @@ export default async function LandingPage() {
             <ul className="mt-8 space-y-3">
               {DEV_POINTS.map((item) => (
                 <li key={item} className="flex items-start gap-3 text-body-sm text-fg-muted">
-                  <i className="fa-solid fa-check mt-1 text-label text-leaf" />
+                  <Icon name="fa-check" className="mt-1 text-label text-leaf" />
                   {t(item)}
                 </li>
               ))}
             </ul>
 
             <Link href="/signin" className="btn-primary mt-9">
-              <i className="fa-solid fa-key text-label" /> {t("รับ API key ของคุณ")}
+              <Icon name="fa-key" className="text-label" /> {t("รับ API key ของคุณ")}
             </Link>
           </Reveal>
 
           <Reveal delay={120}>
-            <CodeCard />
+            <div className="rounded-xl bg-ink-900 p-5 shadow-raised ring-1 ring-white/[0.06]">
+              <ApiUsageTabs />
+            </div>
           </Reveal>
         </div>
       </section>
@@ -291,7 +295,7 @@ export default async function LandingPage() {
             </p>
             <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Link href="/signin" className="btn-primary !px-7 !py-3">
-                <i className="fa-brands fa-google" /> {t("เข้าสู่ระบบด้วย Google")}
+                <Icon name="fa-google" /> {t("เข้าสู่ระบบด้วย Google")}
               </Link>
               <a href="#developers" className="btn-secondary !px-7 !py-3">
                 {t("ดูเอกสาร API")}

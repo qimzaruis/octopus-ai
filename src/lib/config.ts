@@ -53,13 +53,31 @@ const demoOverride = process.env.DEMO_MODE?.trim();
 
 /**
  * โหมด Demo
- * - development (ค่าเริ่มต้น): Demo — ใช้งานได้ทันทีโดยไม่ต้อง login Google / ไม่ต้องมี DB
- * - production: ใช้ของจริง ถ้า env ครบ; ถ้า env ไม่ครบให้ตกไป Demo เพื่อไม่ให้หน้าเว็บล่ม
- * - DEMO_MODE บังคับทับได้เสมอ
+ * - ตั้ง env จริงครบ (Supabase + DATABASE_URL) = ใช้ของจริงเสมอ แม้รัน `next dev`
+ *   (เดิม development บังคับ Demo ตลอด ทำให้หน้า /models แสดงโมเดลตัวอย่าง
+ *    ทั้งที่ฐานข้อมูลจริงมีข้อมูลอยู่แล้ว)
+ * - ยังไม่ตั้ง env = Demo เพื่อให้อ่านหน้าเว็บได้ทันที
+ * - DEMO_MODE=1 บังคับใช้ข้อมูลตัวอย่าง / DEMO_MODE=0 บังคับของจริง
  */
 export const isDemoMode = (() => {
   if (demoOverride === "1") return true;
   if (demoOverride === "0") return false;
-  if (isProductionEnv) return !(supabaseConfigured && databaseConfigured);
-  return true;
+  return !(supabaseConfigured && databaseConfigured);
 })();
+
+const rawSiteUrl = (process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL ?? "").trim();
+
+/**
+ * URL ของเว็บนี้แบบไม่มี slash ท้าย (เช่น https://octopus-ai.flashhub.net)
+ *
+ * ใช้แทนการ hardcode ชื่อโดเมนใน system prompt ของเอเจนต์, ตัวอย่างโค้ดเรียก API
+ * และ metadata ของหน้า — ตั้งผ่าน NEXT_PUBLIC_APP_URL (อ่านได้จากทั้งฝั่ง server และ client)
+ * คืนค่าว่างถ้ายังไม่ตั้ง เพื่อให้ caller ไปใช้ origin ของเบราว์เซอร์แทน
+ */
+export const siteUrl = rawSiteUrl.replace(/\/+$/, "");
+
+/** โดเมนเปล่าสำหรับแสดงในข้อความ (ไม่มี https://) — คืนค่า fallback เมื่อไม่ตั้ง env */
+export function siteHost(fallback = ""): string {
+  if (!siteUrl) return fallback;
+  return siteUrl.replace(/^https?:\/\//, "");
+}

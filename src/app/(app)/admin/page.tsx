@@ -5,6 +5,7 @@ import StatCard from "@/components/StatCard";
 import PageHeader from "@/components/PageHeader";
 import { formatLatency, formatNumber, formatPercent, formatUsd } from "@/lib/format";
 import { getT } from "@/lib/i18n/server";
+import Icon from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -28,16 +29,16 @@ export default async function AdminOverviewPage() {
 actions={
           <>
             <Link href="/admin/users" className="btn-ghost !py-2 text-caption">
-              <i className="fa-solid fa-users text-label" /> {t("ผู้ใช้")}
+              <Icon name="fa-users" className="text-label" /> {t("ผู้ใช้")}
             </Link>
             <Link href="/admin/providers" className="btn-ghost !py-2 text-caption">
-              <i className="fa-solid fa-plug text-label" /> Providers
+              <Icon name="fa-plug" className="text-label" /> Providers
             </Link>
             <Link href="/admin/models" className="btn-ghost !py-2 text-caption">
-              <i className="fa-solid fa-list-check text-label" /> {t("โมเดลที่แสดง")}
+              <Icon name="fa-list-check" className="text-label" /> {t("โมเดลที่แสดง")}
             </Link>
             <Link href="/admin/plans" className="btn-ghost !py-2 text-caption">
-              <i className="fa-solid fa-gauge-high text-label" /> {t("แผนและโควต้า")}
+              <Icon name="fa-gauge-high" className="text-label" /> {t("แผนและโควต้า")}
             </Link>
           </>
         }
@@ -80,7 +81,7 @@ actions={
       {/* อันดับ + ตารางรายโมเดล */}
       <section className="card overflow-hidden">
         <div className="flex items-center gap-2 border-b border-white/[0.07] px-5 py-4">
-          <i className="fa-solid fa-ranking-star text-amber-glow" />
+          <Icon name="fa-ranking-star" className="text-amber-glow" />
           <div>
             <h2 className="text-sm font-semibold text-fg">{t("อันดับการใช้งานรายโมเดล")}</h2>
             <p className="mt-0.5 text-xs text-fg-subtle">
@@ -133,7 +134,6 @@ actions={
                     <span className="font-mono text-caption font-medium text-fg">
                       {r.model}
                     </span>
-                    <p className="text-label text-fg-subtle">{r.provider}</p>
                   </td>
                   <td className="table-cell text-right">{formatNumber(r.requests)}</td>
                   <td className="table-cell text-right text-fg-muted">

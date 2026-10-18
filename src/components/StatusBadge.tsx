@@ -1,3 +1,5 @@
+import Icon from "@/components/Icon";
+
 export default function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; cls: string; icon: string }> = {
     success: {
@@ -25,7 +27,7 @@ export default function StatusBadge({ status }: { status: string }) {
     <span
       className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-label font-medium ${s.cls}`}
     >
-      <i className={`${s.icon} text-micro`} />
+      <Icon name={s.icon} className="text-micro" />
       {s.label}
     </span>
   );

@@ -44,12 +44,12 @@ const config: Config = {
         "amber-glow": "#FBBF24",
       },
 
-      // ---- ตัวอักษร: Latin = Space Grotesk, ไทย = IBM Plex Sans Thai, mono = JetBrains ----
+      // ---- ตัวอักษร: Latin = IBM Plex Sans, ไทย = IBM Plex Sans Thai, mono = JetBrains ----
       // ลําดับสําคัญ: เบราว์เซอร์จะไล่หาฟอนต์แรกที่มี glyph ของตัวอักษรนั้น
-      // → ละตินได้ Space Grotesk, ไทยข้ามไป IBM Plex Sans Thai (Space Grotesk ไม่มีไทย)
+      // → ละตินได้ IBM Plex Sans, ไทยข้ามไป IBM Plex Sans Thai
       fontFamily: {
-        sans: ["var(--font-grotesk)", "var(--font-thai)", "ui-sans-serif", "system-ui", "sans-serif"],
-        display: ["var(--font-grotesk)", "var(--font-thai)", "ui-sans-serif", "system-ui", "sans-serif"],
+        sans: ["var(--font-latin)", "var(--font-thai)", "ui-sans-serif", "system-ui", "sans-serif"],
+        display: ["var(--font-latin)", "var(--font-thai)", "ui-sans-serif", "system-ui", "sans-serif"],
         mono: ["var(--font-mono)", "var(--font-thai)", "ui-monospace", "SFMono-Regular", "monospace"],
       },
 
@@ -103,6 +103,11 @@ const config: Config = {
           from: { opacity: "0" },
           to: { opacity: "1" },
         },
+        /* กล่อง dialog/modal: เข้าเบา ๆ ทั้งจางและขยาย — ออกแบบให้จบในครั้งเดียว */
+        "pop-in": {
+          from: { opacity: "0", transform: "translateY(8px) scale(0.97)" },
+          to: { opacity: "1", transform: "translateY(0) scale(1)" },
+        },
         /* โลโก้เลื่อนวนซ้าย: เลื่อน -50% = 1 ชุด จาก 2 ชุดในราง (ดู REPEATS ใน AgentLogoBar)
            ต้องเป็น 100/REPEATS เสมอ ถ้าเปลี่ยนจํานวนชุดต้องแก้คู่นี้พร้อมกัน
            ก้าวพอดี 1 ชุด → ชุดที่ 2 เข้ามาที่ตําแหน่งเดิมของชุดที่ 1 = วนต่อไม่มีรอยต่อ */
@@ -114,6 +119,7 @@ const config: Config = {
       animation: {
         "fade-up": "fade-up 500ms cubic-bezier(0.22, 1, 0.36, 1) both",
         "fade-in": "fade-in 400ms cubic-bezier(0.22, 1, 0.36, 1) both",
+        "pop-in": "pop-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both",
         marquee: "marquee 45s linear infinite",
       },
 

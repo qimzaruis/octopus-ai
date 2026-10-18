@@ -1,6 +1,7 @@
 "use client";
 
 import { useT } from "@/lib/i18n/client";
+import Icon from "@/components/Icon";
 
 /**
  * QuotaBar — แถบแสดงการใช้งานเทียบเพดาน
@@ -49,12 +50,12 @@ export default function QuotaBar({
       <p className="mt-1.5 text-label text-fg-subtle">
         {state === "full" ? (
           <span className="text-rose-300">
-            <i className="fa-solid fa-circle-exclamation mr-1" />
+            <Icon name="fa-circle-exclamation" className="mr-1" />
             {t("ใช้ครบเพดานรอบนี้แล้ว")}
           </span>
         ) : state === "near" ? (
           <span className="text-amber-glow">
-            <i className="fa-solid fa-triangle-exclamation mr-1" />
+            <Icon name="fa-triangle-exclamation" className="mr-1" />
             {t("ใกล้ถึงเพดานแล้ว")}
           </span>
         ) : (

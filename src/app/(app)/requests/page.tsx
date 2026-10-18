@@ -6,6 +6,7 @@ import PageHeader from "@/components/PageHeader";
 import Badge from "@/components/Badge";
 import EmptyState from "@/components/EmptyState";
 import { getT } from "@/lib/i18n/server";
+import Icon from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -65,12 +66,12 @@ export default async function RequestsPage({
       <div className="card flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
         <form className="relative flex-1" action="/requests" method="get">
           {status !== "all" && <input type="hidden" name="status" value={status} />}
-          <i className="fa-solid fa-magnifying-glass pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-xs text-fg-subtle" />
+          <Icon name="fa-magnifying-glass" className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-xs text-fg-subtle" />
           <input
             name="q"
             defaultValue={q}
             aria-label={t("ค้นหาประวัติการเรียกใช้")}
-            placeholder={t("ค้นหาจากโมเดล, agent, route หรือ provider...")}
+            placeholder={t("ค้นหาจากโมเดล, agent หรือ route...")}
             className="input !pl-10"
           />
         </form>
@@ -83,7 +84,7 @@ export default async function RequestsPage({
               href={`/requests${qs({ status: tab.key, page: 1 })}`}
               className={`chip-toggle ${status === tab.key ? "chip-toggle-active" : ""}`}
             >
-              <i className={`${tab.icon} mr-1.5 text-micro`} />
+              <Icon name={tab.icon} className="mr-1.5 text-micro" />
               {t(tab.label)}
             </Link>
           ))}
@@ -99,7 +100,7 @@ export default async function RequestsPage({
             description="ลองปรับคำค้นหา หรือล้างตัวกรองสถานะเพื่อดูรายการทั้งหมด"
             action={
               <Link href="/requests" className="btn-ghost !py-2 text-xs">
-                <i className="fa-solid fa-rotate-left text-label" /> {t("ล้างตัวกรอง")}
+                <Icon name="fa-rotate-left" className="text-label" /> {t("ล้างตัวกรอง")}
               </Link>
             }
           />
@@ -117,12 +118,12 @@ export default async function RequestsPage({
           <div className="flex gap-2">
             {page > 1 && (
               <Link href={`/requests${qs({ page: page - 1 })}`} className="btn-ghost !py-2 text-xs">
-                <i className="fa-solid fa-chevron-left text-micro" /> {t("ก่อนหน้า")}
+                <Icon name="fa-chevron-left" className="text-micro" /> {t("ก่อนหน้า")}
               </Link>
             )}
             {page < totalPages && (
               <Link href={`/requests${qs({ page: page + 1 })}`} className="btn-ghost !py-2 text-xs">
-                {t("ถัดไป")} <i className="fa-solid fa-chevron-right text-micro" />
+                {t("ถัดไป")} <Icon name="fa-chevron-right" className="text-micro" />
               </Link>
             )}
           </div>

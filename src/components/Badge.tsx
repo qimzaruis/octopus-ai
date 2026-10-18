@@ -1,5 +1,7 @@
+import Icon from "@/components/Icon";
+
 /**
- * Badge — ป้ายกำกับขนาดเล็ก
+ * Badge — ป้ายกํากับขนาดเล็ก
  * โทนสีอ้างอิงจาก token เท่านั้น (fg/brand/สถานะ)
  */
 const TONES = {
@@ -31,7 +33,7 @@ export default function Badge({
       className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-label font-medium ${TONES[tone]} ${className}`}
     >
       {dot && <span className="h-1.5 w-1.5 rounded-full bg-current" />}
-      {icon && <i className={`${icon} text-micro`} />}
+      {icon && <Icon name={icon} className="text-micro" />}
       {children}
     </span>
   );

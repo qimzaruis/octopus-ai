@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { listUsersWithMetrics } from "@/lib/data/users";
+import { listPlans } from "@/lib/data/plans";
 import {
   banUserAction,
   setUserPlanAction,
@@ -9,29 +10,44 @@ import PageHeader from "@/components/PageHeader";
 import Badge from "@/components/Badge";
 import StatCard from "@/components/StatCard";
 import ToggleSwitch from "@/components/ToggleSwitch";
+import UserFilterForm from "@/components/UserFilterForm";
 import { formatNumber, formatUsd } from "@/lib/format";
 import { getT } from "@/lib/i18n/server";
+import Icon from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminUsersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; q?: string }>;
+  searchParams: Promise<{ error?: string; q?: string; status?: string; plan?: string }>;
 }) {
   const t = await getT();
-  const [{ error, q }, users] = await Promise.all([
+  const [{ error, q, status, plan }, users, plans] = await Promise.all([
     searchParams,
     listUsersWithMetrics(),
+    listPlans(),
   ]);
 
+  // ตัวเลือกแผนสร้างจากข้อมูลจริง (ตาราง plans + แผนที่มีใช้อยู่จริงในผู้ใช้)
+  const planMap = new Map<string, string>();
+  for (const p of plans) planMap.set(p.key, p.label || p.key);
+  for (const u of users) if (!planMap.has(u.plan)) planMap.set(u.plan, u.plan);
+  const planOptions = [...planMap.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, label]) => ({ key, label }));
+
   const needle = (q ?? "").trim().toLowerCase();
-  const list = needle
-    ? users.filter(
-        (u) =>
-          u.email.toLowerCase().includes(needle) || u.name.toLowerCase().includes(needle),
-      )
-    : users;
+  const statusFilter = status === "banned" || status === "active" ? status : "";
+  const planFilter = plan && planMap.has(plan) ? plan : "";
+  const list = users.filter((u) => {
+    if (needle && !u.email.toLowerCase().includes(needle) && !u.name.toLowerCase().includes(needle))
+      return false;
+    if (statusFilter === "banned" && !u.banned) return false;
+    if (statusFilter === "active" && u.banned) return false;
+    if (planFilter && u.plan !== planFilter) return false;
+    return true;
+  });
 
   const totalSpend = users.reduce((s, u) => s + u.metrics.costUsd, 0);
   const totalTokens = users.reduce((s, u) => s + u.metrics.tokens, 0);
@@ -58,7 +74,7 @@ export default async function AdminUsersPage({
 
       {error && (
         <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-body-sm text-rose-300">
-          <i className="fa-solid fa-circle-exclamation mr-2" />
+          <Icon name="fa-circle-exclamation" className="mr-2" />
           {error}
         </p>
       )}
@@ -87,27 +103,26 @@ export default async function AdminUsersPage({
         />
       </div>
 
-      {/* ค้นหา */}
+      {/* ค้นหา + ตัวกรอง (สถานะ / แผน) */}
       <div className="card p-4">
-        <form action="/admin/users" method="get" className="relative">
-          <i className="fa-solid fa-magnifying-glass pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-caption text-fg-subtle" />
-          <input
-            name="q"
-            defaultValue={q ?? ""}
-            aria-label={t("ค้นหาผู้ใช้")}
-            placeholder={t("ค้นหาจากชื่อหรืออีเมล...")}
-            className="input !pl-10"
-          />
-        </form>
+        <UserFilterForm q={q ?? ""} status={statusFilter} plan={planFilter} plans={planOptions} />
       </div>
+
+      {list.length !== users.length && (
+        <p className="text-caption text-fg-subtle">
+          {t("แสดง {a} จาก {b} ผู้ใช้", { a: formatNumber(list.length), b: formatNumber(users.length) })}
+        </p>
+      )}
 
       {list.length === 0 ? (
         <div className="card">
           <div className="px-6 py-14 text-center">
-            <i className="fa-solid fa-users mb-3 block text-2xl text-fg-subtle" />
+            <span className="mb-3 flex justify-center text-2xl">
+              <Icon name="fa-users" className="text-fg-subtle" />
+            </span>
             <p className="text-body-sm font-semibold text-fg">{t("ไม่พบผู้ใช้ที่ตรงกับเงื่อนไข")}</p>
             <Link href="/admin/users" className="btn-ghost mt-5 !py-2 text-label">
-              <i className="fa-solid fa-rotate-left text-label" /> {t("ล้างคําค้นหา")}
+              <Icon name="fa-rotate-left" className="text-label" /> {t("ล้างตัวกรอง")}
             </Link>
           </div>
         </div>
@@ -133,9 +148,9 @@ export default async function AdminUsersPage({
                       {u.name || t("ผู้ใช้ไม่มีชื่อ")}
                       <span
                         className={`rounded px-1.5 py-0.5 text-micro font-semibold uppercase ${
-                          u.plan === "pro"
-                            ? "bg-brand-500/20 text-brand-300"
-                            : "bg-white/[0.08] text-fg-subtle"
+                          u.plan === "free"
+                            ? "bg-white/[0.08] text-fg-subtle"
+                            : "bg-brand-500/20 text-brand-300"
                         }`}
                       >
                         {u.planLabel}
@@ -176,7 +191,7 @@ export default async function AdminUsersPage({
                       </dd>
                     </div>
                   </dl>
-                  <i className="fa-solid fa-chevron-down text-caption text-fg-subtle transition-transform group-open:rotate-180" />
+                  <Icon name="fa-chevron-down" className="text-caption text-fg-subtle transition-transform group-open:rotate-180" />
                 </div>
               </summary>
 
@@ -221,7 +236,7 @@ export default async function AdminUsersPage({
                   >
                     <input type="hidden" name="userId" value={u.id} />
                     <p className="flex items-center gap-2 text-body-sm font-semibold text-fg">
-                      <i className="fa-solid fa-coins text-amber-glow" />
+                      <Icon name="fa-coins" className="text-amber-glow" />
                       {t("ปรับเครดิต (USD)")}
                     </p>
                     <p className="mt-1 text-label text-fg-subtle">
@@ -248,7 +263,7 @@ export default async function AdminUsersPage({
                         />
                       </label>
                       <button type="submit" className="btn-primary !py-2.5">
-                        <i className="fa-solid fa-plus" /> {t("ปรับ")}
+                        <Icon name="fa-plus" /> {t("ปรับ")}
                       </button>
                     </div>
                   </form>
@@ -257,25 +272,25 @@ export default async function AdminUsersPage({
                   <div className="space-y-4 rounded-xl bg-white/[0.03] p-4">
                     <div>
                       <p className="flex items-center gap-2 text-body-sm font-semibold text-fg">
-                        <i className="fa-solid fa-layer-group text-brand-300" />
+                        <Icon name="fa-layer-group" className="text-brand-300" />
                         {t("เปลี่ยนแผน")}
                       </p>
-                      <div className="mt-3 flex gap-2">
-                        {(["free", "pro"] as const).map((p) => (
-                          <form key={p} action={setUserPlanAction} className="inline">
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {planOptions.map((p) => (
+                          <form key={p.key} action={setUserPlanAction} className="inline">
                             <input type="hidden" name="userId" value={u.id} />
-                            <input type="hidden" name="plan" value={p} />
+                            <input type="hidden" name="plan" value={p.key} />
                             <button
                               type="submit"
-                              disabled={u.plan === p}
-                              className={u.plan === p ? "btn-secondary !py-2 text-label" : "btn-ghost !py-2 text-label"}
+                              disabled={u.plan === p.key}
+                              className={u.plan === p.key ? "btn-secondary !py-2 text-label" : "btn-ghost !py-2 text-label"}
                             >
-                              {u.plan === p ? (
+                              {u.plan === p.key ? (
                                 <>
-                                  <i className="fa-solid fa-check text-leaf" /> {p === "pro" ? "Pro" : "Free"}
+                                  <Icon name="fa-check" className="text-leaf" /> {p.label}
                                 </>
                               ) : (
-                                t("สลับเป็น {plan}", { plan: p === "pro" ? "Pro" : "Free" })
+                                t("สลับเป็น {plan}", { plan: p.label })
                               )}
                             </button>
                           </form>
@@ -287,7 +302,7 @@ export default async function AdminUsersPage({
                       <div className="flex items-center justify-between gap-3">
                         <div>
                           <p className="flex items-center gap-2 text-body-sm font-semibold text-fg">
-                            <i className="fa-solid fa-ban text-rose-300" />
+                            <Icon name="fa-ban" className="text-rose-300" />
                             {t("ระงับบัญชี")}
                           </p>
                           <p className="mt-0.5 text-label text-fg-subtle">

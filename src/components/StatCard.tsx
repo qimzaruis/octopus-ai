@@ -1,4 +1,5 @@
 import Badge from "@/components/Badge";
+import Icon from "@/components/Icon";
 
 /**
  * StatCard — การ์ดสถิติ
@@ -43,7 +44,7 @@ export default function StatCard({
         <span
           className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md ${iconTone[tone]}`}
         >
-          <i className={`${icon} text-caption`} />
+          <Icon name={icon} className="text-caption" />
         </span>
       </div>
 
@@ -54,10 +55,9 @@ export default function StatCard({
               tone={delta.positive ? "leaf" : "neutral"}
               className="shrink-0 !px-2 !py-0.5 !text-micro"
             >
-              <i
-                className={`fa-solid text-micro ${
-                  delta.positive ? "fa-arrow-trend-up" : "fa-arrow-trend-down"
-                }`}
+              <Icon
+                name={delta.positive ? "fa-arrow-trend-up" : "fa-arrow-trend-down"}
+                className="text-micro"
               />
               {delta.value}
             </Badge>

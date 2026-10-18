@@ -2,7 +2,8 @@ import { asc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { assets, models, providerKeys, providers, routeTargets, routes } from "@/db/schema";
 import { isDemoMode } from "@/lib/config";
-import { getDemoStore } from "@/lib/demo/store";
+import { isDbUnavailable } from "@/lib/db-circuit";
+import { DEMO_MODEL_UPTIME, demoSource } from "@/lib/demo/store";
 import { cooldownUntilFrom, cooldownMinutesLeft, keyHealth, type KeyHealth } from "@/lib/rotation";
 
 export type ModelDTO = {
@@ -89,8 +90,8 @@ function modelLabel(m: ModelDTO, providerName: string): string {
 // ---------------------------------------------------------------------
 
 export async function listProvidersWithModels(): Promise<ProviderDTO[]> {
-  if (isDemoMode) {
-    const store = getDemoStore();
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     return store.providers.map((p) => ({
       id: p.id,
       name: p.name,
@@ -208,8 +209,8 @@ export async function listRoutesWithTargets(): Promise<RouteDTO[]> {
         })),
     }));
 
-  if (isDemoMode) {
-    const store = getDemoStore();
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     const lookup = (id: number) => {
       const m = store.models.find((x) => x.id === id);
       if (!m) return "?";
@@ -254,8 +255,8 @@ export async function upsertProvider(input: {
   const baseUrl = input.baseUrl.trim().replace(/\/+$/, "");
   if (!name || !baseUrl) return { ok: false, error: "กรอกชื่อและ Base URL ให้ครบ" };
 
-  if (isDemoMode) {
-    const store = getDemoStore();
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     if (input.id) {
       const p = store.providers.find((x) => x.id === input.id);
       if (!p) return { ok: false, error: "ไม่พบ provider" };
@@ -299,8 +300,8 @@ export async function addProviderKey(input: {
   if (!input.providerId) return { ok: false, error: "ไม่พบ provider" };
   if (!apiKey) return { ok: false, error: "กรอก API key ก่อน" };
 
-  if (isDemoMode) {
-    const store = getDemoStore();
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     const siblings = store.providerKeys.filter((k) => k.providerId === input.providerId);
     const id = Math.max(0, ...store.providerKeys.map((k) => k.id)) + 1;
     store.providerKeys.push({
@@ -341,8 +342,8 @@ export async function updateProviderKey(input: {
 }): Promise<ActionResult> {
   const label = input.label.trim() || "main";
 
-  if (isDemoMode) {
-    const k = getDemoStore().providerKeys.find((x) => x.id === input.id);
+  if (isDemoMode || isDbUnavailable()) {
+    const k = demoSource().providerKeys.find((x) => x.id === input.id);
     if (!k) return { ok: false, error: "ไม่พบคีย์" };
     k.label = label;
     if (input.apiKey?.trim()) k.apiKey = input.apiKey.trim();
@@ -356,8 +357,8 @@ export async function updateProviderKey(input: {
 }
 
 export async function toggleProviderKey(id: number, enabled: boolean): Promise<ActionResult> {
-  if (isDemoMode) {
-    const k = getDemoStore().providerKeys.find((x) => x.id === id);
+  if (isDemoMode || isDbUnavailable()) {
+    const k = demoSource().providerKeys.find((x) => x.id === id);
     if (!k) return { ok: false, error: "ไม่พบคีย์" };
     k.enabled = enabled;
     return { ok: true };
@@ -368,8 +369,8 @@ export async function toggleProviderKey(id: number, enabled: boolean): Promise<A
 
 /** ตั้งคีย์นี้เป็นคีย์หลัก — คีย์อื่นของ provider เดียวกันถูกถอดตําแหน่ง */
 export async function setPrimaryProviderKey(id: number): Promise<ActionResult> {
-  if (isDemoMode) {
-    const store = getDemoStore();
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     const k = store.providerKeys.find((x) => x.id === id);
     if (!k) return { ok: false, error: "ไม่พบคีย์" };
     store.providerKeys
@@ -392,8 +393,8 @@ export async function setPrimaryProviderKey(id: number): Promise<ActionResult> {
 }
 
 export async function deleteProviderKey(id: number): Promise<ActionResult> {
-  if (isDemoMode) {
-    const store = getDemoStore();
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     const k = store.providerKeys.find((x) => x.id === id);
     store.providerKeys = store.providerKeys.filter((x) => x.id !== id);
     // ถ้าลบตัวหลักไป ให้ตัวแรกที่เหลือเป็นหลักแทน เพื่อไม่ให้ provider ไม่มีคีย์หลัก
@@ -422,8 +423,8 @@ export async function recordKeyResult(
 ): Promise<ActionResult> {
   const now = new Date();
 
-  if (isDemoMode) {
-    const k = getDemoStore().providerKeys.find((x) => x.id === keyId);
+  if (isDemoMode || isDbUnavailable()) {
+    const k = demoSource().providerKeys.find((x) => x.id === keyId);
     if (!k) return { ok: false, error: "ไม่พบคีย์" };
     if (ok) {
       k.failureCount = 0;
@@ -461,8 +462,8 @@ export async function recordKeyResult(
 // ---------------------------------------------------------------------
 
 export async function listAssets(): Promise<AssetDTO[]> {
-  if (isDemoMode) {
-    return getDemoStore().assets.map((a) => ({
+  if (isDemoMode || isDbUnavailable()) {
+    return demoSource().assets.map((a) => ({
       id: a.id,
       name: a.name,
       publicUrl: a.publicUrl,
@@ -488,8 +489,8 @@ export async function createAsset(input: {
   const name = input.name.trim();
   if (!name) return { ok: false, error: "ตั้งชื่อรูปก่อนบันทึก" };
 
-  if (isDemoMode) {
-    const store = getDemoStore();
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     const id = Math.max(0, ...store.assets.map((a) => a.id)) + 1;
     store.assets.push({
       id,
@@ -524,8 +525,8 @@ export async function createAsset(input: {
 }
 
 export async function deleteAsset(id: number): Promise<ActionResult> {
-  if (isDemoMode) {
-    const store = getDemoStore();
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     const a = store.assets.find((x) => x.id === id);
     store.assets = store.assets.filter((x) => x.id !== id);
     // โมเดลที่เคยใช้รูปนี้กลับไปใช้ตัวอักษรแทน
@@ -548,8 +549,8 @@ export async function deleteAsset(id: number): Promise<ActionResult> {
 
 /** ตั้ง/ล้างโลโก้ของโมเดล (null = กลับไปแสดงตัวอักษรแรกของ provider) */
 export async function setModelLogo(id: number, logoUrl: string | null): Promise<ActionResult> {
-  if (isDemoMode) {
-    const m = getDemoStore().models.find((x) => x.id === id);
+  if (isDemoMode || isDbUnavailable()) {
+    const m = demoSource().models.find((x) => x.id === id);
     if (!m) return { ok: false, error: "ไม่พบโมเดล" };
     m.logoUrl = logoUrl;
     return { ok: true };
@@ -559,8 +560,8 @@ export async function setModelLogo(id: number, logoUrl: string | null): Promise<
 }
 
 export async function toggleProvider(id: number, enabled: boolean): Promise<ActionResult> {
-  if (isDemoMode) {
-    const p = getDemoStore().providers.find((x) => x.id === id);
+  if (isDemoMode || isDbUnavailable()) {
+    const p = demoSource().providers.find((x) => x.id === id);
     if (!p) return { ok: false, error: "ไม่พบ provider" };
     p.enabled = enabled;
     return { ok: true };
@@ -570,8 +571,8 @@ export async function toggleProvider(id: number, enabled: boolean): Promise<Acti
 }
 
 export async function deleteProvider(id: number): Promise<ActionResult> {
-  if (isDemoMode) {
-    const store = getDemoStore();
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     store.providers = store.providers.filter((x) => x.id !== id);
     store.models = store.models.filter((m) => m.providerId !== id);
     return { ok: true };
@@ -597,8 +598,8 @@ export async function addModel(input: {
     return { ok: false, error: "กรอก model ID ให้ครบ" };
   }
 
-  if (isDemoMode) {
-    const store = getDemoStore();
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     const dup = store.models.some(
       (m) => m.providerId === input.providerId && m.modelId === modelId,
     );
@@ -616,6 +617,7 @@ export async function addModel(input: {
       inputPricePerM: 0,
       outputPricePerM: 0,
       logoUrl: input.logoUrl ?? null,
+      ...DEMO_MODEL_UPTIME,
       createdAt: new Date(),
     });
     return { ok: true };
@@ -638,8 +640,8 @@ export async function addModel(input: {
 }
 
 export async function toggleModel(id: number, enabled: boolean): Promise<ActionResult> {
-  if (isDemoMode) {
-    const m = getDemoStore().models.find((x) => x.id === id);
+  if (isDemoMode || isDbUnavailable()) {
+    const m = demoSource().models.find((x) => x.id === id);
     if (!m) return { ok: false, error: "ไม่พบโมเดล" };
     m.enabled = enabled;
     return { ok: true };
@@ -649,8 +651,8 @@ export async function toggleModel(id: number, enabled: boolean): Promise<ActionR
 }
 
 export async function deleteModel(id: number): Promise<ActionResult> {
-  if (isDemoMode) {
-    const store = getDemoStore();
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     store.models = store.models.filter((m) => m.id !== id);
     return { ok: true };
   }
@@ -660,8 +662,8 @@ export async function deleteModel(id: number): Promise<ActionResult> {
 
 /** เปิด/ปิดการมองเห็นโมเดลในหน้าผู้ใช้ (visible_to_users) */
 export async function setModelVisibility(id: number, visible: boolean): Promise<ActionResult> {
-  if (isDemoMode) {
-    const m = getDemoStore().models.find((x) => x.id === id);
+  if (isDemoMode || isDbUnavailable()) {
+    const m = demoSource().models.find((x) => x.id === id);
     if (!m) return { ok: false, error: "ไม่พบโมเดล" };
     m.visibleToUsers = visible;
     return { ok: true };
@@ -678,8 +680,8 @@ export async function setModelOptions(
   id: number,
   opts: { enabled: boolean; visibleToUsers: boolean },
 ): Promise<ActionResult> {
-  if (isDemoMode) {
-    const m = getDemoStore().models.find((x) => x.id === id);
+  if (isDemoMode || isDbUnavailable()) {
+    const m = demoSource().models.find((x) => x.id === id);
     if (!m) return { ok: false, error: "ไม่พบโมเดล" };
     m.enabled = opts.enabled;
     m.visibleToUsers = opts.visibleToUsers;
@@ -704,8 +706,8 @@ export async function setModelPricing(
   if (inputPricePerM < 0 || outputPricePerM < 0) {
     return { ok: false, error: "ราคาต้องไม่ติดลบ" };
   }
-  if (isDemoMode) {
-    const m = getDemoStore().models.find((x) => x.id === id);
+  if (isDemoMode || isDbUnavailable()) {
+    const m = demoSource().models.find((x) => x.id === id);
     if (!m) return { ok: false, error: "ไม่พบโมเดล" };
     m.inputPricePerM = inputPricePerM;
     m.outputPricePerM = outputPricePerM;
@@ -730,8 +732,8 @@ export async function upsertRoute(input: {
   const publicModel = input.publicModel.trim().toLowerCase().replace(/\s+/g, "-");
   if (!publicModel) return { ok: false, error: "กรอกชื่อโมเดลสาธารณะ" };
 
-  if (isDemoMode) {
-    const store = getDemoStore();
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     const dup = store.routes.some(
       (r) => r.publicModel === publicModel && r.id !== input.id,
     );
@@ -787,8 +789,8 @@ export async function upsertRoute(input: {
 }
 
 export async function toggleRoute(id: number, enabled: boolean): Promise<ActionResult> {
-  if (isDemoMode) {
-    const r = getDemoStore().routes.find((x) => x.id === id);
+  if (isDemoMode || isDbUnavailable()) {
+    const r = demoSource().routes.find((x) => x.id === id);
     if (!r) return { ok: false, error: "ไม่พบ route" };
     r.enabled = enabled;
     return { ok: true };
@@ -798,8 +800,8 @@ export async function toggleRoute(id: number, enabled: boolean): Promise<ActionR
 }
 
 export async function deleteRoute(id: number): Promise<ActionResult> {
-  if (isDemoMode) {
-    const store = getDemoStore();
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     store.routes = store.routes.filter((r) => r.id !== id);
     store.routeTargets = store.routeTargets.filter((t) => t.routeId !== id);
     return { ok: true };
@@ -816,8 +818,8 @@ export async function addRouteTarget(input: {
     return { ok: false, error: "เลือกโมเดลปลายทางก่อน" };
   }
 
-  if (isDemoMode) {
-    const store = getDemoStore();
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     const existing = store.routeTargets.filter((t) => t.routeId === input.routeId);
     if (existing.some((t) => t.modelRefId === input.modelRefId)) {
       return { ok: false, error: "โมเดลนี้อยู่ใน route แล้ว" };
@@ -850,8 +852,8 @@ export async function addRouteTarget(input: {
 }
 
 export async function moveRouteTarget(targetId: number, direction: -1 | 1): Promise<ActionResult> {
-  if (isDemoMode) {
-    const store = getDemoStore();
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     const target = store.routeTargets.find((t) => t.id === targetId);
     if (!target) return { ok: false, error: "ไม่พบ target" };
     const siblings = store.routeTargets
@@ -892,8 +894,8 @@ export async function toggleRouteTarget(
   targetId: number,
   enabled: boolean,
 ): Promise<ActionResult> {
-  if (isDemoMode) {
-    const t = getDemoStore().routeTargets.find((x) => x.id === targetId);
+  if (isDemoMode || isDbUnavailable()) {
+    const t = demoSource().routeTargets.find((x) => x.id === targetId);
     if (!t) return { ok: false, error: "ไม่พบ target" };
     t.enabled = enabled;
     return { ok: true };
@@ -903,8 +905,8 @@ export async function toggleRouteTarget(
 }
 
 export async function removeRouteTarget(targetId: number): Promise<ActionResult> {
-  if (isDemoMode) {
-    const store = getDemoStore();
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     store.routeTargets = store.routeTargets.filter((t) => t.id !== targetId);
     return { ok: true };
   }

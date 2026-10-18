@@ -2,6 +2,8 @@
 
 import Badge from "@/components/Badge";
 import CountUp from "@/components/CountUp";
+import Icon from "@/components/Icon";
+import { siteHost } from "@/lib/config";
 import { useT } from "@/lib/i18n/client";
 
 /**
@@ -23,7 +25,7 @@ export default function DashboardMock() {
           <span className="h-2.5 w-2.5 rounded-full bg-amber-glow/50" />
           <span className="h-2.5 w-2.5 rounded-full bg-leaf/50" />
           <span className="ml-3 hidden font-mono text-label text-fg-subtle sm:block">
-            app.octopus.ai/dashboard
+            {siteHost("localhost:3000")}/dashboard
           </span>
           <Badge tone="leaf" dot className="ml-auto !py-0.5 !text-micro">
             live
@@ -45,7 +47,7 @@ export default function DashboardMock() {
                   item.active ? "bg-white/[0.08] text-fg" : "text-fg-subtle"
                 }`}
               >
-                <i className={`${item.icon} w-3 text-center text-micro`} />
+                <Icon name={item.icon} className="h-3 w-3 shrink-0 text-micro" />
                 {item.label}
               </div>
             ))}

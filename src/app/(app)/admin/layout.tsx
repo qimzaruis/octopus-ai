@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getSessionUser } from "@/lib/auth";
 import Badge from "@/components/Badge";
 import { getT } from "@/lib/i18n/server";
+import Icon from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       <div className="flex flex-col gap-3 rounded-xl bg-pulse/[0.08] px-5 py-4 ring-1 ring-inset ring-pulse/20 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3.5">
           <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-pulse/15 text-pulse">
-            <i className="fa-solid fa-user-shield" />
+            <Icon name="fa-user-shield" />
           </span>
           <div>
             <p className="text-sm font-semibold text-fg">{t("โหมดผู้ดูแลระบบ")}</p>

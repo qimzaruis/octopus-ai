@@ -149,8 +149,27 @@ body {
   }
 }
 
-/* scrollbar บาง ๆ ธีมมืด */
-::-webkit-scrollbar {
+/* ---- ปุ่มเล็กใต้ฟองแชท (คัดลอก / แก้ไข) ----
+   จอที่มีเมาส์: ซ่อนไว้ โชว์ตอนชี้เมาส์มาที่ฟองแชทหรือกด Tab มาที่ปุ่ม
+   จอสัมผัส/แท็บเล็ตไม่มี hover จึงคงให้เห็นกดได้ตลอด */
+.msg-actions {
+  opacity: 1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .msg-actions {
+    opacity: 0;
+    transition: opacity 150ms ease;
+  }
+  .chat-row:hover .msg-actions,
+  .chat-row:focus-within .msg-actions,
+  .msg-actions:hover,
+  .msg-actions:focus-within {
+    opacity: 1;
+  }
+}
+
+/* scrollbar บาง ๆ ธีมมืด */::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }

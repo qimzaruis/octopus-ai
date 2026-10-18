@@ -1,22 +1,27 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { redirect } from "next/navigation";
-import Logo from "@/components/Logo";
-import Badge from "@/components/Badge";
 import LoginForm from "@/components/LoginForm";
-import LiveUsagePanel from "@/components/LiveUsagePanel";
+import AsciiArt from "@/components/AsciiArt";
 import SiteNav from "@/components/SiteNav";
 import SiteFooter from "@/components/SiteFooter";
 import { getSessionUser } from "@/lib/auth";
 import { getT } from "@/lib/i18n/server";
 import { isDemoMode } from "@/lib/config";
+import Icon from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
 
-const TRUST = [
-  { icon: "fa-solid fa-bolt", text: "แดชบอร์ดใช้งานแบบเรียลไทม์" },
-  { icon: "fa-solid fa-key", text: "API key ของคุณเอง สูงสุด 3 คีย์" },
-  { icon: "fa-solid fa-route", text: "routing พร้อม fallback อัตโนมัติ" },
-  { icon: "fa-solid fa-chart-line", text: "ติดตาม token และค่าใช้จ่ายครบ" },
-];
+async function loadAsciiArt(): Promise<string> {
+  try {
+    return await readFile(
+      path.join(process.cwd(), "public", "ascii-art.txt"),
+      "utf8",
+    );
+  } catch {
+    return "";
+  }
+}
 
 export default async function SignInPage({
   searchParams,
@@ -27,6 +32,7 @@ export default async function SignInPage({
   if (user) redirect("/dashboard");
 
   const t = await getT();
+  const asciiArt = await loadAsciiArt();
 
   const sp = await searchParams;
   const nextPath =
@@ -37,50 +43,23 @@ export default async function SignInPage({
     <div className="relative flex min-h-screen flex-col overflow-x-clip bg-ink-950">
       <SiteNav active="signin" />
 
-      <main className="relative flex-1">
-        <div className="mx-auto grid max-w-6xl items-center gap-14 px-6 py-12 lg:grid-cols-[1.05fr_0.95fr] lg:py-16">
-          {/* ---------- ฝั่งแบรนด์ ---------- */}
-          <div className="animate-fade-up">
-            <Badge tone="brand">Unified AI Gateway</Badge>
+      <main className="relative flex min-h-[calc(100vh-4rem)] flex-1 items-center overflow-hidden">
+        {/* ASCII art เต็มจอเป็นพื้นหลัง — จัดมาสคอตไว้ฝั่งซ้าย (focusX) */}
+        <div aria-hidden className="pointer-events-none absolute inset-0">
+          {asciiArt && (
+            <AsciiArt text={asciiArt} cover focusX={0.34} />
+          )}
+          <div className="absolute left-[-8%] top-1/3 h-[560px] w-[880px] -translate-y-1/2 rounded-full bg-[radial-gradient(closest-side,rgba(124,58,237,0.14),transparent)]" />
+          <div className="absolute right-[-6%] top-1/4 h-[440px] w-[620px] rounded-full bg-[radial-gradient(closest-side,rgba(99,102,241,0.10),transparent)]" />
+        </div>
 
-            <h1 className="mt-6 font-display text-h1 font-semibold text-fg">
-              {t("ทางเข้าหนึ่งเดียว")}
-              <br />
-              <span className="text-brand-300">{t("สู่ทุกโมเดล AI")}</span>
-            </h1>
-
-            <p className="mt-5 max-w-md text-body text-fg-muted">
-              {t("จัดการโมเดล คีย์ และค่าใช้จ่ายทั้งหมดของทีมคุณจากที่เดียว — เริ่มได้ภายในไม่กี่นาที ไม่ต้องตั้งโครงสร้างพื้นฐานเอง")}
-            </p>
-
-            <ul className="mt-8 grid gap-2.5 sm:grid-cols-2">
-              {TRUST.map((item) => (
-                <li
-                  key={item.text}
-                  className="flex items-center gap-3 rounded-md bg-white/[0.04] px-3.5 py-3 text-body-sm text-fg-muted"
-                >
-                  <i className={`${item.icon} text-caption text-brand-300`} />
-                  {t(item.text)}
-                </li>
-              ))}
-            </ul>
-
-            <div className="mt-10 hidden lg:block">
-              <LiveUsagePanel />
-            </div>
-          </div>
-
-          {/* ---------- ฝั่งฟอร์ม ---------- */}
-          <div className="animate-fade-up mx-auto w-full max-w-sm [animation-delay:100ms] lg:mx-0 lg:ml-auto">
-            <div className="rounded-xl bg-ink-900 p-7 shadow-floating">
-              <div className="flex items-center gap-2.5 lg:hidden">
-                <Logo size={26} />
-                <span className="text-body-sm font-semibold text-fg">
-                  Octopus <span className="text-brand-300">AI</span>
-                </span>
-              </div>
-
-<h2 className="text-h3 font-semibold text-fg">{t("เข้าสู่ระบบ")}</h2>
+        {/* ---------- ฟอร์มเข้าสู่ระบบ ---------- */}
+        {/* ขนาดจอต่ำกว่า xl (แท็บเล็ต/ไอแพด/จอเล็ก)การ์ดอยู่กึ่งกลาง
+            เดสก์ท็อปเท่านั้นที่ย้ายไปฝั่งขวาเพื่อเว้นที่ให้มาสคอต */}
+        <div className="relative mx-auto w-full max-w-6xl px-6 py-14">
+          <div className="animate-fade-up mx-auto w-full max-w-sm xl:mr-0">
+            <div className="rounded-xl bg-ink-900 p-7 shadow-[0_0_48px_-16px_rgba(139,92,246,0.45)] ring-1 ring-white/[0.06]">
+              <h2 className="text-h3 font-semibold text-fg">{t("เข้าสู่ระบบ")}</h2>
               <p className="mt-1.5 text-body-sm text-fg-muted">
                 {t("ใช้อีเมลองค์กรหรือบัญชี Google ของคุณก็ได้")}
               </p>
@@ -90,7 +69,7 @@ export default async function SignInPage({
                   role="alert"
                   className="mt-4 rounded-md bg-rose-500/10 px-3.5 py-3 text-caption text-rose-300"
                 >
-                  <i className="fa-solid fa-circle-exclamation mr-1.5" />
+                  <Icon name="fa-circle-exclamation" className="mr-1.5" />
                   {t("การยืนยันตัวตนไม่สําเร็จ กรุณาลองอีกครั้ง")}
                 </p>
               )}
@@ -98,20 +77,16 @@ export default async function SignInPage({
               <div className="mt-6">
                 <LoginForm nextPath={nextPath} demoMode={isDemoMode} />
               </div>
-
-<p className="mt-6 border-t border-white/[0.07] pt-5 text-center text-caption leading-relaxed text-fg-subtle">
-                {t("เข้าสู่ระบบแสดงว่าคุณยอมรับข้อกําหนดการใช้งานและนโยบายความเป็นส่วนตัว")}
-              </p>
             </div>
 
             {isDemoMode && (
               <p className="mt-4 text-center text-caption text-fg-subtle">
-                <i className="fa-solid fa-flask mr-1.5 text-amber-glow" />
+                <Icon name="fa-flask" className="mr-1.5 text-amber-glow" />
                 {t("โหมด Demo — ทดลองได้โดยไม่ต้องตั้งค่า Supabase")}
               </p>
             )}
 
-            <p className="mt-5 text-center text-caption text-fg-subtle">
+            <p className="mt-5 rounded-lg bg-ink-950/85 px-4 py-2.5 text-center text-caption leading-relaxed text-fg-subtle ring-1 ring-white/[0.08] backdrop-blur-sm">
               {t("ยังไม่มีบัญชี? การเข้าสู่ระบบด้วย Google จะสร้างบัญชีให้อัตโนมัติครั้งแรก")}
             </p>
           </div>

@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import Logo from "@/components/Logo";
 import { formatUsd } from "@/lib/format";
 import { useT } from "@/lib/i18n/client";
+import Icon from "@/components/Icon";
 
 export type NavItem = { href: string; label: string; icon: string };
 export type NavSection = { title: string; items: NavItem[] };
@@ -110,8 +111,9 @@ export default function Sidebar({
                           active ? "opacity-100" : "opacity-0"
                         }`}
                       />
-                      <i
-                        className={`${item.icon} w-4 text-center text-caption ${
+                      <Icon
+                        name={item.icon}
+                        className={`h-4 w-4 shrink-0 ${
                           active ? "text-brand-300" : ""
                         }`}
                       />
@@ -140,7 +142,7 @@ export default function Sidebar({
               <span className="text-micro font-medium text-fg-subtle">USD</span>
             </p>
           </div>
-          <i className="fa-solid fa-coins text-amber-glow" />
+          <Icon name="fa-coins" className="text-amber-glow" />
         </Link>
       </div>
 
@@ -157,7 +159,7 @@ export default function Sidebar({
                 {email}
               </p>
               <p className="mt-1.5 flex items-center gap-1.5 text-micro text-fg-subtle">
-                <i className="fa-solid fa-circle-user" />
+                <Icon name="fa-circle-user" />
                 {t(ROLE_LABEL[role] ?? role)}
               </p>
             </div>
@@ -167,7 +169,7 @@ export default function Sidebar({
               role="menuitem"
               className="mt-1.5 flex items-center gap-2.5 rounded-md px-3 py-2.5 text-body-sm font-medium text-fg-muted transition-colors duration-fast hover:bg-rose-500/10 hover:text-rose-300"
             >
-              <i className="fa-solid fa-arrow-right-from-bracket w-4 text-center text-caption" />
+              <Icon name="fa-arrow-right-from-bracket" className="h-4 w-4 shrink-0" />
               {t("ออกจากระบบ")}
             </a>
           </div>
@@ -188,9 +190,9 @@ export default function Sidebar({
               {name}
               <span
                 className={`shrink-0 rounded px-1 py-0.5 text-micro font-semibold uppercase ${
-                  plan === "pro"
-                    ? "bg-brand-500/20 text-brand-300"
-                    : "bg-white/[0.08] text-fg-subtle"
+                  plan === "free"
+                    ? "bg-white/[0.08] text-fg-subtle"
+                    : "bg-brand-500/20 text-brand-300"
                 }`}
               >
                 {plan}
@@ -198,8 +200,9 @@ export default function Sidebar({
             </p>
             <p className="truncate text-label text-fg-subtle">{email}</p>
           </div>
-          <i
-            className={`fa-solid fa-chevron-up shrink-0 text-micro text-fg-subtle transition-transform duration-fast ${
+          <Icon
+            name="fa-chevron-up"
+            className={`shrink-0 text-micro text-fg-subtle transition-transform duration-fast ${
               accountOpen ? "" : "rotate-180"
             }`}
           />
@@ -219,7 +222,7 @@ export default function Sidebar({
         aria-label={t("เปิดเมนู")}
         className="fixed bottom-5 left-5 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-brand-500 text-fg shadow-floating transition active:scale-95 lg:hidden"
       >
-        <i className="fa-solid fa-bars" />
+        <Icon name="fa-bars" />
       </button>
 
       {open && (
@@ -235,7 +238,7 @@ export default function Sidebar({
               aria-label={t("ปิดเมนู")}
               className="absolute right-3 top-4 z-10 rounded-md p-1.5 text-fg-subtle transition hover:text-fg"
             >
-              <i className="fa-solid fa-xmark" />
+              <Icon name="fa-xmark" />
             </button>
             {navContent}
           </aside>

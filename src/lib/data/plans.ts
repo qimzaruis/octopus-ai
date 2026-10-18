@@ -1,9 +1,14 @@
 import { asc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { plans as plansTable, routes } from "@/db/schema";
+import { models, planModels, plans as plansTable, routes } from "@/db/schema";
 import { isDemoMode } from "@/lib/config";
-import { getDemoStore } from "@/lib/demo/store";
+import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
+import { demoSource } from "@/lib/demo/store";
 import { DEFAULT_PLANS, CYCLE_DAY_OPTIONS, type Plan } from "@/lib/plans";
+import { cached } from "@/lib/catalog-cache";
+
+/** อายุแคชข้อมูลแผน — แอดมินบันทึกแล้วล้างทันที */
+const CATALOG_TTL_MS = 60_000;
 
 /**
  * แผนการใช้งาน — อ่าน/เขียนจากตาราง plans
@@ -20,17 +25,32 @@ function rowToPlan(r: typeof plansTable.$inferSelect): Plan {
     cycleRequests: r.cycleRequests,
     concurrentModels: r.concurrentModels,
     fallback: r.fallback,
+    tier: r.tier,
   };
 }
 
-export async function listPlans(): Promise<Plan[]> {
-  if (isDemoMode) return getDemoStore().plans;
+/**
+ * ตารางแผนทั้งหมด — แคชไว้เพราะถูกอ่านในทุก request ที่เช็คโควต้า
+ * (หน้า /admin/plans บันทึกเมื่อไหร่จะล้างแคชผ่าน revalidateAdmin)
+ */
+export function listPlans(): Promise<Plan[]> {
+  // อย่าแคชผลตอน DB ถูกข้าม (ของว่างจะค้างจนครบอายุแคช ทั้งที่ DB ฟื้นแล้ว)
+  if (isDemoMode || isDbUnavailable()) return loadPlans();
+  return cached("plans", CATALOG_TTL_MS, loadPlans);
+}
+
+async function loadPlans(): Promise<Plan[]> {
+  if (isDemoMode || isDbUnavailable()) return demoSource().plans;
 
   try {
-    const rows = await getDb().select().from(plansTable).orderBy(asc(plansTable.key));
+    const rows = await getDb()
+      .select()
+      .from(plansTable)
+      .orderBy(asc(plansTable.tier), asc(plansTable.key));
     if (rows.length === 0) return Object.values(DEFAULT_PLANS);
     return rows.map(rowToPlan);
-  } catch {
+  } catch (err) {
+    markDbUnavailable(err);
     // ตารางยังไม่ถูกสร้าง (ยังไม่รัน setup.sql) — ใช้ค่าเริ่มต้นไปก่อน
     return Object.values(DEFAULT_PLANS);
   }
@@ -67,8 +87,8 @@ export async function updatePlan(input: {
     return { ok: false, error: "โควต้าต่อวันต้องไม่เกินโควต้าต่อรอบ" };
   }
 
-  if (isDemoMode) {
-    const store = getDemoStore();
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     const p = store.plans.find((x) => x.key === input.key);
     if (!p) return { ok: false, error: "ไม่พบแผนนี้" };
     Object.assign(p, {
@@ -124,8 +144,8 @@ export async function updateRouteSettings(input: {
     return { ok: false, error: "ราคา output ต้องไม่ติดลบ" };
   }
 
-  if (isDemoMode) {
-    const r = getDemoStore().routes.find((x) => x.id === input.id);
+  if (isDemoMode || isDbUnavailable()) {
+    const r = demoSource().routes.find((x) => x.id === input.id);
     if (!r) return { ok: false, error: "ไม่พบ route" };
     r.displayMode = mode;
     r.displayName = input.displayName.trim();
@@ -146,4 +166,96 @@ export async function updateRouteSettings(input: {
     })
     .where(eq(routes.id, input.id));
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// โมเดลที่แต่ละแผนใช้งานได้ (แอดมินจัดชุดจากหน้า /admin/plans)
+// ---------------------------------------------------------------------------
+
+export type PlanModelRequirement = { tier: number; label: string };
+
+/**
+ * แผนขั้นต่ำที่ใช้งานโมเดลแต่ละตัวได้
+ * โมเดลที่ไม่ถูกกำหนดไว้ในแผนใดเลย = undefined หมายถึงใช้ได้ทุกแผน
+ */
+export async function modelPlanRequirements(): Promise<Map<number, PlanModelRequirement>> {
+  const map = new Map<number, PlanModelRequirement>();
+  const collect = (pairs: { planKey: string; modelRefId: number }[], plans: Plan[]) => {
+    for (const r of pairs) {
+      const plan = plans.find((p) => p.key === r.planKey);
+      if (!plan) continue;
+      const cur = map.get(r.modelRefId);
+      if (!cur || plan.tier < cur.tier) {
+        map.set(r.modelRefId, { tier: plan.tier, label: plan.label });
+      }
+    }
+  };
+
+  if (isDemoMode || isDbUnavailable()) {
+    collect(demoSource().planModels, demoSource().plans);
+    return map;
+  }
+  try {
+    const [rows, plans] = await Promise.all([getDb().select().from(planModels), listPlans()]);
+    collect(rows, plans);
+    return map;
+  } catch (err) {
+    markDbUnavailable(err);
+    return modelPlanRequirements();
+  }
+}
+
+/** โมเดลที่แอดมินกำหนดให้แต่ละแผน (planKey → model ids) สำหรับหน้า /admin/plans */
+export async function listPlanModelAssignments(): Promise<Record<string, number[]>> {
+  const out: Record<string, number[]> = {};
+  if (isDemoMode || isDbUnavailable()) {
+    for (const pm of demoSource().planModels) (out[pm.planKey] ??= []).push(pm.modelRefId);
+    return out;
+  }
+  try {
+    const rows = await getDb().select().from(planModels);
+    for (const r of rows) (out[r.planKey] ??= []).push(r.modelRefId);
+    return out;
+  } catch (err) {
+    markDbUnavailable(err);
+    return listPlanModelAssignments();
+  }
+}
+
+/** แทนที่ชุดโมเดลของแผนทั้งชุด */
+export async function setPlanModels(
+  planKey: string,
+  modelRefIds: number[],
+): Promise<ActionResult> {
+  const ids = [...new Set(modelRefIds.filter((n) => Number.isFinite(n)))];
+
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
+    store.planModels = store.planModels.filter((pm) => pm.planKey !== planKey);
+    for (const id of ids) store.planModels.push({ planKey, modelRefId: id });
+    return { ok: true };
+  }
+
+  const db = getDb();
+  try {
+    await db.delete(planModels).where(eq(planModels.planKey, planKey));
+    if (ids.length > 0) {
+      await db.insert(planModels).values(ids.map((id) => ({ planKey, modelRefId: id })));
+    }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "บันทึกไม่สำเร็จ" };
+  }
+  return { ok: true };
+}
+
+/** ตรวจว่าแผนนี้ใช้โมเดลนี้ได้ไหม — โมเดลที่ไม่ถูกจำกัดในแผนใดใช้ได้เสมอ */
+export async function isModelAllowedForPlan(
+  planKey: string,
+  modelRefId: number,
+): Promise<boolean> {
+  const [reqs, plans] = await Promise.all([modelPlanRequirements(), listPlans()]);
+  const req = reqs.get(modelRefId);
+  if (!req) return true;
+  const plan = plans.find((p) => p.key === planKey) ?? DEFAULT_PLANS.free;
+  return plan.tier >= req.tier;
 }

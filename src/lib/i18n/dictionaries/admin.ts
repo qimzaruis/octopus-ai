@@ -250,8 +250,8 @@ export const adminPages = {
 
   // ---------- แผนและโควต้า ----------
   "แผนและโควต้า": "Plans & quotas",
-  "กําหนดเพดานการใช้จ่ายเป็น USD ต่อรอบ และตั้ง sub-quota รายวันเพิ่มได้ — โควต้าคุมทั้งระบบ":
-    "Set USD spend limits per cycle and an optional daily sub-quota — quotas apply system-wide",
+  "กําหนดเพดานการใช้จ่ายเป็น USD ต่อรอบ และตั้งโควต้ารายวันเพิ่มได้ — โควต้าคุมทั้งระบบ":
+    "Set USD spend limits per cycle and an optional daily quota — quotas apply system-wide",
   "{n} แผน": "{n} plans",
   "โควต้าคิดเป็น USD จากค่าใช้จ่ายจริงของแต่ละ request — รอบนับย้อนหลังจากเวลาปัจจุบัน (rolling window) รายวันรีเซตเที่ยงคืนเวลาไทย":
     "Quotas are USD based on each request's real cost — cycles are rolling windows from now; daily resets at midnight Thailand time",
@@ -261,13 +261,18 @@ export const adminPages = {
   "วงรอบรีเซตของ {plan}": "Reset cycle for {plan}",
   "{d} วัน": "{d} days",
   "โควต้าต่อรอบ (USD)": "Quota per cycle (USD)",
-  "sub-quota รายวัน (USD)": "Daily sub-quota (USD)",
+  "โควต้ารายวัน (USD)": "Daily quota (USD)",
   "ใส่ 0 = ไม่ตั้งเพดานรายวัน": "Enter 0 for no daily cap",
   "เพดาน requests ต่อรอบ": "Request cap per cycle",
   "ใส่ 0 = ไม่จํากัด": "Enter 0 for unlimited",
   "โมเดลพร้อมกัน": "Concurrent models",
   "เปิด routing fallback": "Enable routing fallback",
   "บันทึกแผนนี้": "Save this plan",
+  "โมเดลที่แผนนี้ใช้งานได้": "Models included in this plan",
+  "ยังไม่มีโมเดลในระบบ — เพิ่มที่หน้า Providers": "No models yet — add them on the Providers page",
+  "โมเดลที่ไม่ถูกเลือกในแผนใดเลย = ใช้ได้ทุกแผน · โมเดลที่เลือกไว้จะจำกัดเฉพาะแผนนั้นและแผนที่สูงกว่า":
+    "Models not selected in any plan are available to every plan · selected models are limited to that plan and higher tiers",
+  "บันทึกชุดโมเดล": "Save model set",
   "วงรอบต้องเป็น 1, 7 หรือ 30 วัน": "Cycle must be 1, 7 or 30 days",
   "โควต้าต่อรอบต้องไม่ติดลบ": "Cycle quota cannot be negative",
   "โควต้าต่อวันต้องไม่ติดลบ": "Daily quota cannot be negative",
@@ -276,4 +281,24 @@ export const adminPages = {
   "ไม่จํากัด": "Unlimited",
   "ราคา input ต้องไม่ติดลบ": "Input price cannot be negative",
   "ราคา output ต้องติดลบไม่ได้": "Output price cannot be negative",
+
+  // ---------- ตัวกรองหน้าจัดการผู้ใช้ ----------
+  "สถานะบัญชี": "Account status",
+  "ทุกสถานะ": "All statuses",
+  "บัญชีปกติ": "Active",
+  "แผนการใช้งาน": "Plan",
+  "ทุกแผน": "All plans",
+  "กรอง": "Filter",
+  "แสดง {a} จาก {b} ผู้ใช้": "Showing {a} of {b} users",
+
+  // ---------- ตั้งค่า Web Agent ----------
+  "ตั้งค่า Web Agent": "Web Agent settings",
+  "กำหนดจำนวนไฟล์แนบสูงสุดต่อหนึ่งข้อความในโหมดแชท":
+    "Set the maximum number of attachments per message in chat mode",
+  "สูงสุด {n} ไฟล์": "Up to {n} files",
+  "จำนวนไฟล์แนบสูงสุดต่อข้อความ": "Maximum attachments per message",
+  "ค่าที่ตั้งไว้ใช้ทั้งฝั่งหน้าจอและฝั่งเซิร์ฟเวอร์ (1–50)":
+    "This value applies to both the UI and the server (1–50)",
+  "บันทึกการตั้งค่าแล้ว": "Settings saved",
+  "จำนวนไฟล์ต้องอยู่ระหว่าง 1–50": "The file count must be between 1 and 50",
 } as const;

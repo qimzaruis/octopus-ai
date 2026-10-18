@@ -20,6 +20,7 @@ import Badge from "@/components/Badge";
 import EmptyState from "@/components/EmptyState";
 import { formatNumber } from "@/lib/format";
 import { getT } from "@/lib/i18n/server";
+import Icon from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +29,7 @@ function KeyHealthBadge({ k, t }: { k: ProviderKeyDTO; t: (s: string, v?: Record
   if (k.health === "disabled") {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-md bg-white/[0.06] px-2 py-0.5 text-label text-fg-subtle">
-        <i className="fa-solid fa-circle-pause text-micro" />
+        <Icon name="fa-circle-pause" className="text-micro" />
         {t("ปิด")}
       </span>
     );
@@ -36,14 +37,14 @@ function KeyHealthBadge({ k, t }: { k: ProviderKeyDTO; t: (s: string, v?: Record
   if (k.health === "cooling") {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-glow/10 px-2 py-0.5 text-label text-amber-glow">
-        <i className="fa-solid fa-hourglass-half text-micro" />
+        <Icon name="fa-hourglass-half" className="text-micro" />
         {t("พัก {n} นาที", { n: k.cooldownMinutes })}
       </span>
     );
   }
   return (
     <span className="inline-flex items-center gap-1.5 rounded-md bg-leaf/10 px-2 py-0.5 text-label text-leaf">
-      <i className="fa-solid fa-circle-check text-micro" />
+      <Icon name="fa-circle-check" className="text-micro" />
       {t("พร้อมใช้")}
     </span>
   );
@@ -75,7 +76,7 @@ export default async function AdminProvidersPage({
 
       {error && (
         <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
-          <i className="fa-solid fa-circle-exclamation mr-2" />
+          <Icon name="fa-circle-exclamation" className="mr-2" />
           {error}
         </p>
       )}
@@ -85,11 +86,11 @@ export default async function AdminProvidersPage({
         <summary className="flex cursor-pointer select-none items-center justify-between px-5 py-4 [&::-webkit-details-marker]:hidden">
           <span className="flex items-center gap-3 font-semibold text-fg">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500/15 text-brand-300">
-              <i className="fa-solid fa-plus" />
+              <Icon name="fa-plus" />
             </span>
             {t("เพิ่ม Provider ใหม่")}
           </span>
-          <i className="fa-solid fa-chevron-down text-xs text-fg-subtle transition-transform group-open:rotate-180" />
+          <Icon name="fa-chevron-down" className="text-xs text-fg-subtle transition-transform group-open:rotate-180" />
         </summary>
         <form action={saveProviderAction} className="space-y-4 border-t border-white/[0.07] p-5">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -108,12 +109,12 @@ export default async function AdminProvidersPage({
             </div>
           </div>
           <p className="text-label text-fg-subtle">
-            <i className="fa-solid fa-circle-info mr-1.5 text-brand-300" />
+            <Icon name="fa-circle-info" className="mr-1.5 text-brand-300" />
             {t("เพิ่ม API key ได้ทีหลังในหน้ารายละเอียด provider — ใส่ได้หลายคีย์ต่อราย")}
           </p>
           <div className="flex justify-end">
             <button type="submit" className="btn-primary">
-              <i className="fa-solid fa-plus" /> {t("เพิ่ม Provider")}
+              <Icon name="fa-plus" /> {t("เพิ่ม Provider")}
             </button>
           </div>
         </form>
@@ -157,15 +158,26 @@ export default async function AdminProvidersPage({
               </div>
               <StopPropagation className="flex items-center gap-3">
                 <span className="rounded-lg bg-white/5 px-2.5 py-1 text-label text-fg-muted">
-                  <i className="fa-solid fa-key mr-1.5" />
+                  <Icon name="fa-key" className="mr-1.5" />
                   {t("{n} คีย์", { n: p.keys.length })}
                 </span>
                 <span className="rounded-lg bg-white/5 px-2.5 py-1 text-label text-fg-muted">
-                  <i className="fa-solid fa-cube mr-1.5" />
+                  <Icon name="fa-cube" className="mr-1.5" />
                   {t("{n} โมเดล", { n: p.models.length })}
                 </span>
+                <form action={deleteProviderAction} className="inline" title={t("ลบ provider นี้ถาวร")}>
+                  <input type="hidden" name="id" value={p.id} />
+                  <ConfirmButton
+                    message={t("ลบ provider {name} พร้อมโมเดลทั้งหมด? การกระทํานี้ไม่สามารถย้อนกลับได้", {
+                      name: p.name,
+                    })}
+                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.07] bg-white/5 text-fg-subtle transition hover:border-rose-500/40 hover:text-rose-400"
+                  >
+                    <Icon name="fa-trash-can" className="text-label" />
+                  </ConfirmButton>
+                </form>
                 <ToggleSwitch action={toggleProviderAction} id={p.id} enabled={p.enabled} />
-                <i className="fa-solid fa-chevron-down text-xs text-fg-subtle transition-transform group-open:rotate-180" />
+                <Icon name="fa-chevron-down" className="text-xs text-fg-subtle transition-transform group-open:rotate-180" />
               </StopPropagation>
             </summary>
 
@@ -186,7 +198,7 @@ export default async function AdminProvidersPage({
                 </div>
                 <div className="flex gap-2">
                   <button type="submit" className="btn-primary flex-1 !py-2.5">
-                    <i className="fa-solid fa-floppy-disk" /> {t("บันทึก")}
+                    <Icon name="fa-floppy-disk" /> {t("บันทึก")}
                   </button>
                 </div>
               </form>
@@ -195,7 +207,7 @@ export default async function AdminProvidersPage({
               <div className="rounded-xl border border-white/[0.07]">
                 <div className="border-b border-white/[0.07] bg-white/[0.02] px-4 py-3">
                   <p className="flex items-center gap-2 text-xs font-medium text-fg-muted">
-                    <i className="fa-solid fa-key text-brand-300" />
+                    <Icon name="fa-key" className="text-brand-300" />
                     {t("API Keys — ระบบเลือกคีย์หลักก่อน แล้วหมุนไปคีย์ถัดไปเมื่อ error")}
                   </p>
                 </div>
@@ -218,7 +230,7 @@ export default async function AdminProvidersPage({
                           }`}
                           title={t(k.isPrimary ? "คีย์หลัก" : "คีย์สำรอง")}
                         >
-                          <i className={`fa-solid ${k.isPrimary ? "fa-star" : "fa-key"}`} />
+                          <Icon name={k.isPrimary ? "fa-star" : "fa-key"} />
                         </span>
                         <div className="min-w-0">
                           <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-fg">
@@ -250,7 +262,7 @@ export default async function AdminProvidersPage({
                               className="rounded-lg border border-white/[0.07] bg-white/5 px-2 py-1 text-micro text-fg-muted transition hover:text-leaf"
                               title={t("ตั้งเป็นคีย์หลัก")}
                             >
-                              <i className="fa-solid fa-star" /> {t("ตั้งเป็นหลัก")}
+                              <Icon name="fa-star" /> {t("ตั้งเป็นหลัก")}
                             </button>
                           </form>
                         )}
@@ -266,7 +278,7 @@ export default async function AdminProvidersPage({
                             message={t("ลบคีย์ {label}?", { label: k.label })}
                             className="rounded-lg border border-white/[0.07] bg-white/5 px-2 py-1 text-micro text-fg-muted transition hover:text-rose-400"
                           >
-                            <i className="fa-solid fa-trash-can" />
+                            <Icon name="fa-trash-can" />
                           </ConfirmButton>
                         </form>
                       </StopPropagation>
@@ -295,7 +307,7 @@ export default async function AdminProvidersPage({
                     />
                   </div>
                   <button type="submit" className="btn-ghost !py-2.5 whitespace-nowrap">
-                    <i className="fa-solid fa-plus" /> {t("เพิ่มคีย์")}
+                    <Icon name="fa-plus" /> {t("เพิ่มคีย์")}
                   </button>
                 </form>
 
@@ -303,7 +315,7 @@ export default async function AdminProvidersPage({
                 {p.keys.length > 0 && (
                   <details className="border-t border-white/[0.07]">
                     <summary className="flex cursor-pointer select-none items-center gap-2 px-4 py-3 text-label text-fg-subtle [&::-webkit-details-marker]:hidden">
-                      <i className="fa-solid fa-pen text-micro" />
+                      <Icon name="fa-pen" className="text-micro" />
                       {t("แก้ไขชื่อ / เปลี่ยนคีย์")}
                     </summary>
                     <div className="space-y-2 px-4 pb-4">
@@ -314,18 +326,6 @@ export default async function AdminProvidersPage({
                   </details>
                 )}
               </div>
-
-              <form action={deleteProviderAction} className="flex justify-end">
-                <input type="hidden" name="id" value={p.id} />
-                <ConfirmButton
-                  message={t("ลบ provider {name} พร้อมโมเดลทั้งหมด? การกระทํานี้ไม่สามารถย้อนกลับได้", {
-                    name: p.name,
-                  })}
-                  className="text-label text-fg-subtle transition hover:text-rose-400"
-                >
-                  <i className="fa-solid fa-trash-can mr-1" /> {t("ลบ provider นี้ถาวร")}
-                </ConfirmButton>
-              </form>
 
               {/* ตารางโมเดล */}
               <div className="overflow-x-auto rounded-xl border border-white/[0.07]">
@@ -360,9 +360,9 @@ export default async function AdminProvidersPage({
                         </td>
                         <td className="table-cell">
                           {m.supportsVision ? (
-                            <i className="fa-solid fa-eye text-aqua" title={t("รองรับรูปภาพ")} />
+                            <Icon name="fa-eye" className="text-aqua" title={t("รองรับรูปภาพ")} />
                           ) : (
-                            <i className="fa-solid fa-eye-slash text-fg-subtle" />
+                            <Icon name="fa-eye-slash" className="text-fg-subtle" />
                           )}
                         </td>
                         <td className="table-cell">
@@ -380,7 +380,7 @@ export default async function AdminProvidersPage({
                               message={t("ลบโมเดล {model}?", { model: m.modelId })}
                               className="text-xs text-fg-subtle transition hover:text-rose-400"
                             >
-                              <i className="fa-solid fa-trash-can" />
+                              <Icon name="fa-trash-can" />
                             </ConfirmButton>
                           </form>
                         </td>
@@ -423,7 +423,7 @@ export default async function AdminProvidersPage({
                   {t("รองรับรูปภาพ (vision)")}
                 </label>
                 <button type="submit" className="btn-ghost !py-2.5">
-                  <i className="fa-solid fa-plus" /> {t("เพิ่มโมเดล")}
+                  <Icon name="fa-plus" /> {t("เพิ่มโมเดล")}
                 </button>
               </form>
             </div>
@@ -464,7 +464,7 @@ function KeyEditForm({
         />
       </label>
       <button type="submit" className="btn-ghost !py-1.5 text-label">
-        <i className="fa-solid fa-floppy-disk text-micro" /> {t("บันทึก")}
+        <Icon name="fa-floppy-disk" className="text-micro" /> {t("บันทึก")}
       </button>
     </form>
   );

@@ -3,7 +3,8 @@ import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { apiKeys } from "@/db/schema";
 import { isDemoMode } from "@/lib/config";
-import { getDemoStore } from "@/lib/demo/store";
+import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
+import { demoSource } from "@/lib/demo/store";
 
 export const MAX_KEYS_PER_USER = 3;
 
@@ -28,8 +29,8 @@ function generateSecret(): { secret: string; prefix: string } {
 // ---------------- รายการ key ของ user ----------------
 
 export async function listApiKeys(userId: string): Promise<ApiKeyDTO[]> {
-  if (isDemoMode) {
-    const store = getDemoStore();
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     return store.apiKeys
       .filter((k) => k.userId === userId && !k.revoked)
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
@@ -66,8 +67,8 @@ export async function createApiKey(userId: string, name: string): Promise<Create
   const cleanName = name.trim() || "Untitled key";
   const { secret, prefix } = generateSecret();
 
-  if (isDemoMode) {
-    const store = getDemoStore();
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     const active = store.apiKeys.filter((k) => k.userId === userId && !k.revoked);
     if (active.length >= MAX_KEYS_PER_USER) {
       return { ok: false, error: `สร้างได้สูงสุด ${MAX_KEYS_PER_USER} คีย์ต่อบัญชี` };
@@ -106,8 +107,8 @@ export async function createApiKey(userId: string, name: string): Promise<Create
 // ---------------- ยกเลิก key ----------------
 
 export async function revokeApiKey(userId: string, keyId: number): Promise<boolean> {
-  if (isDemoMode) {
-    const store = getDemoStore();
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     const key = store.apiKeys.find(
       (k) => k.id === keyId && k.userId === userId && !k.revoked,
     );

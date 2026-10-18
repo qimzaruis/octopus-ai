@@ -80,7 +80,7 @@ export const common = {
   "สําหรับแอดมิน": "For admins",
   "เข้าสู่ระบบ": "Sign in",
   "ออกจากระบบ": "Sign out",
-  "กลับหน้าแรก": "Back to home",
+  "หน้าแรก": "Home",
   "เปิดเมนู": "Open menu",
   "ปิดเมนู": "Close menu",
   "เมนูบัญชี": "Account menu",

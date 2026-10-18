@@ -1,10 +1,12 @@
-import { updatePlanAction } from "@/app/(app)/admin/actions";
-import { listPlans } from "@/lib/data/plans";
+import { setPlanModelsAction, updatePlanAction } from "@/app/(app)/admin/actions";
+import { listPlans, listPlanModelAssignments } from "@/lib/data/plans";
+import { listAllModelsForAdmin } from "@/lib/data/models";
 import { CYCLE_DAY_OPTIONS } from "@/lib/plans";
 import PageHeader from "@/components/PageHeader";
 import Badge from "@/components/Badge";
 import { formatUsd } from "@/lib/format";
 import { getT } from "@/lib/i18n/server";
+import Icon from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -21,14 +23,19 @@ export default async function AdminPlansPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const t = await getT();
-  const [{ error }, plans] = await Promise.all([searchParams, listPlans()]);
+  const [{ error }, plans, allModels, assignments] = await Promise.all([
+    searchParams,
+    listPlans(),
+    listAllModelsForAdmin(),
+    listPlanModelAssignments(),
+  ]);
 
   return (
     <div className="space-y-6">
       <PageHeader
         title={t("แผนและโควต้า")}
         description={t(
-          "กําหนดเพดานการใช้จ่ายเป็น USD ต่อรอบ และตั้ง sub-quota รายวันเพิ่มได้ — โควต้าคุมทั้งระบบ",
+          "กําหนดเพดานการใช้จ่ายเป็น USD ต่อรอบ และตั้งโควต้ารายวันเพิ่มได้ — โควต้าคุมทั้งระบบ",
         )}
         actions={
           <Badge tone="brand" icon="fa-solid fa-gauge-high">
@@ -39,13 +46,13 @@ export default async function AdminPlansPage({
 
       {error && (
         <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-body-sm text-rose-300">
-          <i className="fa-solid fa-circle-exclamation mr-2" />
+          <Icon name="fa-circle-exclamation" className="mr-2" />
           {error}
         </p>
       )}
 
       <p className="rounded-xl bg-white/[0.03] px-4 py-3 text-caption leading-relaxed text-fg-muted">
-        <i className="fa-solid fa-circle-info mr-1.5 text-brand-300" />
+        <Icon name="fa-circle-info" className="mr-1.5 text-brand-300" />
         {t(
           "โควต้าคิดเป็น USD จากค่าใช้จ่ายจริงของแต่ละ request — รอบนับย้อนหลังจากเวลาปัจจุบัน (rolling window) รายวันรีเซตเที่ยงคืนเวลาไทย",
         )}
@@ -61,7 +68,7 @@ export default async function AdminPlansPage({
                     p.key === "pro" ? "bg-brand-500/15 text-brand-300" : "bg-white/5 text-fg-muted"
                   }`}
                 >
-                  <i className={`fa-solid ${p.key === "pro" ? "fa-crown" : "fa-user"}`} />
+                  <Icon name={p.key === "pro" ? "fa-crown" : "fa-user"} />
                 </span>
                 <div>
                   <p className="flex items-center gap-2 font-semibold text-fg">
@@ -123,7 +130,7 @@ export default async function AdminPlansPage({
                 </div>
 
                 <div>
-                  <label className="label">{t("sub-quota รายวัน (USD)")}</label>
+                  <label className="label">{t("โควต้ารายวัน (USD)")}</label>
                   <input
                     name="dailyQuotaUsd"
                     type="number"
@@ -176,7 +183,59 @@ export default async function AdminPlansPage({
 
               <div className="flex justify-end border-t border-white/[0.07] pt-4">
                 <button type="submit" className="btn-primary">
-                  <i className="fa-solid fa-floppy-disk" /> {t("บันทึกแผนนี้")}
+                  <Icon name="fa-floppy-disk" /> {t("บันทึกแผนนี้")}
+                </button>
+              </div>
+            </form>
+
+            {/* ชุดโมเดลที่แผนนี้ใช้งานได้ */}
+            <form action={setPlanModelsAction} className="space-y-3 border-t border-white/[0.07] p-5">
+              <input type="hidden" name="key" value={p.key} />
+              <p className="flex items-center gap-2 text-xs font-medium text-fg-muted">
+                <Icon name="fa-cube" className="text-brand-300" />
+                {t("โมเดลที่แผนนี้ใช้งานได้")}
+              </p>
+              {allModels.length === 0 ? (
+                <p className="text-label text-fg-subtle">
+                  {t("ยังไม่มีโมเดลในระบบ — เพิ่มที่หน้า Providers")}
+                </p>
+              ) : (
+                <ul className="flex flex-wrap gap-2">
+                  {allModels.map((m) => {
+                    const assigned = assignments[p.key] ?? [];
+                    const on = assigned.includes(m.id);
+                    return (
+                      <li key={m.id}>
+                        <label
+                          className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-caption transition ${
+                            on
+                              ? "border-brand-400/40 bg-brand-500/10 text-fg"
+                              : "border-white/[0.07] bg-white/[0.03] text-fg-muted hover:bg-white/[0.06]"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            name="modelIds"
+                            value={m.id}
+                            defaultChecked={on}
+                            className="h-3.5 w-3.5 rounded border-white/20 bg-ink-850 accent-brand-500"
+                          />
+                          {m.displayName}
+                          <code className="text-micro text-fg-subtle">{m.modelId}</code>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              <p className="text-label text-fg-subtle">
+                {t(
+                  "โมเดลที่ไม่ถูกเลือกในแผนใดเลย = ใช้ได้ทุกแผน · โมเดลที่เลือกไว้จะจำกัดเฉพาะแผนนั้นและแผนที่สูงกว่า",
+                )}
+              </p>
+              <div className="flex justify-end">
+                <button type="submit" className="btn-secondary !py-2 text-caption">
+                  <Icon name="fa-floppy-disk" className="text-label" /> {t("บันทึกชุดโมเดล")}
                 </button>
               </div>
             </form>

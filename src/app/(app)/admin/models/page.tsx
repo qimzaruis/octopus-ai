@@ -19,6 +19,7 @@ import Badge from "@/components/Badge";
 import EmptyState from "@/components/EmptyState";
 import { formatUsd } from "@/lib/format";
 import { getT } from "@/lib/i18n/server";
+import Icon from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -75,7 +76,7 @@ export default async function AdminModelsPage({
 
       {error && (
         <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-body-sm text-rose-300">
-          <i className="fa-solid fa-circle-exclamation mr-2" />
+          <Icon name="fa-circle-exclamation" className="mr-2" />
           {error}
         </p>
       )}
@@ -85,7 +86,7 @@ export default async function AdminModelsPage({
         <summary className="flex cursor-pointer select-none items-center justify-between px-5 py-4 [&::-webkit-details-marker]:hidden">
           <span className="flex items-center gap-3 font-semibold text-fg">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-aqua/15 text-aqua">
-              <i className="fa-solid fa-image" />
+              <Icon name="fa-image" />
             </span>
             {t("คลังรูป — อัปโหลดครั้งเดียว ใช้ซ้ำได้ทุกรายการ")}
           </span>
@@ -93,7 +94,7 @@ export default async function AdminModelsPage({
             <span className="rounded-lg bg-white/5 px-2.5 py-1 text-label text-fg-muted">
               {t("{n} รูป", { n: assets.length })}
             </span>
-            <i className="fa-solid fa-chevron-down text-xs text-fg-subtle transition-transform group-open:rotate-180" />
+            <Icon name="fa-chevron-down" className="text-xs text-fg-subtle transition-transform group-open:rotate-180" />
           </span>
         </summary>
 
@@ -128,7 +129,7 @@ export default async function AdminModelsPage({
                       message={t("ลบรูป {name} ออกจากคลัง?", { name: a.name })}
                       className="rounded-lg border border-white/[0.07] bg-white/5 px-2 py-1 text-micro text-fg-muted transition hover:text-rose-400"
                     >
-                      <i className="fa-solid fa-trash-can" />
+                      <Icon name="fa-trash-can" />
                     </ConfirmButton>
                   </form>
                 </li>
@@ -160,7 +161,7 @@ export default async function AdminModelsPage({
               />
             </label>
             <button type="submit" className="btn-ghost !py-2.5 whitespace-nowrap">
-              <i className="fa-solid fa-upload" /> {t("อัปโหลดเข้าคลัง")}
+              <Icon name="fa-upload" /> {t("อัปโหลดเข้าคลัง")}
             </button>
           </form>
         </div>
@@ -171,11 +172,11 @@ export default async function AdminModelsPage({
         <summary className="flex cursor-pointer select-none items-center justify-between px-5 py-4 [&::-webkit-details-marker]:hidden">
           <span className="flex items-center gap-3 font-semibold text-fg">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-pulse/15 text-pulse">
-              <i className="fa-solid fa-plus" />
+              <Icon name="fa-plus" />
             </span>
             {t("สร้าง Route ใหม่")}
           </span>
-          <i className="fa-solid fa-chevron-down text-xs text-fg-subtle transition-transform group-open:rotate-180" />
+          <Icon name="fa-chevron-down" className="text-xs text-fg-subtle transition-transform group-open:rotate-180" />
         </summary>
         <form action={saveRouteAction} className="space-y-4 border-t border-white/[0.07] p-5">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -202,7 +203,7 @@ export default async function AdminModelsPage({
           </div>
           <div className="flex justify-end">
             <button type="submit" className="btn-primary">
-              <i className="fa-solid fa-plus" /> {t("สร้าง Route")}
+              <Icon name="fa-plus" /> {t("สร้าง Route")}
             </button>
           </div>
         </form>
@@ -249,7 +250,7 @@ export default async function AdminModelsPage({
                         className="h-full w-full object-contain"
                       />
                     ) : (
-                      <i className="fa-solid fa-route" />
+                      <Icon name="fa-route" />
                     )}
                   </span>
                   <div>
@@ -284,7 +285,7 @@ export default async function AdminModelsPage({
                       message={t("ลบ route {name}?", { name: route.publicModel })}
                       className="text-xs text-fg-subtle transition hover:text-rose-400"
                     >
-                      <i className="fa-solid fa-trash-can" />
+                      <Icon name="fa-trash-can" />
                     </ConfirmButton>
                   </form>
                 </div>
@@ -362,7 +363,7 @@ export default async function AdminModelsPage({
                         ))}
                       </select>
                       <button type="submit" className="btn-primary !py-2.5 whitespace-nowrap">
-                        <i className="fa-solid fa-floppy-disk" /> {t("บันทึก")}
+                        <Icon name="fa-floppy-disk" /> {t("บันทึก")}
                       </button>
                     </div>
                   </div>
@@ -371,7 +372,7 @@ export default async function AdminModelsPage({
                 {/* ลำดับ fallback */}
                 <div>
                   <p className="mb-3 text-xs font-medium text-fg-subtle">
-                    <i className="fa-solid fa-arrow-down-1-9 mr-1.5" />
+                    <Icon name="fa-arrow-down-1-9" className="mr-1.5" />
                     {t("ลําดับ fallback — ระบบจะลองเรียงจากบนลงล่าง")}
                   </p>
                   <ul className="space-y-2">
@@ -415,7 +416,7 @@ export default async function AdminModelsPage({
                               className="rounded-lg border border-white/[0.07] bg-white/5 px-2 py-1 text-micro text-fg-muted transition hover:text-fg disabled:opacity-30"
                               title={t("เลื่อนขึ้น")}
                             >
-                              <i className="fa-solid fa-arrow-up" />
+                              <Icon name="fa-arrow-up" />
                             </button>
                           </form>
                           <form action={moveRouteTargetAction} className="inline">
@@ -427,7 +428,7 @@ export default async function AdminModelsPage({
                               className="rounded-lg border border-white/[0.07] bg-white/5 px-2 py-1 text-micro text-fg-muted transition hover:text-fg disabled:opacity-30"
                               title={t("เลื่อนลง")}
                             >
-                              <i className="fa-solid fa-arrow-down" />
+                              <Icon name="fa-arrow-down" />
                             </button>
                           </form>
                           <ToggleSwitch
@@ -442,7 +443,7 @@ export default async function AdminModelsPage({
                               message={t("นํา {name} ออกจาก route?", { name: tm.modelLabel })}
                               className="rounded-lg border border-white/[0.07] bg-white/5 px-2 py-1 text-micro text-fg-muted transition hover:text-rose-400"
                             >
-                              <i className="fa-solid fa-xmark" />
+                              <Icon name="fa-xmark" />
                             </ConfirmButton>
                           </form>
                         </div>
@@ -475,7 +476,7 @@ export default async function AdminModelsPage({
                         </select>
                       </label>
                       <button type="submit" className="btn-ghost !py-2.5 whitespace-nowrap">
-                        <i className="fa-solid fa-plus" /> {t("เพิ่มเป็น fallback")}
+                        <Icon name="fa-plus" /> {t("เพิ่มเป็น fallback")}
                       </button>
                     </form>
                   )}
@@ -484,7 +485,7 @@ export default async function AdminModelsPage({
                 {/* ตัวอย่างที่ผู้ใช้จะเห็น */}
                 <div className="rounded-xl bg-white/[0.03] px-4 py-3">
                   <p className="text-label text-fg-subtle">
-                    <i className="fa-solid fa-eye mr-1.5 text-brand-300" />
+                    <Icon name="fa-eye" className="mr-1.5 text-brand-300" />
                     {t("ผู้ใช้จะเห็นหน้านี้เป็น:")}
                   </p>
                   <p className="mt-1.5 flex flex-wrap items-center gap-2 text-caption text-fg-muted">

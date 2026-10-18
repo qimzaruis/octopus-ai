@@ -23,6 +23,7 @@ import {
   formatUsd,
 } from "@/lib/format";
 import { getT } from "@/lib/i18n/server";
+import Icon from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -79,10 +80,10 @@ export default async function DashboardPage() {
         </div>
         <div className="flex items-center gap-2">
           <Link href="/requests" className="btn-ghost !py-2 text-xs">
-            <i className="fa-solid fa-clock-rotate-left text-label" /> {t("ประวัติทั้งหมด")}
+            <Icon name="fa-clock-rotate-left" className="text-label" /> {t("ประวัติทั้งหมด")}
           </Link>
           <Link href="/keys" className="btn-primary !py-2 text-xs">
-            <i className="fa-solid fa-key text-label" /> {t("จัดการ API Keys")}
+            <Icon name="fa-key" className="text-label" /> {t("จัดการ API Keys")}
           </Link>
         </div>
       </div>
@@ -139,7 +140,7 @@ export default async function DashboardPage() {
       <section className="card overflow-hidden">
         <div className="flex items-center justify-between gap-3 border-b border-white/[0.07] px-5 py-4">
           <div className="flex items-center gap-2">
-            <i className="fa-solid fa-cube text-brand-400" />
+            <Icon name="fa-cube" className="text-brand-400" />
             <div>
               <h2 className="text-body-sm font-semibold text-fg">{t("โมเดลที่ใช้ได้")}</h2>
               <p className="mt-0.5 text-caption text-fg-subtle">
@@ -151,7 +152,7 @@ export default async function DashboardPage() {
             href="/models"
             className="flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-caption font-medium text-brand-300 transition hover:bg-brand-500/10 hover:text-brand-200"
           >
-            {t("ดูทั้งหมด")} <i className="fa-solid fa-arrow-right text-micro" />
+            {t("ดูทั้งหมด")} <Icon name="fa-arrow-right" className="text-micro" />
           </Link>
         </div>
         {routes.length === 0 ? (
@@ -172,8 +173,7 @@ export default async function DashboardPage() {
                       {r.publicModel}
                     </span>
                     {hasVision && (
-                      <i
-                        className="fa-solid fa-image shrink-0 text-label text-aqua"
+                      <Icon name="fa-image" className="shrink-0 text-label text-aqua"
                         title={t("รองรับรูปภาพ")}
                       />
                     )}
@@ -206,7 +206,7 @@ export default async function DashboardPage() {
           <div className="mb-6 flex items-start justify-between gap-3">
             <div>
               <h2 className="flex items-center gap-2 text-sm font-semibold text-fg">
-                <i className="fa-solid fa-ranking-star text-amber-glow" />
+                <Icon name="fa-ranking-star" className="text-amber-glow" />
                 {t("อันดับโมเดลยอดนิยม")}
               </h2>
               <p className="mt-1 text-xs text-fg-subtle">{t("เรียงตาม tokens ที่ใช้ทั้งหมด")}</p>
@@ -222,7 +222,7 @@ export default async function DashboardPage() {
           <div className="flex items-center justify-between gap-3 border-b border-white/[0.07] px-5 py-4">
             <div>
               <h2 className="flex items-center gap-2 text-sm font-semibold text-fg">
-                <i className="fa-solid fa-clock-rotate-left text-brand-400" />
+                <Icon name="fa-clock-rotate-left" className="text-brand-400" />
                 {t("Requests ล่าสุด")}
               </h2>
               <p className="mt-1 text-xs text-fg-subtle">{t("8 รายการล่าสุดของคุณ")}</p>
@@ -231,7 +231,7 @@ export default async function DashboardPage() {
               href="/requests"
               className="flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-brand-300 transition hover:bg-brand-500/10 hover:text-brand-200"
             >
-              {t("ดูทั้งหมด")} <i className="fa-solid fa-arrow-right text-micro" />
+              {t("ดูทั้งหมด")} <Icon name="fa-arrow-right" className="text-micro" />
             </Link>
           </div>
 
@@ -242,7 +242,7 @@ export default async function DashboardPage() {
               description={t("สร้าง API key แล้วยิง request แรกของคุณ เพื่อดูสถิติที่นี่")}
               action={
                 <Link href="/keys" className="btn-primary !py-2 text-xs">
-                  <i className="fa-solid fa-key text-label" /> {t("สร้าง API key")}
+                  <Icon name="fa-key" className="text-label" /> {t("สร้าง API key")}
                 </Link>
               }
             />
@@ -266,14 +266,10 @@ export default async function DashboardPage() {
                         {formatTime(r.createdAt)}
                       </td>
                       <td className="table-cell">
+                        {/* แสดงเฉพาะ route ที่ผู้ใช้เรียก — ไม่เปิดเผยโมเดล/ค่ายปลายทาง */}
                         <span className="font-mono text-caption font-medium text-fg">
-                          {r.model}
+                          {r.publicModel || r.model}
                         </span>
-                        {r.publicModel && (
-                          <span className="ml-2 text-label text-fg-subtle">
-                            via {r.publicModel}
-                          </span>
-                        )}
                       </td>
                       <td className="table-cell text-fg-muted">{r.agent}</td>
                       <td className="table-cell">

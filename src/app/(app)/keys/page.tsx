@@ -8,6 +8,7 @@ import Badge from "@/components/Badge";
 import EmptyState from "@/components/EmptyState";
 import { formatDateTime, formatNumber, formatUsd } from "@/lib/format";
 import { getT, getLocale } from "@/lib/i18n/server";
+import Icon from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +37,7 @@ export default async function KeysPage() {
       {/* สร้างคีย์ */}
       <section className="card p-5 sm:p-6">
         <div className="mb-5 flex items-center gap-2">
-          <i className="fa-solid fa-plus text-brand-400" />
+          <Icon name="fa-plus" className="text-white-400" />
           <h2 className="text-body-sm font-semibold text-fg">{t("สร้างคีย์ใหม่")}</h2>
         </div>
         <CreateKeyForm remaining={remaining} maxKeys={MAX_KEYS_PER_USER} />
@@ -46,7 +47,7 @@ export default async function KeysPage() {
       {keys.length > 0 && (
         <section className="card p-5 sm:p-6">
           <div className="flex items-center gap-2">
-            <i className="fa-solid fa-chart-simple text-brand-400" />
+            <Icon name="fa-chart-simple" className="text-brand-400" />
             <h2 className="text-body-sm font-semibold text-fg">{t("สรุปการใช้งานจากทุกคีย์")}</h2>
           </div>
           <div className="mt-4 grid grid-cols-2 gap-4">
@@ -86,7 +87,7 @@ export default async function KeysPage() {
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div className="flex items-center gap-4">
                     <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-500/10 text-brand-300">
-                      <i className="fa-solid fa-key" />
+                      <Icon name="fa-key" />
                     </span>
                     <div className="min-w-0">
                       <p className="font-semibold text-fg">{k.name}</p>

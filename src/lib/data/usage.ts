@@ -1,7 +1,9 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { isDemoMode } from "@/lib/config";
-import { getDemoStore } from "@/lib/demo/store";
+import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
+import { demoSource } from "@/lib/demo/store";
+import { bangkokDay, ensureUptimeColumns } from "@/lib/gateway";
 
 /** Timezone ที่ใช้ bucket ข้อมูลกราฟ */
 const APP_TZ = "Asia/Bangkok";
@@ -19,8 +21,8 @@ export type UsageBucket = {
 };
 
 export type ModelRank = {
+  /** ชื่อ route ที่ผู้ใช้เรียกจริง (ไม่เปิดเผยโมเดล/ค่ายปลายทาง) */
   model: string;
-  provider: string;
   requests: number;
   inputTokens: number;
   outputTokens: number;
@@ -43,7 +45,6 @@ export type Overview = {
 
 export type RequestDTO = {
   id: number;
-  providerName: string;
   model: string;
   publicModel: string;
   agent: string;
@@ -149,7 +150,7 @@ async function getUsageReal(scope: Scope, range: RangeKey): Promise<UsageBucket[
 }
 
 async function getUsageDemo(scope: Scope, range: RangeKey): Promise<UsageBucket[]> {
-  const store = getDemoStore();
+  const store = demoSource();
   const list = store.requests.filter((r) => scope === "all" || r.userId === scope);
   const now = Date.now();
 
@@ -197,7 +198,13 @@ async function getUsageDemo(scope: Scope, range: RangeKey): Promise<UsageBucket[
 }
 
 export async function getUsage(scope: Scope, range: RangeKey): Promise<UsageBucket[]> {
-  return isDemoMode ? getUsageDemo(scope, range) : getUsageReal(scope, range);
+  if (isDemoMode || isDbUnavailable()) return getUsageDemo(scope, range);
+  try {
+    return await getUsageReal(scope, range);
+  } catch (err) {
+    markDbUnavailable(err);
+    return getUsageDemo(scope, range);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -206,8 +213,7 @@ async function getModelRankingReal(scope: Scope, limit: number): Promise<ModelRa
   const userFilter = scope === "all" ? sql`` : sql` where user_id = ${scope}`;
   const rows = await rawRows(sql`
     select
-      model,
-      provider_name,
+      coalesce(nullif(public_model, ''), model) as model,
       count(*)::int as requests,
       coalesce(sum(input_tokens), 0)::int as input_tokens,
       coalesce(sum(output_tokens), 0)::int as output_tokens,
@@ -216,13 +222,12 @@ async function getModelRankingReal(scope: Scope, limit: number): Promise<ModelRa
       coalesce(sum(case when status != 'success' then 1 else 0 end), 0)::int as errors
     from requests
     ${userFilter}
-    group by model, provider_name
+    group by coalesce(nullif(public_model, ''), model)
     order by coalesce(sum(input_tokens + output_tokens), 0) desc
     limit ${limit}
   `);
   return rows.map((r) => ({
     model: String(r.model),
-    provider: String(r.provider_name ?? ""),
     requests: num(r.requests),
     inputTokens: num(r.input_tokens),
     outputTokens: num(r.output_tokens),
@@ -234,15 +239,15 @@ async function getModelRankingReal(scope: Scope, limit: number): Promise<ModelRa
 }
 
 function getModelRankingDemo(scope: Scope, limit: number): ModelRank[] {
-  const store = getDemoStore();
+  const store = demoSource();
   const list = store.requests.filter((r) => scope === "all" || r.userId === scope);
-  const map = new Map<string, ModelRank>();
+  const map = new Map<string, ModelRank & { latencySum: number }>();
   for (const r of list) {
+    const key = r.publicModel || r.model;
     const cur =
-      map.get(r.model) ??
+      map.get(key) ??
       ({
-        model: r.model,
-        provider: r.providerName,
+        model: key,
         requests: 0,
         inputTokens: 0,
         outputTokens: 0,
@@ -250,31 +255,34 @@ function getModelRankingDemo(scope: Scope, limit: number): ModelRank[] {
         avgLatencyMs: 0,
         errors: 0,
         costUsd: 0,
-      } as ModelRank);
+        latencySum: 0,
+      } as ModelRank & { latencySum: number });
     cur.requests++;
     cur.inputTokens += r.inputTokens;
     cur.outputTokens += r.outputTokens;
     cur.totalTokens = cur.inputTokens + cur.outputTokens;
     cur.errors += r.status !== "success" ? 1 : 0;
     cur.costUsd += r.costUsd ?? 0;
-    map.set(r.model, cur);
+    cur.latencySum += r.latencyMs;
+    map.set(key, cur);
   }
   return [...map.values()]
-    .map((m) => ({
+    .map(({ latencySum, ...m }) => ({
       ...m,
-      avgLatencyMs: Math.round(
-        list.filter((r) => r.model === m.model).reduce((s, r) => s + r.latencyMs, 0) /
-          m.requests,
-      ),
+      avgLatencyMs: Math.round(latencySum / Math.max(1, m.requests)),
     }))
     .sort((a, b) => b.totalTokens - a.totalTokens)
     .slice(0, limit);
 }
 
 export async function getModelRanking(scope: Scope, limit = 8): Promise<ModelRank[]> {
-  return isDemoMode
-    ? getModelRankingDemo(scope, limit)
-    : getModelRankingReal(scope, limit);
+  if (isDemoMode || isDbUnavailable()) return getModelRankingDemo(scope, limit);
+  try {
+    return await getModelRankingReal(scope, limit);
+  } catch (err) {
+    markDbUnavailable(err);
+    return getModelRankingDemo(scope, limit);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -310,7 +318,7 @@ async function getOverviewReal(scope: Scope): Promise<Overview> {
 }
 
 function getOverviewDemo(scope: Scope): Overview {
-  const store = getDemoStore();
+  const store = demoSource();
   const list = store.requests.filter((r) => scope === "all" || r.userId === scope);
   const inputTokens = list.reduce((s, r) => s + r.inputTokens, 0);
   const outputTokens = list.reduce((s, r) => s + r.outputTokens, 0);
@@ -330,7 +338,13 @@ function getOverviewDemo(scope: Scope): Overview {
 }
 
 export async function getOverview(scope: Scope): Promise<Overview> {
-  return isDemoMode ? getOverviewDemo(scope) : getOverviewReal(scope);
+  if (isDemoMode || isDbUnavailable()) return getOverviewDemo(scope);
+  try {
+    return await getOverviewReal(scope);
+  } catch (err) {
+    markDbUnavailable(err);
+    return getOverviewDemo(scope);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -364,7 +378,7 @@ async function getUsageTotalsReal(scope: Scope, period: UsagePeriod): Promise<Us
 }
 
 function getUsageTotalsDemo(scope: Scope, period: UsagePeriod): UsageTotals {
-  const store = getDemoStore();
+  const store = demoSource();
   let list = store.requests.filter((r) => scope === "all" || r.userId === scope);
   if (period === "month") {
     const nowBkk = new Date(Date.now() + TZ_OFFSET_MS);
@@ -383,7 +397,13 @@ export async function getUsageTotals(
   scope: Scope,
   period: UsagePeriod,
 ): Promise<UsageTotals> {
-  return isDemoMode ? getUsageTotalsDemo(scope, period) : getUsageTotalsReal(scope, period);
+  if (isDemoMode || isDbUnavailable()) return getUsageTotalsDemo(scope, period);
+  try {
+    return await getUsageTotalsReal(scope, period);
+  } catch (err) {
+    markDbUnavailable(err);
+    return getUsageTotalsDemo(scope, period);
+  }
 }
 
 /**
@@ -396,8 +416,8 @@ export async function getSpendInWindows(
   scope: Scope,
   windows: { cycleSince: Date; daySince: Date },
 ): Promise<{ cycleSpendUsd: number; dailySpendUsd: number }> {
-  if (isDemoMode) {
-    const store = getDemoStore();
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     const list = store.requests.filter((r) => scope === "all" || r.userId === scope);
     const cycleMs = windows.cycleSince.getTime();
     const dayMs = windows.daySince.getTime();
@@ -411,16 +431,21 @@ export async function getSpendInWindows(
     return { cycleSpendUsd: cycle, dailySpendUsd: daily };
   }
 
-  const userCond = scope === "all" ? sql`1=1` : sql`user_id = ${scope}`;
-  const rows = await rawRows(sql`
-    select
-      coalesce(sum(case when created_at >= ${windows.cycleSince.toISOString()} then cost_usd else 0 end), 0)::float8 as cycle_cost,
-      coalesce(sum(case when created_at >= ${windows.daySince.toISOString()} then cost_usd else 0 end), 0)::float8 as day_cost
-    from requests
-    where ${userCond}
-  `);
-  const r = rows[0] ?? {};
-  return { cycleSpendUsd: num(r.cycle_cost), dailySpendUsd: num(r.day_cost) };
+  try {
+    const userCond = scope === "all" ? sql`1=1` : sql`user_id = ${scope}`;
+    const rows = await rawRows(sql`
+      select
+        coalesce(sum(case when created_at >= ${windows.cycleSince.toISOString()} then cost_usd else 0 end), 0)::float8 as cycle_cost,
+        coalesce(sum(case when created_at >= ${windows.daySince.toISOString()} then cost_usd else 0 end), 0)::float8 as day_cost
+      from requests
+      where ${userCond}
+    `);
+    const r = rows[0] ?? {};
+    return { cycleSpendUsd: num(r.cycle_cost), dailySpendUsd: num(r.day_cost) };
+  } catch (err) {
+    markDbUnavailable(err);
+    return getSpendInWindows(scope, windows);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -439,7 +464,7 @@ async function listRequestsReal(
   if (filter.q) {
     const like = `%${filter.q.toLowerCase()}%`;
     conds.push(
-      sql`(lower(model) like ${like} or lower(agent) like ${like} or lower(public_model) like ${like} or lower(provider_name) like ${like})`,
+      sql`(lower(model) like ${like} or lower(agent) like ${like} or lower(public_model) like ${like})`,
     );
   }
   if (filter.status && filter.status !== "all") {
@@ -449,7 +474,7 @@ async function listRequestsReal(
 
   const countRows = await rawRows(sql`select count(*)::int as c from requests where ${where}`);
   const rows = await rawRows(sql`
-    select id, provider_name, model, public_model, agent, status, http_status,
+    select id, model, public_model, agent, status, http_status,
       input_tokens, output_tokens, latency_ms, cost_usd, error, created_at
     from requests
     where ${where}
@@ -460,7 +485,6 @@ async function listRequestsReal(
   return {
     items: rows.map((r) => ({
       id: num(r.id),
-      providerName: String(r.provider_name ?? ""),
       model: String(r.model),
       publicModel: String(r.public_model ?? ""),
       agent: String(r.agent ?? ""),
@@ -481,14 +505,14 @@ function listRequestsDemo(
   scope: Scope,
   filter: RequestFilter,
 ): { items: RequestDTO[]; total: number } {
-  const store = getDemoStore();
+  const store = demoSource();
   const page = filter.page ?? 1;
   const perPage = filter.perPage ?? 20;
   let list = store.requests.filter((r) => scope === "all" || r.userId === scope);
   if (filter.q) {
     const q = filter.q.toLowerCase();
     list = list.filter((r) =>
-      [r.model, r.agent, r.publicModel, r.providerName].some((v) =>
+      [r.model, r.agent, r.publicModel].some((v) =>
         v.toLowerCase().includes(q),
       ),
     );
@@ -504,7 +528,6 @@ function listRequestsDemo(
 
 export function toRequestDTO(r: {
   id: number;
-  providerName: string;
   model: string;
   publicModel: string;
   agent: string;
@@ -519,7 +542,6 @@ export function toRequestDTO(r: {
 }): RequestDTO {
   return {
     id: r.id,
-    providerName: r.providerName,
     model: r.model,
     publicModel: r.publicModel,
     agent: r.agent,
@@ -539,7 +561,13 @@ export async function listRequests(
   scope: Scope,
   filter: RequestFilter = {},
 ): Promise<{ items: RequestDTO[]; total: number }> {
-  return isDemoMode ? listRequestsDemo(scope, filter) : listRequestsReal(scope, filter);
+  if (isDemoMode || isDbUnavailable()) return listRequestsDemo(scope, filter);
+  try {
+    return await listRequestsReal(scope, filter);
+  } catch (err) {
+    markDbUnavailable(err);
+    return listRequestsDemo(scope, filter);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -574,7 +602,7 @@ async function getPublicModelUsageReal(
 function getPublicModelUsageDemo(
   scope: Scope,
 ): Map<string, { requests: number; tokens: number; costUsd: number }> {
-  const store = getDemoStore();
+  const store = demoSource();
   const list = store.requests.filter((r) => scope === "all" || r.userId === scope);
   const map = new Map<string, { requests: number; tokens: number; costUsd: number }>();
   for (const r of list) {
@@ -590,7 +618,13 @@ function getPublicModelUsageDemo(
 export async function getPublicModelUsage(
   scope: Scope,
 ): Promise<Map<string, { requests: number; tokens: number; costUsd: number }>> {
-  return isDemoMode ? getPublicModelUsageDemo(scope) : getPublicModelUsageReal(scope);
+  if (isDemoMode || isDbUnavailable()) return getPublicModelUsageDemo(scope);
+  try {
+    return await getPublicModelUsageReal(scope);
+  } catch (err) {
+    markDbUnavailable(err);
+    return getPublicModelUsageDemo(scope);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -624,7 +658,7 @@ async function getKeyUsageReal(scope: Scope): Promise<Map<number, KeyUsage>> {
 }
 
 function getKeyUsageDemo(scope: Scope): Map<number, KeyUsage> {
-  const store = getDemoStore();
+  const store = demoSource();
   const list = store.requests.filter((r) => scope === "all" || r.userId === scope);
   const map = new Map<number, KeyUsage>();
   for (const r of list) {
@@ -639,5 +673,103 @@ function getKeyUsageDemo(scope: Scope): Map<number, KeyUsage> {
 }
 
 export async function getKeyUsage(scope: Scope): Promise<Map<number, KeyUsage>> {
-  return isDemoMode ? getKeyUsageDemo(scope) : getKeyUsageReal(scope);
+  if (isDemoMode || isDbUnavailable()) return getKeyUsageDemo(scope);
+  try {
+    return await getKeyUsageReal(scope);
+  } catch (err) {
+    markDbUnavailable(err);
+    return getKeyUsageDemo(scope);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// สุขภาพของ route (ใช้แสดงในกล่องรายละเอียดโมเดล)
+// ---------------------------------------------------------------------------
+
+export type RouteHealth = {
+  /** จำนวน request ของวันนี้ (เที่ยงคืนกรุงเทพฯ) */
+  requests: number;
+  /** สัดส่วนที่สำเร็จ (0–1) — แสดงเป็น uptime */
+  successRate: number;
+  avgLatencyMs: number;
+  totalTokens: number;
+  /** ไม่มีข้อมูลเลย (ยังไม่เคยถูกเรียก) */
+  empty: boolean;
+};
+
+/** จุดเริ่ม "วันนี้" ตามเวลากรุงเทพฯ คืนเป็น timestamp UTC ที่เทียบเท่า */
+function todayStartUtcMs(now = Date.now()): number {
+  const d = new Date(now + TZ_OFFSET_MS);
+  d.setUTCHours(0, 0, 0, 0);
+  return d.getTime() - TZ_OFFSET_MS;
+}
+
+/**
+ * สถิติวันนี้ของ route — อ่านจากคอลัมน์ uptime ในตาราง models ตรง ๆ
+ *
+ * logRequest บวกตัวเลขลงคอลัมน์ของโมเดลที่ถูกเรียกจริงทุกรอบ (ทั้ง /v1 และ Web Agent)
+ * route หนึ่งมีได้หลายปลายทาง (fallback) จึงรวมตัวเลขจากทุกปลายทางของ route นั้น
+ * ถ้าวันนี้อัตราที่ยังไม่เคยถูกเรียกจะคืน empty = "ยังไม่มีข้อมูล" โดยไม่ต้อง scan requests
+ */
+async function getRouteHealthReal(publicModel: string): Promise<RouteHealth> {
+  await ensureUptimeColumns();
+  const rows = await rawRows(sql`
+    select coalesce(sum(m.uptime_requests), 0)::int as requests,
+           coalesce(sum(m.uptime_ok), 0)::int as ok,
+           coalesce(sum(m.uptime_latency_ms), 0)::bigint as latency_sum,
+           coalesce(sum(m.uptime_tokens), 0)::bigint as tokens
+    from routes r
+    join route_targets rt on rt.route_id = r.id
+    join models m on m.id = rt.model_ref_id
+    where r.public_model = ${publicModel}
+      and m.uptime_day = ${bangkokDay()}
+  `);
+  const r = rows[0] ?? {};
+  const total = num(r.requests);
+  return {
+    requests: total,
+    successRate: total > 0 ? num(r.ok) / total : 1,
+    avgLatencyMs: total > 0 ? Math.round(num(r.latency_sum) / total) : 0,
+    totalTokens: num(r.tokens),
+    empty: total === 0,
+  };
+}
+
+function getRouteHealthDemo(publicModel: string): RouteHealth {
+  const since = todayStartUtcMs();
+  const list = demoSource().requests.filter(
+    (r) => r.publicModel === publicModel && r.createdAt.getTime() > since,
+  );
+  const ok = list.filter((r) => r.status === "success").length;
+  return {
+    requests: list.length,
+    successRate: list.length > 0 ? ok / list.length : 1,
+    avgLatencyMs:
+      list.length > 0 ? Math.round(list.reduce((s, r) => s + r.latencyMs, 0) / list.length) : 0,
+    totalTokens: list.reduce((s, r) => s + r.inputTokens + r.outputTokens, 0),
+    empty: list.length === 0,
+  };
+}
+
+/**
+ * สถิติวันนี้ของ route — ถ้ายังไม่เคยถูกเรียกจะคืน empty เพื่อแสดง "ยังไม่มีข้อมูล"
+ *
+ * แคชไว้สั้น ๆ เพราะกดเปิดกล่องรายละเอียดซ้ำไม่ควรยิง query ซ้ำทุกครั้ง
+ * ตัวเลขในคอลัมน์ถูกบวกทุก request ที่จบ จึงค้างสุดแค่ช่วงสั้นเท่านั้น
+ */
+const HEALTH_TTL_MS = 20_000;
+const healthCache = new Map<string, { at: number; value: RouteHealth }>();
+
+export async function getRouteHealth(publicModel: string): Promise<RouteHealth> {
+  if (isDemoMode || isDbUnavailable()) return getRouteHealthDemo(publicModel);
+  const hit = healthCache.get(publicModel);
+  if (hit && Date.now() - hit.at < HEALTH_TTL_MS) return hit.value;
+  try {
+    const value = await getRouteHealthReal(publicModel);
+    healthCache.set(publicModel, { at: Date.now(), value });
+    return value;
+  } catch (err) {
+    markDbUnavailable(err);
+    return getRouteHealthDemo(publicModel);
+  }
 }

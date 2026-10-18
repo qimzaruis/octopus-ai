@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Icon from "@/components/Icon";
 import { useT } from "@/lib/i18n/client";
 
 /**
@@ -39,7 +40,10 @@ export default function CopyButton({
       aria-label={t("คัดลอก {value}", { value })}
       className={`inline-flex items-center gap-1.5 rounded-md border border-white/[0.07] bg-white/5 px-2 py-1 text-micro text-fg-muted transition hover:bg-white/[0.09] hover:text-fg ${className}`}
     >
-      <i className={`fa-solid ${copied ? "fa-check text-leaf" : "fa-copy"} text-micro`} />
+      <Icon
+        name={copied ? "fa-check" : "fa-copy"}
+        className={`text-micro ${copied ? "text-leaf" : ""}`}
+      />
       {copied ? t("คัดลอกแล้ว") : (label ?? t("คัดลอก"))}
     </button>
   );

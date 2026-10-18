@@ -1,6 +1,7 @@
 import type { ModelRank } from "@/lib/data/usage";
 import { formatLatency, formatNumber, formatUsd } from "@/lib/format";
 import { getT } from "@/lib/i18n/server";
+import Icon from "@/components/Icon";
 
 const RANK_STYLE = [
   "bg-amber-glow/15 text-amber-glow",
@@ -10,7 +11,7 @@ const RANK_STYLE = [
 
 /**
  * RankingList — อันดับโมเดลที่ใช้มากที่สุด พร้อมแถบสัดส่วน tokens
- * ตัวเลข tokens เด่นชัด แต่ยังแสดง provider / latency / requests ประกอบ
+ * ตัวเลข tokens เด่นชัด พร้อม latency และจำนวน request ประกอบ (ไม่แสดงค่ายต้นทาง)
  */
 export default async function RankingList({
   ranking,
@@ -25,7 +26,9 @@ export default async function RankingList({
   if (ranking.length === 0) {
     return (
       <div className="py-12 text-center">
-        <i className="fa-solid fa-chart-simple mb-3 block text-2xl text-fg-subtle" />
+        <span className="mb-3 flex justify-center text-2xl">
+          <Icon name="fa-chart-simple" className="text-fg-subtle" />
+        </span>
         <p className="text-sm text-fg-subtle">{emptyText ?? t("ยังไม่มีการใช้งาน")}</p>
       </div>
     );
@@ -49,7 +52,7 @@ export default async function RankingList({
                   {r.model}
                 </p>
                 <p className="mt-0.5 text-label text-fg-subtle">
-                  {r.provider} · {formatLatency(r.avgLatencyMs)} ·{" "}
+                  {formatLatency(r.avgLatencyMs)} ·{" "}
                   {formatNumber(r.requests)} req
                 </p>
               </div>

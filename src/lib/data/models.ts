@@ -2,9 +2,21 @@ import { asc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { models, providers, routeTargets, routes } from "@/db/schema";
 import { isDemoMode } from "@/lib/config";
-import { getDemoStore } from "@/lib/demo/store";
+import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
+import { demoSource } from "@/lib/demo/store";
 import { getPlan, cycleStart, dayStart, computeQuota, type QuotaUsage } from "@/lib/plans";
 import { getUsage, type UsageBucket } from "@/lib/data/usage";
+import { modelPlanRequirements } from "@/lib/data/plans";
+import { cached } from "@/lib/catalog-cache";
+
+/** อายุแคชของข้อมูล catalog (route/ปลายทาง/แผน) — ล้างทันทีที่แอดมินบันทึก */
+const CATALOG_TTL_MS = 60_000;
+
+/** แผนขั้นต่ำที่จำเป็นต้องมีเพื่อใช้โมเดล/route นี้ (null = ใช้ได้ทุกแผน) */
+export type PlanRequirement = {
+  requiredPlanTier: number | null;
+  requiredPlanLabel: string | null;
+};
 
 /** โมเดลที่ผู้ใช้เห็นได้ (enabled + visibleToUsers) */
 export type PublicModelDTO = {
@@ -21,7 +33,7 @@ export type PublicModelDTO = {
   logoUrl: string | null;
   /** ค่าใช้จ่ายต่อ request โดยประมาณ (1,000 in + 500 out tokens) */
   sampleCostUsd: number;
-};
+} & PlanRequirement;
 
 /** โมเดลทั้งหมดสําหรับหน้า admin (รวมที่ซ่อนจากผู้ใช้) */
 export type AdminModelDTO = PublicModelDTO & { enabled: boolean; visibleToUsers: boolean };
@@ -43,7 +55,7 @@ export type PublicRouteDTO = {
   outputPricePerM: number;
   /** โมเดลปลายทาง (fallback) เรียงตามลําดับ — แสดงเมื่อ displayMode = model */
   targets: { label: string; contextWindow: number; supportsVision: boolean }[];
-};
+} & PlanRequirement;
 
 type ModelRow = {
   id: number;
@@ -57,7 +69,7 @@ type ModelRow = {
   logoUrl: string | null;
 };
 
-function toPublicDTO(m: ModelRow, providerName: string): PublicModelDTO {
+function toPublicDTO(m: ModelRow, providerName: string, req: PlanRequirement): PublicModelDTO {
   return {
     id: m.id,
     providerId: m.providerId,
@@ -71,17 +83,48 @@ function toPublicDTO(m: ModelRow, providerName: string): PublicModelDTO {
     logoUrl: m.logoUrl,
     sampleCostUsd:
       (1000 / 1_000_000) * m.inputPricePerM + (500 / 1_000_000) * m.outputPricePerM,
+    ...req,
   };
+}
+
+const NO_REQ: PlanRequirement = { requiredPlanTier: null, requiredPlanLabel: null };
+
+/**
+ * แผนขั้นต่ำของ route = ขั้นที่สูงที่สุดในบรรดาโมเดลปลายทางที่เปิดใช้
+ * (เพราะ fallback อาจไปจบที่โมเดลใดก็ได้ในชุด จึงต้องถือสิทธิ์ตามตัวที่เข้มสุด)
+ */
+function routeRequirement(
+  targetModelIds: number[],
+  reqs: Map<number, { tier: number; label: string }>,
+): PlanRequirement {
+  let worst: { tier: number; label: string } | null = null;
+  for (const id of targetModelIds) {
+    const r = reqs.get(id);
+    if (r && (!worst || r.tier > worst.tier)) worst = r;
+  }
+  return worst
+    ? { requiredPlanTier: worst.tier, requiredPlanLabel: worst.label }
+    : NO_REQ;
 }
 
 /** รายการโมเดลที่ผู้ใช้เรียกใช้ได้จริง */
 export async function listPublicModels(): Promise<PublicModelDTO[]> {
-  if (isDemoMode) {
-    const store = getDemoStore();
+  const reqs = await modelPlanRequirements();
+  const reqOf = (id: number) => {
+    const r = reqs.get(id);
+    return r ? { requiredPlanTier: r.tier, requiredPlanLabel: r.label } : NO_REQ;
+  };
+
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     return store.models
       .filter((m) => m.enabled && m.visibleToUsers)
       .map((m) =>
-        toPublicDTO(m, store.providers.find((p) => p.id === m.providerId)?.name ?? "?"),
+        toPublicDTO(
+          m,
+          store.providers.find((p) => p.id === m.providerId)?.name ?? "?",
+          reqOf(m.id),
+        ),
       )
       .sort(
         (a, b) =>
@@ -89,18 +132,25 @@ export async function listPublicModels(): Promise<PublicModelDTO[]> {
       );
   }
 
-  const db = getDb();
-  const [modelRows, providerRows] = await Promise.all([
-    db
-      .select()
-      .from(models)
-      .where(eq(models.visibleToUsers, true))
-      .orderBy(asc(models.providerId), asc(models.modelId)),
-    db.select().from(providers),
-  ]);
-  return modelRows
-    .filter((m) => m.enabled)
-    .map((m) => toPublicDTO(m, providerRows.find((p) => p.id === m.providerId)?.name ?? "?"));
+  try {
+    const db = getDb();
+    const [modelRows, providerRows] = await Promise.all([
+      db
+        .select()
+        .from(models)
+        .where(eq(models.visibleToUsers, true))
+        .orderBy(asc(models.providerId), asc(models.modelId)),
+      db.select().from(providers),
+    ]);
+    return modelRows
+      .filter((m) => m.enabled)
+      .map((m) =>
+        toPublicDTO(m, providerRows.find((p) => p.id === m.providerId)?.name ?? "?", reqOf(m.id)),
+      );
+  } catch (err) {
+    markDbUnavailable(err);
+    return listPublicModels();
+  }
 }
 
 /**
@@ -108,13 +158,71 @@ export async function listPublicModels(): Promise<PublicModelDTO[]> {
  *
  * อ้างอิง route เป็นหลัก (route = "โมเดล" ที่ผู้ใช้เรียก) เพราะผู้ใช้ไม่ควรรู้ว่า
  * เบื้องหลังส่งต่อไปค่ายไหน ถ้า displayMode = model จะแนบรายชื่อโมเดลปลายทางมาด้วย
+ *
+ * อ่านจากแคชก่อน — ชุด query เดียวกันนี้ถูกเรียกในทุก request ของแชทและ API
+ * ถ้าไม่แคชจะเสียเวลาไป Supabase เกิน 1 วินาทีก่อนที่โมเดลจะเริ่มตอบ
+ * (แอดมินบันทึกการตั้งค่าเมื่อไหร่ก็ล้างแคชทันทีใน revalidateAdmin)
  */
 export async function listPublicRoutes(): Promise<PublicRouteDTO[]> {
-  if (isDemoMode) {
-    const store = getDemoStore();
+  // ตอน DB ถูกข้าม อย่าเอาผลว่างไปใส่แคช เพราะจะค้างตาถึงครบอายุแม้ DB ฟื้นแล้ว
+  if (isDemoMode || isDbUnavailable()) return loadPublicRoutes();
+  return cached("public-routes", CATALOG_TTL_MS, loadPublicRoutes);
+}
+
+/**
+ * อุ่นแคชตั้งแต่ module ถูกโหลด — request แรกหลังเซิร์ฟเวอร์สตาร์ท/รีสตาร์ท
+ * จะได้ไม่ต้องรอการเชื่อมต่อใหม่กับ Supabase (วัดได้ ~5 วินาทีถ้าต้องรอแบบนั้น)
+ */
+if (!isDemoMode && process.env.DATABASE_URL) {
+  void listPublicRoutes().catch(() => undefined);
+}
+
+async function loadPublicRoutes(): Promise<PublicRouteDTO[]> {
+  const reqs = await modelPlanRequirements();
+
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     return store.routes
       .filter((r) => r.enabled)
-      .map((r) => ({
+      .map((r) => {
+        const targets = store.routeTargets
+          .filter((t) => t.routeId === r.id && t.enabled)
+          .sort((a, b) => a.priority - b.priority);
+        return {
+          id: r.id,
+          publicModel: r.publicModel,
+          displayName: r.displayName || r.publicModel,
+          description: r.description,
+          displayMode: r.displayMode,
+          logoUrl: r.logoUrl ?? null,
+          inputPricePerM: Number(r.inputPricePerM ?? 0),
+          outputPricePerM: Number(r.outputPricePerM ?? 0),
+          targets: targets.map((t) => {
+            const m = store.models.find((x) => x.id === t.modelRefId);
+            return {
+              label: m?.displayName || m?.modelId || "?",
+              contextWindow: m?.contextWindow ?? 0,
+              supportsVision: m?.supportsVision ?? false,
+            };
+          }),
+          ...routeRequirement(targets.map((t) => t.modelRefId), reqs),
+        };
+      });
+  }
+
+  try {
+    const db = getDb();
+    const [routeRows, targetRows, modelRows] = await Promise.all([
+      db.select().from(routes).where(eq(routes.enabled, true)).orderBy(asc(routes.id)),
+      db.select().from(routeTargets).orderBy(asc(routeTargets.priority)),
+      db.select().from(models),
+    ]);
+
+    return routeRows.map((r) => {
+      const targets = targetRows
+        .filter((t) => t.routeId === r.id && t.enabled)
+        .sort((a, b) => a.priority - b.priority);
+      return {
         id: r.id,
         publicModel: r.publicModel,
         displayName: r.displayName || r.publicModel,
@@ -123,70 +231,54 @@ export async function listPublicRoutes(): Promise<PublicRouteDTO[]> {
         logoUrl: r.logoUrl ?? null,
         inputPricePerM: Number(r.inputPricePerM ?? 0),
         outputPricePerM: Number(r.outputPricePerM ?? 0),
-        targets: store.routeTargets
-          .filter((t) => t.routeId === r.id && t.enabled)
-          .sort((a, b) => a.priority - b.priority)
-          .map((t) => {
-            const m = store.models.find((x) => x.id === t.modelRefId);
-            return {
-              label: m?.displayName || m?.modelId || "?",
-              contextWindow: m?.contextWindow ?? 0,
-              supportsVision: m?.supportsVision ?? false,
-            };
-          }),
-      }));
+        targets: targets.map((t) => {
+          const m = modelRows.find((x) => x.id === t.modelRefId);
+          return {
+            label: m?.displayName || m?.modelId || "?",
+            contextWindow: m?.contextWindow ?? 0,
+            supportsVision: m?.supportsVision ?? false,
+          };
+        }),
+        ...routeRequirement(targets.map((t) => t.modelRefId), reqs),
+      };
+    });
+  } catch (err) {
+    markDbUnavailable(err);
+    return listPublicRoutes();
   }
-
-  const db = getDb();
-  const [routeRows, targetRows, modelRows] = await Promise.all([
-    db.select().from(routes).where(eq(routes.enabled, true)).orderBy(asc(routes.id)),
-    db.select().from(routeTargets).orderBy(asc(routeTargets.priority)),
-    db.select().from(models),
-  ]);
-
-  return routeRows.map((r) => ({
-    id: r.id,
-    publicModel: r.publicModel,
-    displayName: r.displayName || r.publicModel,
-    description: r.description,
-    displayMode: r.displayMode,
-    logoUrl: r.logoUrl ?? null,
-    inputPricePerM: Number(r.inputPricePerM ?? 0),
-    outputPricePerM: Number(r.outputPricePerM ?? 0),
-    targets: targetRows
-      .filter((t) => t.routeId === r.id && t.enabled)
-      .sort((a, b) => a.priority - b.priority)
-      .map((t) => {
-        const m = modelRows.find((x) => x.id === t.modelRefId);
-        return {
-          label: m?.displayName || m?.modelId || "?",
-          contextWindow: m?.contextWindow ?? 0,
-          supportsVision: m?.supportsVision ?? false,
-        };
-      }),
-  }));
 }
 
 /** โมเดลทั้งหมดสําหรับหน้า admin */
 export async function listAllModelsForAdmin(): Promise<AdminModelDTO[]> {
-  if (isDemoMode) {
-    const store = getDemoStore();
+  const reqs = await modelPlanRequirements();
+  const reqOf = (id: number) => {
+    const r = reqs.get(id);
+    return r ? { requiredPlanTier: r.tier, requiredPlanLabel: r.label } : NO_REQ;
+  };
+
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
     return store.models.map((m) => ({
-      ...toPublicDTO(m, store.providers.find((p) => p.id === m.providerId)?.name ?? "?"),
+      ...toPublicDTO(m, store.providers.find((p) => p.id === m.providerId)?.name ?? "?", reqOf(m.id)),
       enabled: m.enabled,
       visibleToUsers: m.visibleToUsers,
     }));
   }
-  const db = getDb();
-  const [modelRows, providerRows] = await Promise.all([
-    db.select().from(models).orderBy(asc(models.providerId), asc(models.modelId)),
-    db.select().from(providers),
-  ]);
-  return modelRows.map((m) => ({
-    ...toPublicDTO(m, providerRows.find((p) => p.id === m.providerId)?.name ?? "?"),
-    enabled: m.enabled,
-    visibleToUsers: m.visibleToUsers,
-  }));
+  try {
+    const db = getDb();
+    const [modelRows, providerRows] = await Promise.all([
+      db.select().from(models).orderBy(asc(models.providerId), asc(models.modelId)),
+      db.select().from(providers),
+    ]);
+    return modelRows.map((m) => ({
+      ...toPublicDTO(m, providerRows.find((p) => p.id === m.providerId)?.name ?? "?", reqOf(m.id)),
+      enabled: m.enabled,
+      visibleToUsers: m.visibleToUsers,
+    }));
+  } catch (err) {
+    markDbUnavailable(err);
+    return listAllModelsForAdmin();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -242,7 +334,7 @@ async function userMetricsReal(userId: string): Promise<UserMetrics> {
 }
 
 function userMetricsDemo(userId: string): UserMetrics {
-  const store = getDemoStore();
+  const store = demoSource();
   const list = store.requests.filter((r) => r.userId === userId);
   const byModel = new Map<string, number>();
   const byAgent = new Map<string, number>();
@@ -272,7 +364,13 @@ function userMetricsDemo(userId: string): UserMetrics {
 }
 
 export async function getUserMetrics(userId: string): Promise<UserMetrics> {
-  return isDemoMode ? userMetricsDemo(userId) : userMetricsReal(userId);
+  if (isDemoMode || isDbUnavailable()) return userMetricsDemo(userId);
+  try {
+    return await userMetricsReal(userId);
+  } catch (err) {
+    markDbUnavailable(err);
+    return userMetricsDemo(userId);
+  }
 }
 
 /**

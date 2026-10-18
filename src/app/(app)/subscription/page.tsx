@@ -5,6 +5,7 @@ import PageHeader from "@/components/PageHeader";
 import Badge from "@/components/Badge";
 import { formatUsd } from "@/lib/format";
 import { getT } from "@/lib/i18n/server";
+import Icon from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -59,27 +60,26 @@ export default async function SubscriptionPage() {
               </p>
               <ul className="mt-4 space-y-2 text-caption text-fg-muted">
                 <li className="flex items-center gap-2">
-                  <i className="fa-solid fa-check text-leaf" />
+                  <Icon name="fa-check" className="text-leaf" />
                   {p.dailyQuotaUsd > 0
                     ? t("เพดานรายวัน {v}", { v: formatUsd(p.dailyQuotaUsd) })
                     : t("ไม่จํากัดรายวัน")}
                 </li>
                 <li className="flex items-center gap-2">
-                  <i className="fa-solid fa-check text-leaf" />
+                  <Icon name="fa-check" className="text-leaf" />
                   {p.cycleRequests > 0
                     ? t("{n} requests / รอบ", { n: String(p.cycleRequests) })
                     : t("ไม่จํากัดจํานวน requests")}
                 </li>
                 <li className="flex items-center gap-2">
-                  <i
-                    className={`fa-solid ${
-                      p.fallback ? "fa-check text-leaf" : "fa-xmark text-fg-subtle"
-                    }`}
+                  <Icon
+                    name={p.fallback ? "fa-check" : "fa-xmark"}
+                    className={p.fallback ? "text-leaf" : "text-fg-subtle"}
                   />
                   {t("Routing fallback {state}", { state: t(p.fallback ? "เปิด" : "ปิด") })}
                 </li>
                 <li className="flex items-center gap-2">
-                  <i className="fa-solid fa-check text-leaf" />
+                  <Icon name="fa-check" className="text-leaf" />
                   {t("ใช้พร้อมกันได้ {n} โมเดล", { n: p.concurrentModels })}
                 </li>
               </ul>
@@ -89,7 +89,7 @@ export default async function SubscriptionPage() {
                   title={t("การอัปเกรดแผนจะเปิดใช้งานเร็ว ๆ นี้")}
                   className="btn-secondary mt-5 w-full !py-2.5 text-caption"
                 >
-                  <i className="fa-solid fa-arrow-up text-label" /> {t("อัปเกรดเป็น Pro")}
+                  <Icon name="fa-arrow-up" className="text-label" /> {t("อัปเกรดเป็น Pro")}
                 </button>
               )}
             </div>

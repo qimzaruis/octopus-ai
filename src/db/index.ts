@@ -18,11 +18,14 @@ export function getDb() {
   if (!client) {
     client = postgres(normalizeDbUrl(raw), {
       prepare: false,
-      max: 10,
+      // ไม่เปิด connection แต่ละ query ใหม่ เพราะการเปิดหนึ่งครั้งไป Supabase pooler วัดได้ ~2.5 วินาที
+      // (query ปกติบน connection ที่เปิดแล้วเพียง ~350ms) จึงใช้ connection น้อยตัวแต่เก็บไว้นาน
+      max: 3,
+      // ถ้าปิด idle_timeout เดิม (20s) ทุกครั้งที่ผู้ใช้พิมพ์ช้ากว่า 20 วินาทีจะเจอค่าเปิดใหม่
+      idle_timeout: 60 * 10,
+      max_lifetime: 60 * 30,
       // ถ้า DB เข้าถึงไม่ได้ ให้ล้มเร็วแทนที่จะค้าง 20+ วินาที (fallback profile ใน auth.ts)
       connect_timeout: 5,
-      idle_timeout: 20,
-      max_lifetime: 60 * 30,
     });
   }
   return drizzle(client, { schema });

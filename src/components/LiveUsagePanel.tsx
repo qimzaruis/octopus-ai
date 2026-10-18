@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useT } from "@/lib/i18n/client";
+import Icon from "@/components/Icon";
 
 const BARS = [42, 58, 36, 71, 52, 88, 64, 96];
 
@@ -91,11 +92,11 @@ export default function LiveUsagePanel() {
 
       <div className="mt-4 flex flex-wrap items-center gap-2.5">
         <span className="rounded-md bg-white/[0.05] px-3 py-1.5 text-label text-fg-muted">
-          <i className="fa-solid fa-shield-halved mr-1.5 text-leaf" />
+          <Icon name="fa-shield-halved" className="mr-1.5 text-leaf" />
           {t("คีย์เก็บฝั่ง server")}
         </span>
         <span className="rounded-md bg-white/[0.05] px-3 py-1.5 text-label text-fg-muted">
-          <i className="fa-solid fa-rotate mr-1.5 text-aqua" />
+          <Icon name="fa-rotate" className="mr-1.5 text-aqua" />
           {t("fallback อัตโนมัติ")}
         </span>
       </div>

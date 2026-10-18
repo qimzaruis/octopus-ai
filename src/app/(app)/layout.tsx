@@ -6,6 +6,7 @@ import LanguageSwitcher from "@/components/LanguageSwitcher";
 import { isDemoMode } from "@/lib/config";
 import { formatUsd } from "@/lib/format";
 import { getT } from "@/lib/i18n/server";
+import Icon from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         { href: "/dashboard", label: "Dashboard", icon: "fa-solid fa-chart-pie" },
         { href: "/models", label: t("โมเดล"), icon: "fa-solid fa-cube" },
         { href: "/requests", label: t("ประวัติการเรียกใช้"), icon: "fa-solid fa-clock-rotate-left" },
-        { href: "/playground", label: "Playground", icon: "fa-solid fa-comments" },
+      ],
+    },
+    {
+      title: t("บริการ"),
+      items: [
+        { href: "/agent", label: "Web Agent", icon: "fa-solid fa-robot" },
+        { href: "/images", label: t("สร้างรูปภาพ"), icon: "fa-solid fa-wand-magic-sparkles" },
       ],
     },
     {
@@ -45,6 +52,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         { href: "/admin/providers", label: "Providers", icon: "fa-solid fa-plug" },
         { href: "/admin/models", label: t("โมเดลที่แสดง"), icon: "fa-solid fa-list-check" },
         { href: "/admin/plans", label: t("แผนและโควต้า"), icon: "fa-solid fa-gauge-high" },
+        { href: "/admin/chat", label: t("ตั้งค่า Web Agent"), icon: "fa-solid fa-robot" },
       ],
     });
   }
@@ -76,14 +84,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             href="/keys"
             className="hidden items-center gap-2 rounded-md bg-white/[0.05] px-3.5 py-2 text-caption font-medium text-fg-muted transition-colors duration-fast hover:bg-white/[0.09] hover:text-fg sm:flex"
           >
-            <i className="fa-solid fa-key text-label" /> API Keys
+            <Icon name="fa-key" className="text-label" /> API Keys
           </Link>
 
           <Link
             href="/credits"
             className="flex items-center gap-2 rounded-md bg-white/[0.05] px-3.5 py-2 text-caption font-medium text-fg-muted transition-colors duration-fast hover:bg-white/[0.09]"
           >
-            <i className="fa-solid fa-coins text-amber-glow" />
+            <Icon name="fa-coins" className="text-amber-glow" />
             <span className="tnum">{formatUsd(user.credits)}</span>
             <span className="hidden text-micro text-fg-subtle sm:inline">USD</span>
           </Link>

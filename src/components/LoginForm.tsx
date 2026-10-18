@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { supabaseConfigured } from "@/lib/config";
 import { useT } from "@/lib/i18n/client";
+import Icon from "@/components/Icon";
 
 /**
  * demoMode รับเป็น prop จาก server (ไม่ประเมิน isDemoMode ฝั่ง client
@@ -21,8 +23,10 @@ export default function LoginForm({
   const t = useT();
   const [loading, setLoading] = useState<"google" | "demo-user" | "demo-admin" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [accepted, setAccepted] = useState(false);
 
   async function signInWithGoogle() {
+    if (!accepted) return;
     setLoading("google");
     setError(null);
     try {
@@ -33,7 +37,7 @@ export default function LoginForm({
           redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`,
         },
       });
-if (err) {
+      if (err) {
         setError(t("เชื่อมต่อ Google ไม่สําเร็จ กรุณาลองใหม่"));
         setLoading(null);
       }
@@ -43,7 +47,8 @@ if (err) {
     }
   }
 
-  async function demoLogin(role: "user" | "admin") {
+  function demoLogin(role: "user" | "admin") {
+    if (!accepted) return;
     const key = role === "admin" ? "demo-admin" : "demo-user";
     setLoading(key);
     router.push(`/auth/demo?role=${role}`);
@@ -53,34 +58,41 @@ if (err) {
     <div className="space-y-3">
       {error && (
         <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs text-rose-300">
-          <i className="fa-solid fa-circle-exclamation mr-2" />
+          <Icon name="fa-circle-exclamation" className="mr-2" />
           {error}
         </p>
       )}
 
-{supabaseConfigured ? (
+      {supabaseConfigured ? (
         <button
           onClick={signInWithGoogle}
-          disabled={loading !== null}
+          disabled={loading !== null || !accepted}
           className="group relative flex w-full items-center justify-center gap-3 overflow-hidden rounded-xl bg-white px-5 py-3.5 text-sm font-semibold text-ink-950 shadow-lg transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {loading === "google" ? (
-            <i className="fa-solid fa-circle-notch animate-spin" />
+            <Icon name="fa-circle-notch" className="animate-spin" />
           ) : (
-            <i className="fa-brands fa-google text-base" />
+            <Icon name="fa-google" className="text-base" />
           )}
           {t("ดําเนินการต่อด้วย Google")}
         </button>
       ) : (
         <button disabled className="btn-primary w-full !py-3.5 opacity-40">
-          <i className="fa-brands fa-google" />
+          <Icon name="fa-google" />
           {t("ดําเนินการต่อด้วย Google")}
         </button>
       )}
 
+      {!accepted && (
+        <p className="text-center text-micro text-fg-subtle">
+          <Icon name="fa-lock" className="mr-1.5" />
+          {t("ติ๊กยอมรับข้อกําหนดเพื่อปลดล็อกการเข้าสู่ระบบ")}
+        </p>
+      )}
+
       {!supabaseConfigured && (
         <p className="rounded-xl border border-amber-glow/20 bg-amber-glow/5 px-3.5 py-3 text-label leading-relaxed text-amber-glow/80">
-          <i className="fa-solid fa-circle-info mr-1.5" />
+          <Icon name="fa-circle-info" className="mr-1.5" />
           {t("ตั้งค่า")}{" "}
           <code className="rounded bg-black/30 px-1.5 py-0.5 text-amber-glow">
             NEXT_PUBLIC_SUPABASE_URL
@@ -100,30 +112,58 @@ if (err) {
 
           <button
             onClick={() => demoLogin("user")}
-            disabled={loading !== null}
+            disabled={loading !== null || !accepted}
             className="btn-ghost w-full !py-3"
           >
             {loading === "demo-user" ? (
-              <i className="fa-solid fa-circle-notch animate-spin" />
+              <Icon name="fa-circle-notch" className="animate-spin" />
             ) : (
-              <i className="fa-solid fa-user" />
+              <Icon name="fa-user" />
             )}
             {t("เข้าสู่ระบบเป็นผู้ใช้ทั่วไป")}
           </button>
           <button
             onClick={() => demoLogin("admin")}
-            disabled={loading !== null}
+            disabled={loading !== null || !accepted}
             className="btn-ghost w-full !py-3"
           >
             {loading === "demo-admin" ? (
-              <i className="fa-solid fa-circle-notch animate-spin" />
+              <Icon name="fa-circle-notch" className="animate-spin" />
             ) : (
-              <i className="fa-solid fa-user-shield" />
+              <Icon name="fa-user-shield" />
             )}
             {t("เข้าสู่ระบบเป็นแอดมิน")}
           </button>
         </>
       )}
+
+      {/* checkbox ยอมรับข้อกําหนด — อยู่ใต้ปุ่มเข้าสู่ระบบ บังคับก่อนกดได้จริง */}
+      <label className="mt-4 flex cursor-pointer items-start gap-2.5 border-t border-white/[0.07] px-1 pt-4 text-fg-muted">
+        <input
+          type="checkbox"
+          checked={accepted}
+          onChange={(e) => setAccepted(e.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-brand-500"
+        />
+        <span className="text-caption leading-relaxed">
+          {t("ฉันยอมรับ")}{" "}
+          <Link
+            href="/terms"
+            onClick={(e) => e.stopPropagation()}
+            className="font-medium text-pulse-300 underline decoration-pulse-300/40 underline-offset-2 transition hover:text-pulse hover:decoration-pulse"
+          >
+            {t("ข้อกําหนดการใช้งาน")}
+          </Link>{" "}
+          {t("และ")}{" "}
+          <Link
+            href="/privacy"
+            onClick={(e) => e.stopPropagation()}
+            className="font-medium text-pulse-300 underline decoration-pulse-300/40 underline-offset-2 transition hover:text-pulse hover:decoration-pulse"
+          >
+            {t("นโยบายความเป็นส่วนตัว")}
+          </Link>
+        </span>
+      </label>
     </div>
   );
 }

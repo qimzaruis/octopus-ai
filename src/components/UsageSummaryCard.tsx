@@ -6,6 +6,7 @@ import Badge from "@/components/Badge";
 import { formatUsd } from "@/lib/format";
 import type { UsageTotals } from "@/lib/data/usage";
 import { useT } from "@/lib/i18n/client";
+import Icon from "@/components/Icon";
 
 type Period = "cycle" | "all";
 
@@ -51,7 +52,7 @@ export default function UsageSummaryCard({
     <section className="card p-5 sm:p-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-start gap-2">
-          <i className="fa-solid fa-chart-simple mt-0.5 text-brand-400" />
+          <Icon name="fa-chart-simple" className="mt-0.5 text-brand-400" />
           <div>
             <h2 className="text-body-sm font-semibold text-fg">{t("สรุปการใช้งาน")}</h2>
             <p className="mt-0.5 text-caption text-fg-subtle">
@@ -77,7 +78,7 @@ export default function UsageSummaryCard({
               title={t("รอบบิลปัจจุบัน เทียบโควต้าของแผน")}
               className={`chip-toggle whitespace-nowrap ${isCycle ? "chip-toggle-active" : ""}`}
             >
-              <i className="fa-solid fa-calendar-day mr-1.5 text-micro" />
+              <Icon name="fa-calendar-day" className="mr-1.5 text-micro" />
               {t("รอบนี้")}
             </button>
             <button
@@ -87,7 +88,7 @@ export default function UsageSummaryCard({
               title={t("รวมทุกการใช้งานตั้งแต่เริ่มบัญชี")}
               className={`chip-toggle whitespace-nowrap ${!isCycle ? "chip-toggle-active" : ""}`}
             >
-              <i className="fa-solid fa-infinity mr-1.5 text-micro" />
+              <Icon name="fa-infinity" className="mr-1.5 text-micro" />
               {t("ทั้งหมด")}
             </button>
           </div>
@@ -98,7 +99,7 @@ export default function UsageSummaryCard({
       <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <div className="rounded-lg bg-white/[0.04] p-4">
           <p className="flex items-center gap-1.5 text-caption text-fg-muted">
-            <i className="fa-solid fa-receipt text-label text-amber-glow" /> {t("ค่าใช้จ่าย")}
+            <Icon name="fa-receipt" className="text-label text-amber-glow" /> {t("ค่าใช้จ่าย")}
           </p>
           <p className="tnum mt-2 text-stat font-semibold text-fg">
             {formatUsd(isCycle ? cycleSpendUsd : all.costUsd)}
@@ -110,7 +111,7 @@ export default function UsageSummaryCard({
 
         <div className="rounded-lg bg-white/[0.04] p-4">
           <p className="flex items-center gap-1.5 text-caption text-fg-muted">
-            <i className="fa-solid fa-calendar-day text-label text-brand-300" /> {t("ใช้ไปวันนี้")}
+            <Icon name="fa-calendar-day" className="text-label text-brand-300" /> {t("ใช้ไปวันนี้")}
           </p>
           <p className="tnum mt-2 text-stat font-semibold text-fg">{formatUsd(dailySpendUsd)}</p>
           <p className="mt-1 text-label text-fg-subtle">
@@ -120,7 +121,7 @@ export default function UsageSummaryCard({
 
         <div className="rounded-lg bg-white/[0.04] p-4">
           <p className="flex items-center gap-1.5 text-caption text-fg-muted">
-            <i className="fa-solid fa-gauge-high text-label text-pulse-300" /> {t("โควต้าคงเหลือ")}
+            <Icon name="fa-gauge-high" className="text-label text-pulse-300" /> {t("โควต้าคงเหลือ")}
           </p>
           <p className="tnum mt-2 text-stat font-semibold text-fg">
             {cycleQuotaUsd > 0 ? formatUsd(Math.max(0, cycleQuotaUsd - cycleSpendUsd)) : t("ไม่จํากัด")}
@@ -132,7 +133,7 @@ export default function UsageSummaryCard({
 
         <div className="rounded-lg bg-white/[0.04] p-4">
           <p className="flex items-center gap-1.5 text-caption text-fg-muted">
-            <i className="fa-solid fa-coins text-label text-amber-glow" /> {t("เครดิตคงเหลือ")}
+            <Icon name="fa-coins" className="text-label text-amber-glow" /> {t("เครดิตคงเหลือ")}
           </p>
           <p className="tnum mt-2 text-stat font-semibold text-fg">{formatUsd(credits)}</p>
           <p className="mt-1 text-label text-fg-subtle">{t("USD · หักตามใช้จริง")}</p>
@@ -149,7 +150,7 @@ export default function UsageSummaryCard({
             totalLabel={cycleQuotaUsd > 0 ? formatUsd(cycleQuotaUsd) : "∞"}
           />
           <QuotaBar
-            label={t("sub-quota รายวัน")}
+            label={t("โควต้ารายวัน")}
             pct={dailyPct}
             usedLabel={formatUsd(dailySpendUsd)}
             totalLabel={dailyQuotaUsd > 0 ? formatUsd(dailyQuotaUsd) : "∞"}
@@ -158,7 +159,7 @@ export default function UsageSummaryCard({
           <p className="text-caption text-fg-subtle sm:col-span-2">
             {cycleExhausted ? (
               <span className="text-rose-300">
-                <i className="fa-solid fa-circle-exclamation mr-1.5" />
+                <Icon name="fa-circle-exclamation" className="mr-1.5" />
                 {t("โควต้าของรอบนี้ใช้ครบแล้ว — ระบบจะไม่รีเซตตามรายวันจนกว่ารอบใหม่จะเริ่ม")}
               </span>
             ) : (

@@ -1,0 +1,582 @@
+import { createClient, type Client } from "@libsql/client";
+import { cached, invalidateCache } from "@/lib/catalog-cache";
+
+/**
+ * ที่เก็บประวัติแชทของ Web Agent — อยู่บน Turso (libSQL) แยกจาก Postgres หลัก
+ *
+ * ตั้งค่า CHAT_DATABASE_URL / CHAT_DATABASE_TOKEN ใน .env.local
+ * ตารางถูกสร้างอัตโนมัติเมื่อใช้งานครั้งแรก (CREATE TABLE IF NOT EXISTS) จึงไม่ต้องรัน migration
+ */
+
+let client: Client | null = null;
+let schemaReady: Promise<void> | null = null;
+
+function getChatUrl(): string {
+  const url = process.env.CHAT_DATABASE_URL;
+  if (!url) throw new Error("CHAT_DATABASE_URL is not configured");
+  return url;
+}
+
+export function getChatDb(): Client {
+  if (!client) {
+    client = createClient({
+      url: getChatUrl(),
+      authToken: process.env.CHAT_DATABASE_TOKEN || undefined,
+    });
+  }
+  return client;
+}
+
+const DDL = [
+  `create table if not exists chat_conversations (
+     id text primary key,
+     user_id text not null,
+     title text not null default '',
+     model text not null default '',
+     created_at text not null,
+     updated_at text not null,
+     deleted_at text
+   )`,
+  `create index if not exists chat_conversations_user_idx
+     on chat_conversations(user_id, updated_at desc)`,
+  `create table if not exists chat_messages (
+     id text primary key,
+     conversation_id text not null,
+     role text not null,
+     content text not null default '',
+     created_at text not null
+   )`,
+  `create index if not exists chat_messages_conv_idx
+     on chat_messages(conversation_id, created_at)`,
+  `create table if not exists chat_attachments (
+     id text primary key,
+     message_id text not null,
+     name text not null default '',
+     mime text not null default '',
+     data_url text not null default ''
+   )`,
+  `create index if not exists chat_attachments_msg_idx
+     on chat_attachments(message_id)`,
+  `create table if not exists chat_settings (
+     key text primary key,
+     value text not null default ''
+   )`,
+  `create table if not exists chat_files (
+     id text primary key,
+     user_id text not null,
+     conversation_id text not null default '',
+     name text not null default '',
+     kind text not null default 'html',
+     content text not null default '',
+     size_bytes integer not null default 0,
+     share_url text,
+     share_expires_at text,
+     created_at text not null
+   )`,
+  `create index if not exists chat_files_user_idx
+     on chat_files(user_id, created_at desc)`,
+  `create table if not exists image_jobs (
+     id text primary key,
+     user_id text not null,
+     prompt text not null default '',
+     model text not null default '',
+     ratio text not null default '1:1',
+     refs text not null default '[]',
+     status text not null default 'queued',
+     error text not null default '',
+     created_at text not null
+   )`,
+  `create index if not exists image_jobs_user_idx
+     on image_jobs(user_id, created_at desc)`,
+];
+
+/**
+ * ตารางเก่าที่ CREATE TABLE IF NOT EXISTS แก้ให้ไม่ได้ — เพิ่มคอลัมน์ให้ฐานข้อมูลที่มีอยู่ก่อน
+ * ถ้าคอลัมน์มีอยู่แล้วคำสั่งจะล้มเหลว ซึ่งข้ามได้
+ */
+const ALTERS = [`alter table chat_conversations add column deleted_at text`];
+
+/** สร้างตารางทั้งหมดถ้ายังไม่มี — เรียกครั้งเดียวต่อ process */
+export async function ensureChatSchema(): Promise<void> {
+  if (!schemaReady) {
+    schemaReady = (async () => {
+      const db = getChatDb();
+      // ส่งเป็น batch เดียว: Turso อยู่คนละเครื่อง แต่ละ statement คิดเป็น ~115ms
+      // ถ้าไล่ส่งทีละคำสั่งอย่างเดิม = ค้าง ~2 วินาทีตอน request แรกหลัง server รีสตาร์ท
+      await db.batch(DDL.map((stmt) => ({ sql: stmt })));
+      try {
+        await db.batch(ALTERS.map((stmt) => ({ sql: stmt })));
+      } catch {
+        /* คอลัมน์มีอยู่แล้ว — SQLite ไม่มี if not exists ตอน add column */
+      }
+    })().catch((err) => {
+      // ให้ลองใหม่ในคำขอถัดไปถ้าล้ม
+      schemaReady = null;
+      throw err;
+    });
+  }
+  return schemaReady;
+}
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export type ChatAttachment = { name: string; mime: string; dataUrl: string };
+
+export type ChatMessage = {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  attachments: ChatAttachment[];
+  createdAt: string;
+};
+
+export type ChatConversation = {
+  id: string;
+  title: string;
+  model: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ChatConversationWithMessages = ChatConversation & {
+  messages: ChatMessage[];
+};
+
+export type ChatSettings = { maxAttachments: number };
+
+export const DEFAULT_CHAT_SETTINGS: ChatSettings = { maxAttachments: 5 };
+
+// ---------------------------------------------------------------------------
+// Conversations
+// ---------------------------------------------------------------------------
+
+function rowToConversation(r: Record<string, unknown>): ChatConversation {
+  return {
+    id: String(r.id),
+    title: String(r.title ?? ""),
+    model: String(r.model ?? ""),
+    createdAt: String(r.created_at),
+    updatedAt: String(r.updated_at),
+  };
+}
+
+export async function listConversations(userId: string): Promise<ChatConversation[]> {
+  await ensureChatSchema();
+  const res = await getChatDb().execute({
+    sql: `select id, title, model, created_at, updated_at
+          from chat_conversations
+          where user_id = ? and deleted_at is null
+          order by updated_at desc`,
+    args: [userId],
+  });
+  return res.rows.map((r) => rowToConversation(r as Record<string, unknown>));
+}
+
+export async function getConversation(
+  userId: string,
+  id: string,
+): Promise<ChatConversationWithMessages | null> {
+  await ensureChatSchema();
+  const db = getChatDb();
+  const conv = await db.execute({
+    sql: `select id, title, model, created_at, updated_at
+          from chat_conversations where id = ? and user_id = ? and deleted_at is null`,
+    args: [id, userId],
+  });
+  if (conv.rows.length === 0) return null;
+
+  const msgRes = await db.execute({
+    sql: `select id, role, content, created_at
+          from chat_messages where conversation_id = ? order by created_at, rowid`,
+    args: [id],
+  });
+  const messages: ChatMessage[] = [];
+  for (const r of msgRes.rows) {
+    const m = r as Record<string, unknown>;
+    const att = await db.execute({
+      sql: `select name, mime, data_url from chat_attachments where message_id = ?`,
+      args: [String(m.id)],
+    });
+    messages.push({
+      id: String(m.id),
+      role: String(m.role) as ChatMessage["role"],
+      content: String(m.content ?? ""),
+      createdAt: String(m.created_at),
+      attachments: att.rows.map((a) => {
+        const row = a as Record<string, unknown>;
+        return {
+          name: String(row.name ?? ""),
+          mime: String(row.mime ?? ""),
+          dataUrl: String(row.data_url ?? ""),
+        };
+      }),
+    });
+  }
+  return { ...rowToConversation(conv.rows[0] as Record<string, unknown>), messages };
+}
+
+export async function createConversation(input: {
+  userId: string;
+  title?: string;
+  model?: string;
+}): Promise<ChatConversation> {
+  await ensureChatSchema();
+  const now = new Date().toISOString();
+  const conv: ChatConversation = {
+    id: crypto.randomUUID(),
+    title: input.title?.trim() || "",
+    model: input.model || "",
+    createdAt: now,
+    updatedAt: now,
+  };
+  await getChatDb().execute({
+    sql: `insert into chat_conversations (id, user_id, title, model, created_at, updated_at)
+          values (?, ?, ?, ?, ?, ?)`,
+    args: [conv.id, input.userId, conv.title, conv.model, conv.createdAt, conv.updatedAt],
+  });
+  return conv;
+}
+
+export async function updateConversation(
+  userId: string,
+  id: string,
+  patch: { title?: string; model?: string },
+): Promise<void> {
+  await ensureChatSchema();
+  const sets: string[] = [];
+  const args: (string | number)[] = [];
+  if (patch.title !== undefined) {
+    sets.push("title = ?");
+    args.push(patch.title);
+  }
+  if (patch.model !== undefined) {
+    sets.push("model = ?");
+    args.push(patch.model);
+  }
+  sets.push("updated_at = ?");
+  args.push(new Date().toISOString());
+  args.push(id, userId);
+  await getChatDb().execute({
+    sql: `update chat_conversations set ${sets.join(", ")} where id = ? and user_id = ?`,
+    args,
+  });
+}
+
+/**
+ * ลบแบบ soft delete — ซ่อนห้องแชทจากผู้ใช้คนเดียว
+ *
+ * ข้อความ ไฟล์ และ attachment ยังอยู่ในฐานข้อมูลตามเดิม (ผู้ดูแลยังกู้คืนหรือ
+ * ตรวจย้อนหลังได้) การลบของจริงต้องทำจากฝั่งผู้ดูแลเท่านั้น
+ */
+export async function deleteConversation(userId: string, id: string): Promise<void> {
+  await ensureChatSchema();
+  const db = getChatDb();
+  await db.execute({
+    sql: `update chat_conversations
+          set deleted_at = ?
+          where id = ? and user_id = ? and deleted_at is null`,
+    args: [new Date().toISOString(), id, userId],
+  });
+}
+
+/**
+ * ตัดข้อความตั้งแต่ลำดับที่ `from` (0-based) จนถึงท้ายห้อง — ใช้ตอนผู้ใช้แก้คำถามแล้วส่งใหม่
+ *
+ * เรียงลำดับเดียวกับที่หน้า /c/<id> อ่านไปแสดง จึงคำนวณ index ฝั่ง client ได้ตรงกัน
+ */
+export async function deleteMessagesFromIndex(conversationId: string, from: number): Promise<number> {
+  await ensureChatSchema();
+  const db = getChatDb();
+  const rows = await db.execute({
+    sql: `select id from chat_messages where conversation_id = ? order by created_at, rowid`,
+    args: [conversationId],
+  });
+  const ids = rows.rows.slice(Math.max(0, from)).map((r) => String((r as Record<string, unknown>).id));
+  if (ids.length === 0) return 0;
+  const marks = ids.map(() => "?").join(",");
+  await db.execute({
+    sql: `delete from chat_attachments where message_id in (${marks})`,
+    args: ids,
+  });
+  await db.execute({
+    sql: `delete from chat_messages where conversation_id = ? and id in (${marks})`,
+    args: [conversationId, ...ids],
+  });
+  return ids.length;
+}
+
+// ---------------------------------------------------------------------------
+// Messages
+// ---------------------------------------------------------------------------
+
+export async function addMessage(input: {
+  conversationId: string;
+  role: ChatMessage["role"];
+  content: string;
+  attachments?: ChatAttachment[];
+}): Promise<ChatMessage> {
+  await ensureChatSchema();
+  const db = getChatDb();
+  const now = new Date().toISOString();
+  const msg: ChatMessage = {
+    id: crypto.randomUUID(),
+    role: input.role,
+    content: input.content,
+    attachments: input.attachments ?? [],
+    createdAt: now,
+  };
+  await db.execute({
+    sql: `insert into chat_messages (id, conversation_id, role, content, created_at)
+          values (?, ?, ?, ?, ?)`,
+    args: [msg.id, input.conversationId, msg.role, msg.content, now],
+  });
+  for (const a of msg.attachments) {
+    await db.execute({
+      sql: `insert into chat_attachments (id, message_id, name, mime, data_url)
+            values (?, ?, ?, ?, ?)`,
+      args: [crypto.randomUUID(), msg.id, a.name, a.mime, a.dataUrl],
+    });
+  }
+  await db.execute({
+    sql: `update chat_conversations set updated_at = ? where id = ?`,
+    args: [now, input.conversationId],
+  });
+  return msg;
+}
+
+// ---------------------------------------------------------------------------
+// Settings (แอดมินตั้งค่าได้)
+// ---------------------------------------------------------------------------
+/** ค่าตั้งต้นทั้งระบบ (แอดมินแก้) — แคชไว้เพราะแต่ละ query ไป Turso ใช้เวลา ~375ms */
+const SETTINGS_TTL_MS = 60_000;
+
+export function getChatSettings(): Promise<ChatSettings> {
+  return cached("chat-settings", SETTINGS_TTL_MS, loadChatSettings);
+}
+
+async function loadChatSettings(): Promise<ChatSettings> {
+  await ensureChatSchema();
+  const res = await getChatDb().execute({
+    sql: `select key, value from chat_settings`,
+  });
+  const map = new Map<string, string>();
+  for (const r of res.rows) {
+    const row = r as Record<string, unknown>;
+    map.set(String(row.key), String(row.value ?? ""));
+  }
+  const raw = Number(map.get("max_attachments"));
+  return {
+    maxAttachments:
+      Number.isFinite(raw) && raw >= 1 ? Math.min(50, Math.floor(raw)) : DEFAULT_CHAT_SETTINGS.maxAttachments,
+  };
+}
+
+export async function updateChatSettings(patch: Partial<ChatSettings>): Promise<void> {
+  await ensureChatSchema();
+  invalidateCache("chat-settings");
+  const db = getChatDb();
+  if (patch.maxAttachments !== undefined) {
+    await db.execute({
+      sql: `insert into chat_settings (key, value) values ('max_attachments', ?)
+            on conflict(key) do update set value = excluded.value`,
+      args: [String(patch.maxAttachments)],
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Files (คลังไฟล์ — ไฟล์ที่ AI สร้างให้ในแชท)
+// ---------------------------------------------------------------------------
+
+export type ChatFile = {
+  id: string;
+  conversationId: string;
+  name: string;
+  /** html | image | text */
+  kind: string;
+  content: string;
+  sizeBytes: number;
+  shareUrl: string | null;
+  shareExpiresAt: string | null;
+  createdAt: string;
+};
+
+function rowToFile(r: Record<string, unknown>): ChatFile {
+  return {
+    id: String(r.id),
+    conversationId: String(r.conversation_id ?? ""),
+    name: String(r.name ?? ""),
+    kind: String(r.kind ?? "html"),
+    content: String(r.content ?? ""),
+    sizeBytes: Number(r.size_bytes ?? 0),
+    shareUrl: r.share_url ? String(r.share_url) : null,
+    shareExpiresAt: r.share_expires_at ? String(r.share_expires_at) : null,
+    createdAt: String(r.created_at),
+  };
+}
+
+export async function addFile(input: {
+  userId: string;
+  conversationId?: string;
+  name: string;
+  kind: string;
+  content: string;
+}): Promise<ChatFile> {
+  await ensureChatSchema();
+  const now = new Date().toISOString();
+  const file: ChatFile = {
+    id: crypto.randomUUID(),
+    conversationId: input.conversationId ?? "",
+    name: input.name,
+    kind: input.kind,
+    content: input.content,
+    sizeBytes: new TextEncoder().encode(input.content).length,
+    shareUrl: null,
+    shareExpiresAt: null,
+    createdAt: now,
+  };
+  await getChatDb().execute({
+    sql: `insert into chat_files
+            (id, user_id, conversation_id, name, kind, content, size_bytes, share_url, share_expires_at, created_at)
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      file.id,
+      input.userId,
+      file.conversationId,
+      file.name,
+      file.kind,
+      file.content,
+      file.sizeBytes,
+      null,
+      null,
+      now,
+    ],
+  });
+  return file;
+}
+
+export async function listFiles(userId: string): Promise<ChatFile[]> {
+  await ensureChatSchema();
+  const res = await getChatDb().execute({
+    sql: `select id, conversation_id, name, kind, content, size_bytes, share_url, share_expires_at, created_at
+          from chat_files where user_id = ? order by created_at desc`,
+    args: [userId],
+  });
+  return res.rows.map((r) => rowToFile(r as Record<string, unknown>));
+}
+
+export async function getFile(userId: string, id: string): Promise<ChatFile | null> {
+  await ensureChatSchema();
+  const res = await getChatDb().execute({
+    sql: `select id, conversation_id, name, kind, content, size_bytes, share_url, share_expires_at, created_at
+          from chat_files where id = ? and user_id = ?`,
+    args: [id, userId],
+  });
+  if (res.rows.length === 0) return null;
+  return rowToFile(res.rows[0] as Record<string, unknown>);
+}
+
+export async function setFileShare(
+  userId: string,
+  id: string,
+  share: { shareUrl: string; shareExpiresAt: string },
+): Promise<void> {
+  await ensureChatSchema();
+  await getChatDb().execute({
+    sql: `update chat_files set share_url = ?, share_expires_at = ? where id = ? and user_id = ?`,
+    args: [share.shareUrl, share.shareExpiresAt, id, userId],
+  });
+}
+
+// ---------------------------------------------------------------------------
+// งานสร้างรูปภาพ (คิวของผู้ใช้ — ตัวสร้างรูปจริงต่อเข้ากับ upstream ในขั้นถัดไป)
+// ---------------------------------------------------------------------------
+
+export type ImageJob = {
+  id: string;
+  prompt: string;
+  model: string;
+  ratio: string;
+  /** ชื่อไฟล์อ้างอิงที่ผู้ใช้แนบมา (ไม่เก็บตัวไฟล์) */
+  refs: string[];
+  /** queued | done | failed */
+  status: string;
+  error: string;
+  createdAt: string;
+};
+
+function rowToJob(r: Record<string, unknown>): ImageJob {
+  let refs: string[] = [];
+  try {
+    const parsed = JSON.parse(String(r.refs ?? "[]"));
+    if (Array.isArray(parsed)) refs = parsed.map((x) => String(x));
+  } catch {
+    /* ค่าเดิมไม่ใช่ JSON — ปล่อยเป็นว่าง */
+  }
+  return {
+    id: String(r.id),
+    prompt: String(r.prompt ?? ""),
+    model: String(r.model ?? ""),
+    ratio: String(r.ratio ?? "1:1"),
+    refs,
+    status: String(r.status ?? "queued"),
+    error: String(r.error ?? ""),
+    createdAt: String(r.created_at),
+  };
+}
+
+export async function addImageJob(input: {
+  userId: string;
+  prompt: string;
+  model: string;
+  ratio: string;
+  refs: string[];
+}): Promise<ImageJob> {
+  await ensureChatSchema();
+  const job: ImageJob = {
+    id: crypto.randomUUID(),
+    prompt: input.prompt,
+    model: input.model,
+    ratio: input.ratio,
+    refs: input.refs,
+    status: "queued",
+    error: "",
+    createdAt: new Date().toISOString(),
+  };
+  await getChatDb().execute({
+    sql: `insert into image_jobs (id, user_id, prompt, model, ratio, refs, status, error, created_at)
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      job.id,
+      input.userId,
+      job.prompt,
+      job.model,
+      job.ratio,
+      JSON.stringify(job.refs),
+      job.status,
+      job.error,
+      job.createdAt,
+    ],
+  });
+  return job;
+}
+
+export async function listImageJobs(userId: string, limit = 24): Promise<ImageJob[]> {
+  await ensureChatSchema();
+  const res = await getChatDb().execute({
+    sql: `select id, prompt, model, ratio, refs, status, error, created_at
+          from image_jobs where user_id = ? order by created_at desc limit ?`,
+    args: [userId, limit],
+  });
+  return res.rows.map((r) => rowToJob(r as Record<string, unknown>));
+}
+
+export async function deleteImageJob(userId: string, id: string): Promise<void> {
+  await ensureChatSchema();
+  await getChatDb().execute({
+    sql: `delete from image_jobs where id = ? and user_id = ?`,
+    args: [id, userId],
+  });
+}

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { createKeyAction, type CreateKeyState } from "@/app/(app)/keys/actions";
 import { useT } from "@/lib/i18n/client";
+import Icon from "@/components/Icon";
 
 export default function CreateKeyForm({
   remaining,
@@ -39,7 +40,7 @@ export default function CreateKeyForm({
       {state.secret && (
         <div className="rounded-xl border border-leaf/30 bg-leaf/10 p-4">
           <p className="flex items-center gap-2 text-sm font-semibold text-leaf">
-            <i className="fa-solid fa-circle-check" /> {t("สร้างคีย์สําเร็จ — คัดลอกไปเก็บไว้เลย")}
+            <Icon name="fa-circle-check" /> {t("สร้างคีย์สําเร็จ — คัดลอกไปเก็บไว้เลย")}
           </p>
           <p className="mt-1 text-xs text-leaf/70">
             {t("คีย์เต็มจะแสดงเพียงครั้งเดียวเท่านั้น หากลืมจะต้องสร้างใหม่")}
@@ -51,11 +52,11 @@ export default function CreateKeyForm({
             <button onClick={copySecret} className="btn-ghost !py-2.5">
               {copied ? (
                 <>
-                  <i className="fa-solid fa-check text-leaf" /> {t("คัดลอกแล้ว")}
+                  <Icon name="fa-check" className="text-leaf" /> {t("คัดลอกแล้ว")}
                 </>
               ) : (
                 <>
-                  <i className="fa-regular fa-copy" /> {t("คัดลอก")}
+                  <Icon name="fa-copy" /> {t("คัดลอก")}
                 </>
               )}
             </button>
@@ -65,7 +66,7 @@ export default function CreateKeyForm({
 
       {state.error && (
         <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
-          <i className="fa-solid fa-circle-exclamation mr-2" />
+          <Icon name="fa-circle-exclamation" className="mr-2" />
           {state.error}
         </p>
       )}
@@ -86,9 +87,9 @@ export default function CreateKeyForm({
           disabled={remaining === 0 || pending}
         >
           {pending ? (
-            <i className="fa-solid fa-circle-notch animate-spin" />
+            <Icon name="fa-circle-notch" className="animate-spin" />
           ) : (
-            <i className="fa-solid fa-plus" />
+            <Icon name="fa-plus" />
           )}
           {t("สร้างคีย์ใหม่")}
         </button>
@@ -96,7 +97,7 @@ export default function CreateKeyForm({
 
       {remaining === 0 && (
         <p className="text-xs text-amber-glow">
-          <i className="fa-solid fa-circle-info mr-1.5" />
+          <Icon name="fa-circle-info" className="mr-1.5" />
           {t("คุณมีคีย์ครบ {max} คีย์แล้ว — ยกเลิกคีย์เดิมก่อนจึงจะสร้างใหม่ได้", { max: maxKeys })}
         </p>
       )}

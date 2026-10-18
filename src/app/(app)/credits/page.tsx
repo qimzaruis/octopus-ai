@@ -6,6 +6,7 @@ import Badge from "@/components/Badge";
 import EmptyState from "@/components/EmptyState";
 import { formatUsd, formatUsdSigned, formatDateTime } from "@/lib/format";
 import { getT, getLocale } from "@/lib/i18n/server";
+import Icon from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -64,7 +65,7 @@ export default async function CreditsPage() {
             </p>
           </div>
           <div className="flex max-w-xs items-start gap-3 rounded-xl bg-white/[0.04] p-4 text-caption leading-relaxed text-fg-muted">
-            <i className="fa-solid fa-lightbulb mt-0.5 text-amber-glow" />
+            <Icon name="fa-lightbulb" className="mt-0.5 text-amber-glow" />
             <span>
               {t("เครดิตหักตามการใช้งานจริง ไม่มีค่าสมาชิกรายเดือน และไม่มีวันหมดอายุ")}
             </span>
@@ -75,7 +76,7 @@ export default async function CreditsPage() {
       {/* เติมเครดิต */}
       <section className="card p-5 sm:p-6">
         <div className="flex items-center gap-2">
-          <i className="fa-solid fa-wallet text-brand-400" />
+          <Icon name="fa-wallet" className="text-brand-400" />
           <h2 className="text-body-sm font-semibold text-fg">{t("เติมเครดิต")}</h2>
         </div>
         <p className="mt-1.5 text-caption text-fg-subtle">{t("เลือกจํานวนเงินที่ต้องการเติม (USD)")}</p>
@@ -102,7 +103,7 @@ export default async function CreditsPage() {
               <p className="mt-1.5 text-caption">
                 {opt.bonus ? (
                   <span className="text-leaf">
-                    <i className="fa-solid fa-gift mr-1" />
+                    <Icon name="fa-gift" className="mr-1" />
                     {opt.bonus}
                   </span>
                 ) : (
@@ -114,14 +115,14 @@ export default async function CreditsPage() {
                 title={t("ระบบชําระเงินจะเปิดใช้งานเร็ว ๆ นี้")}
                 className="btn-primary mt-5 w-full !py-2.5 text-caption"
               >
-                <i className="fa-solid fa-lock text-micro" /> {t("เร็ว ๆ นี้")}
+                <Icon name="fa-lock" className="text-micro" /> {t("เร็ว ๆ นี้")}
               </button>
             </div>
           ))}
         </div>
 
         <p className="mt-5 flex items-start gap-2.5 rounded-xl border border-amber-glow/20 bg-amber-glow/5 px-4 py-3 text-caption leading-relaxed text-amber-glow/80">
-          <i className="fa-solid fa-circle-info mt-0.5" />
+          <Icon name="fa-circle-info" className="mt-0.5" />
           {t("ระบบเติมเครดิตยังไม่เปิดใช้งานในเวอร์ชันนี้ — ทีมงานกําลังเตรียมการชําระเงินผ่าน PromptPay และบัตรเครดิต")}
         </p>
       </section>

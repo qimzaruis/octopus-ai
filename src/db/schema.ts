@@ -9,6 +9,9 @@ import {
   numeric,
   uniqueIndex,
   index,
+  primaryKey,
+  date,
+  bigint,
 } from "drizzle-orm/pg-core";
 
 /** Mirror ของ supabase auth.users — เก็บ role, เครดิต และสถานะการใช้งาน */
@@ -120,6 +123,20 @@ export const models = pgTable(
       .default(0),
     /** โลโก้ที่แสดงแทนชื่อผู้ให้บริการ (URL จากคลังรูป Supabase Storage) */
     logoUrl: text("logo_url"),
+    /**
+     * ---- สถิติวันนี้ (เก็บในคอลัมน์ ไม่ต้อง scan ตาราง requests) ----
+     * logRequest เป็นตัวบวกตัวเลขทุกรอบที่ผ่าน gateway ทั้งจาก /v1 และ Web Agent
+     * uptimeDay ต่างจากวันนี้ (เวลากรุงเทพฯ) = ตัวเลขค้างจากเมื่อวาน จะเริ่มนับใหม่เอง
+     */
+    uptimeDay: date("uptime_day"),
+    /** uptime วันนี้ 0–100 (%) */
+    uptime: numeric("uptime", { precision: 5, scale: 2, mode: "number" }).notNull().default(100),
+    uptimeRequests: integer("uptime_requests").notNull().default(0),
+    /** ในจำนวนข้างบนนี้มีกี่รอบที่สำเร็จ */
+    uptimeOk: integer("uptime_ok").notNull().default(0),
+    /** ผลรวม latency (ms) — เอาไปเฉลี่ยกับ uptimeRequests ตอนอ่าน */
+    uptimeLatencyMs: integer("uptime_latency_ms").notNull().default(0),
+    uptimeTokens: bigint("uptime_tokens", { mode: "number" }).notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -186,8 +203,29 @@ export const plans = pgTable("plans", {
   cycleRequests: integer("cycle_requests").notNull().default(0),
   concurrentModels: integer("concurrent_models").notNull().default(3),
   fallback: boolean("fallback").notNull().default(false),
+  /** ลำดับขั้นของแผน (0 = ฟรี, สูงขึ้น = แผนที่สูงกว่า) ใช้เทียบสิทธิ์โมเดล */
+  tier: integer("tier").notNull().default(0),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * โมเดลที่แต่ละแผนใช้งานได้ — แอดมินจัดชุดได้จากหน้า /admin/plans
+ * โมเดลที่ไม่อยู่ในแผนใดเลย = ใช้ได้ทุกแผน (ไม่จำกัด)
+ */
+export const planModels = pgTable(
+  "plan_models",
+  {
+    planKey: text("plan_key")
+      .notNull()
+      .references(() => plans.key, { onDelete: "cascade" }),
+    modelRefId: integer("model_ref_id")
+      .notNull()
+      .references(() => models.id, { onDelete: "cascade" }),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.planKey, t.modelRefId] }),
+  }),
+);
 
 /** Target ของ route เรียงตาม priority (fallback ไล่จากบนลงล่าง) */
 export const routeTargets = pgTable("route_targets", {
@@ -290,6 +328,7 @@ export type Model = typeof models.$inferSelect;
 export type Route = typeof routes.$inferSelect;
 export type RouteTarget = typeof routeTargets.$inferSelect;
 export type PlanRow = typeof plans.$inferSelect;
+export type PlanModel = typeof planModels.$inferSelect;
 export type ApiKey = typeof apiKeys.$inferSelect;
 export type RequestRow = typeof requests.$inferSelect;
 export type CreditTransaction = typeof creditTransactions.$inferSelect;

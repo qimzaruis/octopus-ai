@@ -6,6 +6,8 @@ import { getSessionUser } from "@/lib/auth";
 import * as admin from "@/lib/data/admin";
 import * as plansData from "@/lib/data/plans";
 import * as users from "@/lib/data/users";
+import { updateChatSettings } from "@/lib/chat/db";
+import { invalidateCatalog } from "@/lib/catalog-cache";
 import { uploadAsset } from "@/lib/storage";
 
 async function requireAdmin() {
@@ -15,11 +17,15 @@ async function requireAdmin() {
 }
 
 function revalidateAdmin() {
+  // route/โมเดล/แผน ถูกแคชไว้เพื่อความเร็ว — แก้เสร็จต้องล้างให้เห็นทันที
+  invalidateCatalog();
   revalidatePath("/admin");
   revalidatePath("/admin/users");
   revalidatePath("/admin/providers");
   revalidatePath("/admin/models");
   revalidatePath("/admin/plans");
+  revalidatePath("/admin/chat");
+  revalidatePath("/agent");
   revalidatePath("/models");
   revalidatePath("/dashboard");
   revalidatePath("/subscription");
@@ -313,4 +319,36 @@ export async function updatePlanAction(formData: FormData) {
   });
   if (!result.ok) redirect(`/admin/plans?error=${encodeURIComponent(result.error!)}`);
   revalidateAdmin();
+}
+
+/** แทนที่ชุดโมเดลที่แผนนี้ใช้งานได้ (checkbox หลายตัวส่งเป็น modelIds ซ้ำ) */
+export async function setPlanModelsAction(formData: FormData) {
+  await requireAdmin();
+  const ids = formData
+    .getAll("modelIds")
+    .map((v) => Number(v))
+    .filter((n) => Number.isFinite(n));
+  const result = await plansData.setPlanModels(str(formData, "key"), ids);
+  if (!result.ok) redirect(`/admin/plans?error=${encodeURIComponent(result.error!)}`);
+  revalidateAdmin();
+}
+
+// ---------------------------------------------------------------------------
+// ตั้งค่า Web Agent (จำนวนไฟล์แนบสูงสุด) — เก็บบน Turso
+// ---------------------------------------------------------------------------
+
+export async function updateChatSettingsAction(formData: FormData) {
+  await requireAdmin();
+  const raw = Number(str(formData, "maxAttachments"));
+  if (!Number.isFinite(raw) || raw < 1 || raw > 50) {
+    redirect(`/admin/chat?error=${encodeURIComponent("จำนวนไฟล์ต้องอยู่ระหว่าง 1–50")}`);
+  }
+  try {
+    await updateChatSettings({ maxAttachments: Math.floor(raw) });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "บันทึกไม่สำเร็จ";
+    redirect(`/admin/chat?error=${encodeURIComponent(msg)}`);
+  }
+  revalidateAdmin();
+  redirect("/admin/chat?ok=1");
 }

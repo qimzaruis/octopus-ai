@@ -3,13 +3,16 @@
 import { useState } from "react";
 import type { RequestDTO } from "@/lib/data/usage";
 import StatusBadge from "@/components/StatusBadge";
+import { Dialog } from "@/components/Dialog";
 import { useT, useLocale } from "@/lib/i18n/client";
 import {
   formatDateTime,
   formatLatency,
   formatNumber,
   formatTime,
+  formatUsd,
 } from "@/lib/format";
+import Icon from "@/components/Icon";
 
 function DetailRow({
   icon,
@@ -23,7 +26,7 @@ function DetailRow({
   return (
     <div className="flex items-start justify-between gap-6 border-b border-white/[0.07] px-5 py-3.5 last:border-0">
       <span className="flex items-center gap-2.5 text-xs text-fg-subtle">
-        <i className={`${icon} w-4 text-center text-fg-subtle`} />
+        <Icon name={icon} className="h-4 w-4 shrink-0 text-fg-subtle" />
         {label}
       </span>
       <span className="text-right text-sm font-medium text-fg">{children}</span>
@@ -56,7 +59,9 @@ export default function RequestsTable({ items }: { items: RequestDTO[] }) {
             {items.length === 0 && (
               <tr>
                 <td colSpan={8} className="px-4 py-12 text-center text-sm text-fg-subtle">
-                  <i className="fa-solid fa-magnifying-glass mb-3 block text-2xl text-fg-subtle" />
+                  <span className="mb-3 flex justify-center text-2xl">
+                    <Icon name="fa-magnifying-glass" className="text-fg-subtle" />
+                  </span>
                   {t("ไม่พบรายการที่ตรงกับเงื่อนไข")}
                 </td>
               </tr>
@@ -74,11 +79,8 @@ export default function RequestsTable({ items }: { items: RequestDTO[] }) {
                   {formatTime(r.createdAt)}
                 </td>
                 <td className="table-cell">
-                  <span className="font-medium text-fg">{r.model}</span>
-                  {r.publicModel && (
-                    <span className="ml-1.5 text-label text-fg-subtle">via {r.publicModel}</span>
-                  )}
-                  <p className="text-label text-fg-subtle">{r.providerName}</p>
+                  {/* แสดง "route" ที่ผู้ใช้เรียกจริง ไม่เปิดเผยโมเดล/ค่ายต้นทาง */}
+                  <span className="font-medium text-fg">{r.publicModel || r.model}</span>
                 </td>
                 <td className="table-cell text-fg-muted">{r.agent}</td>
                 <td className="table-cell">
@@ -98,7 +100,7 @@ export default function RequestsTable({ items }: { items: RequestDTO[] }) {
                       setSelected(r);
                     }}
                   >
-                    <i className="fa-solid fa-eye mr-1" /> {t("ดู")}
+                    <Icon name="fa-eye" className="mr-1" /> {t("ดู")}
                   </button>
                 </td>
               </tr>
@@ -107,75 +109,57 @@ export default function RequestsTable({ items }: { items: RequestDTO[] }) {
         </table>
       </div>
 
-      {/* Modal รายละเอียด */}
-      {selected && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-          onClick={() => setSelected(null)}
-        >
-          <div
-            className="card w-full max-w-lg !bg-ink-900"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-white/[0.07] px-5 py-4">
-              <h3 className="font-semibold text-fg">
-                Request <span className="font-mono text-brand-300">#{selected.id}</span>
-              </h3>
-              <button
-                onClick={() => setSelected(null)}
-                className="text-fg-subtle transition hover:text-fg"
-              >
-                <i className="fa-solid fa-xmark" />
-              </button>
-            </div>
-
-            <div>
-              <DetailRow icon="fa-solid fa-clock" label={t("เวลาที่เรียกใช้")}>
-                {formatDateTime(selected.createdAt, locale)}
-              </DetailRow>
-              <DetailRow icon="fa-solid fa-circle-info" label={t("สถานะ")}>
-                <span className="flex items-center justify-end gap-2">
-                  <StatusBadge status={selected.status} />
-                  <span className="font-mono text-xs text-fg-subtle">HTTP {selected.httpStatus}</span>
+      {/* รายละเอียด request — ใช้ Dialog ตัวเดียวกับทั้งแอป (ไม่ใช่ modal เขียนเอง) */}
+      <Dialog
+        open={Boolean(selected)}
+        onClose={() => setSelected(null)}
+        icon="fa-solid fa-circle-info"
+        title={`Request ${selected ? `#${selected.id}` : ""}`}
+        description={selected ? formatDateTime(selected.createdAt, locale) : undefined}
+      >
+        {selected && (
+          <div className="-mx-5 -my-4">
+            <DetailRow icon="fa-solid fa-circle-info" label={t("สถานะ")}>
+              <span className="flex items-center justify-end gap-2">
+                <StatusBadge status={selected.status} />
+                <span className="font-mono text-xs text-fg-subtle">
+                  HTTP {selected.httpStatus}
+                </span>
+              </span>
+            </DetailRow>
+            <DetailRow icon="fa-solid fa-cube" label={t("โมเดล")}>
+              {selected.publicModel || selected.model}
+            </DetailRow>
+            <DetailRow icon="fa-solid fa-user-astronaut" label="Agent">
+              {selected.agent || "—"}
+            </DetailRow>
+            <DetailRow icon="fa-solid fa-gauge-high" label="Latency">
+              {formatLatency(selected.latencyMs)}
+            </DetailRow>
+            <DetailRow icon="fa-solid fa-arrow-down" label="Input tokens">
+              {formatNumber(selected.inputTokens)}
+            </DetailRow>
+            <DetailRow icon="fa-solid fa-arrow-up" label="Output tokens">
+              {formatNumber(selected.outputTokens)}
+            </DetailRow>
+            <DetailRow icon="fa-solid fa-coins" label={t("Tokens รวม")}>
+              <span className="text-brand-300">
+                {formatNumber(selected.inputTokens + selected.outputTokens)}
+              </span>
+            </DetailRow>
+            <DetailRow icon="fa-solid fa-dollar-sign" label={t("ค่าใช้จ่าย")}>
+              {formatUsd(selected.costUsd)}
+            </DetailRow>
+            {selected.error && (
+              <DetailRow icon="fa-solid fa-triangle-exclamation" label="Error">
+                <span className="font-mono text-xs leading-relaxed text-rose-400">
+                  {selected.error}
                 </span>
               </DetailRow>
-              <DetailRow icon="fa-solid fa-robot" label={t("โมเดล (Model)")}>
-                {selected.model}
-              </DetailRow>
-              <DetailRow icon="fa-solid fa-route" label={t("Route / Public model")}>
-                {selected.publicModel || "—"}
-              </DetailRow>
-              <DetailRow icon="fa-solid fa-plug" label="Provider">
-                {selected.providerName || "—"}
-              </DetailRow>
-              <DetailRow icon="fa-solid fa-user-astronaut" label="Agent">
-                {selected.agent || "—"}
-              </DetailRow>
-              <DetailRow icon="fa-solid fa-gauge-high" label="Latency">
-                {formatLatency(selected.latencyMs)}
-              </DetailRow>
-              <DetailRow icon="fa-solid fa-arrow-down" label="Input tokens">
-                {formatNumber(selected.inputTokens)}
-              </DetailRow>
-              <DetailRow icon="fa-solid fa-arrow-up" label="Output tokens">
-                {formatNumber(selected.outputTokens)}
-              </DetailRow>
-              <DetailRow icon="fa-solid fa-coins" label={t("Tokens รวม")}>
-                <span className="text-brand-300">
-                  {formatNumber(selected.inputTokens + selected.outputTokens)}
-                </span>
-              </DetailRow>
-              {selected.error && (
-                <DetailRow icon="fa-solid fa-triangle-exclamation" label="Error">
-                  <span className="font-mono text-xs leading-relaxed text-rose-400">
-                    {selected.error}
-                  </span>
-                </DetailRow>
-              )}
-            </div>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </Dialog>
     </>
   );
 }

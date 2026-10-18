@@ -24,6 +24,8 @@ export type Plan = {
   cycleRequests: number;
   concurrentModels: number;
   fallback: boolean;
+  /** ลำดับขั้นของแผน (0 = ฟรี) — ใช้เทียบสิทธิ์การเข้าถึงโมเดล */
+  tier: number;
 };
 
 export const DEFAULT_PLANS: Record<string, Plan> = {
@@ -36,6 +38,7 @@ export const DEFAULT_PLANS: Record<string, Plan> = {
     cycleRequests: 0,
     concurrentModels: 3,
     fallback: false,
+    tier: 0,
   },
   pro: {
     key: "pro",
@@ -46,6 +49,7 @@ export const DEFAULT_PLANS: Record<string, Plan> = {
     cycleRequests: 0,
     concurrentModels: 20,
     fallback: true,
+    tier: 1,
   },
 };
 

@@ -1,5 +1,7 @@
+import Icon from "@/components/Icon";
+
 /**
- * EmptyState — สถานะว่างที่บอกชัดว่าต้องทำอะไรต่อ
+ * EmptyState — สถานะว่างที่บอกชัดว่าต้องทําอะไรต่อ
  */
 export default function EmptyState({
   icon,
@@ -17,7 +19,7 @@ export default function EmptyState({
   return (
     <div className={`flex flex-col items-center px-6 py-14 text-center ${className}`}>
       <span className="flex h-14 w-14 items-center justify-center rounded-xl border border-white/[0.07] bg-white/5 text-lg text-fg-subtle">
-        <i className={icon} />
+        <Icon name={icon} />
       </span>
       <p className="mt-5 text-sm font-semibold text-fg">{title}</p>
       {description && (

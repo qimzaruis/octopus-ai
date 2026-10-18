@@ -13,6 +13,7 @@ import type {
   RouteTarget,
 } from "@/db/schema";
 import { DEFAULT_PLANS, type Plan } from "@/lib/plans";
+import { isDemoMode } from "@/lib/config";
 
 export type DemoUser = {
   id: string;
@@ -170,6 +171,19 @@ const DEMO_MODEL_LOGOS: Record<string, string> = {
   "gemini-1.5-pro": "/Agent-lg/trimmed/zcode.png",
 };
 
+/**
+ * คอลัมน์สถิติวันนี้ของตาราง models — ของจริงถูกเขียนโดย logRequest
+ * โหมด demo ไม่มีคอลัมน์เหล่านี้ในฐานข้อมูล จึงใช้ค่าเริ่มต้นคงที่
+ */
+export const DEMO_MODEL_UPTIME = {
+  uptimeDay: null,
+  uptime: 100,
+  uptimeRequests: 0,
+  uptimeOk: 0,
+  uptimeLatencyMs: 0,
+  uptimeTokens: 0,
+};
+
 export type DemoStore = {
   providers: Provider[];
   providerKeys: ProviderKey[];
@@ -178,6 +192,7 @@ export type DemoStore = {
   routes: Route[];
   routeTargets: RouteTarget[];
   plans: Plan[];
+  planModels: { planKey: string; modelRefId: number }[];
   apiKeys: ApiKey[];
   requests: RequestRow[];
   users: DemoUser[];
@@ -219,6 +234,7 @@ function buildStore(): DemoStore {
     outputPricePerM: m.outP,
     // ผูกโลโก้จากคลัง (demo) ให้บางโมเดล เพื่อสาธิตว่าผู้ใช้เห็นรูปแทนชื่อค่าย
     logoUrl: DEMO_MODEL_LOGOS[m.model] ?? null,
+    ...DEMO_MODEL_UPTIME,
     createdAt: new Date(),
   }));
 
@@ -318,10 +334,21 @@ function buildStore(): DemoStore {
     routes,
     routeTargets,
     plans: demoPlans(),
+    planModels: demoPlanModels(),
     apiKeys,
     requests,
     users: allUsers,
   };
+}
+
+/** ชุดโมเดลต่อแผนตัวอย่าง — ฟรีได้บางส่วน ที่เหลือต้อง Pro */
+function demoPlanModels(): { planKey: string; modelRefId: number }[] {
+  const free = [1, 4, 6];
+  const pro = [1, 2, 3, 4, 5, 6, 7];
+  return [
+    ...free.map((modelRefId) => ({ planKey: "free", modelRefId })),
+    ...pro.map((modelRefId) => ({ planKey: "pro", modelRefId })),
+  ];
 }
 
 /** แผนการใช้งานเริ่มต้น (คัดลอกค่า เพื่อให้ mutation ในโหมด demo ไม่ทับค่าต้นฉบับ) */
@@ -337,4 +364,33 @@ export function getDemoStore(): DemoStore {
     g.__octopusDemoStore = buildStore();
   }
   return g.__octopusDemoStore;
+}
+
+/** ชุดว่างที่ใช้เฉพาะตอน DB ใช้ไม่ได้ชั่วคราว — สร้างใหม่ทุกครั้งไม่ให้ ai แก้ค่าค้างไว้ */
+function emptyStore(): DemoStore {
+  return {
+    providers: [],
+    providerKeys: [],
+    assets: [],
+    models: [],
+    routes: [],
+    routeTargets: [],
+    plans: demoPlans(),
+    planModels: [],
+    apiKeys: [],
+    requests: [],
+    users: [],
+  };
+}
+
+/**
+ * แหล่งข้อมูลที่ data layer ใช้เมื่อไม่อ่านฐานข้อมูลจริง
+ *
+ * - โหมด Demo (ยังไม่ได้ตั้ง env) → ข้อมูลตัวอย่าง เพื่อให้ดูหน้าเว็บได้ทันที
+ * - DB ใช้ไม่ได้ชั่วคราว (circuit breaker) → ชุดว่าง
+ *   เดิมกรณีหลังคืนข้อมูลตัวอย่างปนกับบัญชีจริง ทำให้เห็น "โมเดลปลอม"
+ *   เช่น Octopus Fast/Octopus Pro ทั้งที่ข้อมูลจริงอยู่ใน Supabase
+ */
+export function demoSource(): DemoStore {
+  return isDemoMode ? getDemoStore() : emptyStore();
 }

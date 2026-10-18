@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { LOCALES, LOCALE_LABEL, type Locale } from "@/lib/i18n/config";
 import { useLocale, useT } from "@/lib/i18n/client";
 import { setLocaleAction } from "@/lib/i18n/actions";
+import Icon from "@/components/Icon";
 
 /**
  * LanguageSwitcher — เมนูสลับภาษา TH/EN
@@ -52,9 +53,9 @@ export default function LanguageSwitcher({ variant = "nav" }: { variant?: "nav" 
         }`}
       >
         {pending ? (
-          <i className="fa-solid fa-circle-notch animate-spin text-micro" />
+          <Icon name="fa-circle-notch" className="animate-spin text-micro" />
         ) : (
-          <i className="fa-solid fa-globe text-micro" />
+          <Icon name="fa-globe" className="text-micro" />
         )}
         <span className="font-semibold">{LOCALE_LABEL[locale]}</span>
       </button>
@@ -86,7 +87,7 @@ export default function LanguageSwitcher({ variant = "nav" }: { variant?: "nav" 
                     {t(l === "th" ? "ไทย" : "อังกฤษ")}
                   </span>
                 </span>
-                {l === locale && <i className="fa-solid fa-check text-micro text-brand-300" />}
+                {l === locale && <Icon name="fa-check" className="text-micro text-brand-300" />}
               </button>
             ))}
           </div>
