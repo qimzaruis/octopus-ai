@@ -10,6 +10,8 @@ import AgentLogoBar from "@/components/AgentLogoBar";
 import Reveal from "@/components/Reveal";
 import CountUp from "@/components/CountUp";
 import { isDemoMode } from "@/lib/config";
+import { listTopUsedModels } from "@/lib/data/models";
+import { formatCompact } from "@/lib/format";
 import { getT } from "@/lib/i18n/server";
 import Icon from "@/components/Icon";
 
@@ -43,14 +45,6 @@ const FEATURES = [
   },
 ];
 
-const MODELS = [
-  { model: "gpt-4o-mini", provider: "OpenAI", context: "128K", best: "งานทั่วไป คุ้มที่สุด" },
-  { model: "claude-3.5-sonnet", provider: "Anthropic", context: "200K", best: "งานเขียนและวิเคราะห์" },
-  { model: "gemini-1.5-pro", provider: "Google", context: "1M", best: "เอกสารยาว มัลติโมดัล" },
-  { model: "llama-3.1-70b", provider: "Groq", context: "131K", best: "ตอบเร็วมาก" },
-  { model: "mistral-large", provider: "Mistral", context: "128K", best: "งานหลายภาษา" },
-];
-
 const DEV_POINTS = [
   "OpenAI-compatible chat completions",
   "รองรับ Anthropic Messages และ OpenAI Responses API",
@@ -59,8 +53,13 @@ const DEV_POINTS = [
   "Fallback อัตโนมัติเมื่อโมเดลใช้งานไม่ได้",
 ];
 
+/** จำนวนแถวที่แสดงในหน้า landing — เหลือไว้ดูว่ายังมียี่ห้ออื่นที่ไม่ได้แสดงไหม */
+const MODEL_ROWS = 6;
+
 export default async function LandingPage() {
-  const t = await getT();
+  const [t, topModels] = await Promise.all([getT(), listTopUsedModels()]);
+  const shownModels = topModels.slice(0, MODEL_ROWS);
+  const hiddenCount = topModels.length - shownModels.length;
   return (
     /* overflow-x: clip ไม่ใช่ hidden — clip ไม่สร้าง scroll container จึงรักษา sticky ของ nav ไว้ */
     <div className="relative min-h-screen overflow-x-clip bg-ink-950">
@@ -199,7 +198,7 @@ export default async function LandingPage() {
         </div>
       </section>
 
-      {/* ============ Models table ============ */}
+      {/* ============ Models table — ข้อมูลจริงจากแคตตาล็อก + สัดส่วนการใช้งาน 7 วัน ============ */}
       <section id="models" className="bg-ink-900/50 px-6 py-24">
         <div className="mx-auto max-w-6xl">
           <Reveal>
@@ -207,7 +206,7 @@ export default async function LandingPage() {
               <div>
                 <h2 className="font-display text-h2 font-semibold text-fg">{t("โมเดลยอดนิยม")}</h2>
                 <p className="mt-3 max-w-md text-body-sm text-fg-muted">
-                  {t("เลือกใช้ได้ทันที หรือเพิ่ม provider ของคุณเองในหน้าแอดมิน")}
+                  {t("เรียงตามการใช้งานจริง 7 วันล่าสุด ของโมเดลที่เปิดใช้อยู่ตอนนี้")}
                 </p>
               </div>
               <Link href="/signin" className="btn-secondary shrink-0">
@@ -224,22 +223,42 @@ export default async function LandingPage() {
                     <th className="table-head">{t("โมเดล")}</th>
                     <th className="table-head">{t("ผู้ให้บริการ")}</th>
                     <th className="table-head">Context</th>
-                    <th className="table-head hidden sm:table-cell">{t("เหมาะกับ")}</th>
+                    <th className="table-head hidden sm:table-cell">{t("การใช้งาน 7 วันล่าสุด")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/[0.05]">
-                  {MODELS.map((m) => (
-                    <tr key={m.model} className="transition-colors duration-fast hover:bg-white/[0.03]">
-                      <td className="table-cell font-mono text-fg">{m.model}</td>
-                      <td className="table-cell">{m.provider}</td>
-                      <td className="table-cell tnum">{m.context}</td>
-                      <td className="table-cell hidden sm:table-cell">{t(m.best)}</td>
+                  {shownModels.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="table-cell text-center text-fg-subtle">
+                        {t("ยังไม่มีโมเดลที่เปิดใช้อยู่ตอนนี้")}
+                      </td>
+                    </tr>
+                  )}
+                  {shownModels.map((m) => (
+                    <tr
+                      key={`${m.providerId}/${m.modelId}`}
+                      className="transition-colors duration-fast hover:bg-white/[0.03]"
+                    >
+                      <td className="table-cell font-mono text-fg">{m.modelId}</td>
+                      <td className="table-cell">{m.providerName}</td>
+                      <td className="table-cell tnum">{formatCompact(m.contextWindow)}</td>
+                      {/* แถบเทียบสัดส่วนกับตัวอันดับหนึ่ง — ไม่เปิดจำนวน request/token จริง */}
+                      <td className="table-cell hidden sm:table-cell">
+                        <div className="h-1.5 w-full max-w-[9rem] overflow-hidden rounded-full bg-white/5">
+                          <div
+                            className="h-full rounded-full bg-brand-500/60"
+                            style={{ width: `${m.share}%` }}
+                          />
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
               <p className="border-t border-white/[0.07] px-4 py-3.5 text-caption text-fg-subtle">
-                {t("และอีก 50+ โมเดล — เพิ่ม provider ใหม่ได้เองตลอดเวลา")}
+                {hiddenCount > 0
+                  ? t("และอีก {n} โมเดลที่เรียกได้ผ่าน API เดียว", { n: hiddenCount })
+                  : t("ทุกโมเดลที่เปิดใช้อยู่เรียกผ่าน API เดียวกัน")}
               </p>
             </div>
           </Reveal>

@@ -30,7 +30,6 @@ export default async function SiteFooter() {
       links: [
         { href: "/dashboard", label: t("ภาพรวมการใช้งาน") },
         { href: "/requests", label: t("ประวัติการเรียกใช้") },
-        { href: "/admin", label: t("สําหรับแอดมิน") },
       ],
     },
   ];
@@ -72,28 +71,23 @@ export default async function SiteFooter() {
         </div>
 
         <div className="mt-12 flex flex-col items-center justify-between gap-3 border-t border-white/[0.07] pt-6 sm:flex-row">
-          <div className="flex flex-col items-center gap-3 sm:flex-row sm:gap-5">
-            <p className="text-caption text-fg-subtle">
-              © 2026 Octopus AI — One Gateway to Every AI
-            </p>
-            <nav className="flex items-center gap-5">
-              <Link
-                href="/terms"
-                className="text-caption text-fg-subtle transition-colors duration-fast hover:text-fg"
-              >
-                {t("ข้อกําหนดการใช้งาน")}
-              </Link>
-              <Link
-                href="/privacy"
-                className="text-caption text-fg-subtle transition-colors duration-fast hover:text-fg"
-              >
-                {t("นโยบายความเป็นส่วนตัว")}
-              </Link>
-            </nav>
-          </div>
           <p className="text-caption text-fg-subtle">
-            {t("สร้างด้วย Next.js, Drizzle และ Supabase")}
+            © 2026 Octopus AI — One Gateway to Every AI
           </p>
+          <nav className="flex items-center gap-5">
+            <Link
+              href="/terms"
+              className="text-caption text-fg-subtle transition-colors duration-fast hover:text-fg"
+            >
+              {t("ข้อกําหนดการใช้งาน")}
+            </Link>
+            <Link
+              href="/privacy"
+              className="text-caption text-fg-subtle transition-colors duration-fast hover:text-fg"
+            >
+              {t("นโยบายความเป็นส่วนตัว")}
+            </Link>
+          </nav>
         </div>
       </div>
     </footer>

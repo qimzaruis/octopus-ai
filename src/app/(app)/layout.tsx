@@ -50,6 +50,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         { href: "/admin", label: t("สรุปการใช้งานรวม"), icon: "fa-solid fa-user-shield" },
         { href: "/admin/users", label: t("ผู้ใช้"), icon: "fa-solid fa-users" },
         { href: "/admin/providers", label: "Providers", icon: "fa-solid fa-plug" },
+        { href: "/admin/key-limits", label: t("จำกัดคีย์"), icon: "fa-solid fa-signal" },
         { href: "/admin/models", label: t("โมเดลที่แสดง"), icon: "fa-solid fa-list-check" },
         { href: "/admin/plans", label: t("แผนและโควต้า"), icon: "fa-solid fa-gauge-high" },
         { href: "/admin/chat", label: t("ตั้งค่า Web Agent"), icon: "fa-solid fa-robot" },

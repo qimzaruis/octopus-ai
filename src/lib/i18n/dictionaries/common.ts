@@ -77,7 +77,6 @@ export const common = {
   "นักพัฒนา": "Developers",
   "ผลิตภัณฑ์": "Product",
   "แอดมิน": "Admin",
-  "สําหรับแอดมิน": "For admins",
   "เข้าสู่ระบบ": "Sign in",
   "ออกจากระบบ": "Sign out",
   "หน้าแรก": "Home",

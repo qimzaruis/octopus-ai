@@ -33,16 +33,12 @@ export const publicPages = {
 
   // ---------- Models table ----------
   "โมเดลยอดนิยม": "Popular models",
-  "เลือกใช้ได้ทันที หรือเพิ่ม provider ของคุณเองในหน้าแอดมิน":
-    "Start using them right away, or add your own provider from the admin page",
-  "เหมาะกับ": "Best for",
-  "งานทั่วไป คุ้มที่สุด": "General work, best value",
-  "งานเขียนและวิเคราะห์": "Writing and analysis",
-  "เอกสารยาว มัลติโมดัล": "Long documents, multimodal",
-  "ตอบเร็วมาก": "Very fast responses",
-  "งานหลายภาษา": "Multilingual work",
-  "และอีก 50+ โมเดล — เพิ่ม provider ใหม่ได้เองตลอดเวลา":
-    "And 50+ more models — add new providers any time",
+  "เรียงตามการใช้งานจริง 7 วันล่าสุด ของโมเดลที่เปิดใช้อยู่ตอนนี้":
+    "Ranked by real usage over the last 7 days among the models live right now",
+  "การใช้งาน 7 วันล่าสุด": "Last 7 days",
+  "ยังไม่มีโมเดลที่เปิดใช้อยู่ตอนนี้": "No models are live right now",
+  "และอีก {n} โมเดลที่เรียกได้ผ่าน API เดียว": "Plus {n} more models through the same API",
+  "ทุกโมเดลที่เปิดใช้อยู่เรียกผ่าน API เดียวกัน": "Every live model is reachable through one API",
 
   // ---------- Developer section ----------
   "คุ้นเคยตั้งแต่บรรทัดแรก": "Familiar from the first line",
@@ -99,7 +95,6 @@ export const publicPages = {
     "One gateway to every AI model — connect, analyze and control from one place",
   "บัญชี": "Account",
   "ตั้งลำดับ fallback ได้เอง ระบบสลับโมเดลให้อัตโนมัติเมื่อเจอ rate limit หรือปลายทางล่ม": "Set your own fallback order; the system switches models automatically on rate limits or outages",
-  "สร้างด้วย Next.js, Drizzle และ Supabase": "Built with Next.js, Drizzle and Supabase",
   "เชื่อมต่อ OpenAI, Claude, Gemini และอีกหลายสิบโมเดลผ่านแพลตฟอร์ม OctopusAI พร้อมแดชบอร์ดวิเคราะห์การใช้งาน และ OctopusRouter Free": "Connect OpenAI, Claude, Gemini and dozens more models through the OctopusAI platform, with a usage dashboard and OctopusRouter Free.",
 
   // ---------- Legal (terms / privacy / footer / signin checkbox) ----------

@@ -1,6 +1,6 @@
 import { asc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { models, providers, routeTargets, routes } from "@/db/schema";
+import { models, providers, requests, routeTargets, routes } from "@/db/schema";
 import { isDemoMode } from "@/lib/config";
 import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
 import { demoSource } from "@/lib/demo/store";
@@ -151,6 +151,72 @@ export async function listPublicModels(): Promise<PublicModelDTO[]> {
     markDbUnavailable(err);
     return listPublicModels();
   }
+}
+
+/** โมเดลสาธารณะพร้อมสัดส่วนการใช้งานจริง 7 วันล่าสุด */
+export type TopModelDTO = PublicModelDTO & {
+  /** เทียบกับตัวอันดับหนึ่ง (0–100) — ใช้วาดแถบโดยไม่เปิดตัวเลขใช้งานจริงต่อสาธารณะ */
+  share: number;
+};
+
+const TOP_TTL_MS = 5 * 60_000;
+
+/**
+ * โมเดลที่เปิดใช้อยู่ เรียงตามการใช้งานจริงล่าสุด (tokens รวม 7 วัน)
+ *
+ * หน้า landing ใช้-list นี้แทนรายการ hardcode เพื่อให้เป็น "top ตอนนี้" จริง
+ * ตัวเลขดิบไม่ถูกส่งออกมา เพราะเป็นสถิติรวมของทั้งระบบ — มีแค่สัดส่วนเทียบอันดับหนึ่ง
+ */
+export async function listTopUsedModels(): Promise<TopModelDTO[]> {
+  if (isDemoMode) return loadTopUsedModels();
+  return cached("topModels", TOP_TTL_MS, loadTopUsedModels);
+}
+
+async function loadTopUsedModels(): Promise<TopModelDTO[]> {
+  // listPublicModels มี fallback เป็นชุดข้อมูลภายในอยู่แล้ว ส่วน query สถิติ
+  // เป็นแค่ตัวจัดลำดับ ถ้าพังให้เรียงตามแคตตาล็อกแทน (หน้า landing ห้าม 500 ตาม)
+  const catalog = await listPublicModels();
+  let used = new Map<string, number>();
+  try {
+    used = await usedTokensByModel();
+  } catch (err) {
+    markDbUnavailable(err);
+  }
+  const withUsage = catalog
+    .map((m) => ({ m, tokens: used.get(m.modelId) ?? 0 }))
+    .sort(
+      (a, b) =>
+        b.tokens - a.tokens ||
+        a.m.providerName.localeCompare(b.m.providerName) ||
+        a.m.modelId.localeCompare(b.m.modelId),
+    );
+  const top = withUsage[0]?.tokens ?? 0;
+  return withUsage.map(({ m, tokens }) => ({
+    ...m,
+    share: top > 0 ? Math.round((tokens / top) * 100) : 0,
+  }));
+}
+
+/** ผลรวม tokens ของแต่ละโมเดลปลายทางใน 7 วันล่าสุด (โหมด demo นับจากข้อมูลตัวอย่าง) */
+async function usedTokensByModel(): Promise<Map<string, number>> {
+  if (isDemoMode || isDbUnavailable()) {
+    const cutoff = Date.now() - 7 * 86_400_000;
+    const map = new Map<string, number>();
+    for (const r of demoSource().requests) {
+      if (r.createdAt.getTime() < cutoff) continue;
+      map.set(r.model, (map.get(r.model) ?? 0) + r.inputTokens + r.outputTokens);
+    }
+    return map;
+  }
+  const rows = await getDb()
+    .select({
+      model: requests.model,
+      tokens: sql<string>`coalesce(sum(input_tokens + output_tokens), 0)`,
+    })
+    .from(requests)
+    .where(sql`${requests.createdAt} > now() - interval '7 days'`)
+    .groupBy(requests.model);
+  return new Map(rows.map((r) => [r.model, Number(r.tokens)]));
 }
 
 /**
