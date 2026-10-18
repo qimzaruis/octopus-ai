@@ -1,10 +1,27 @@
 import { asc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { assets, models, providerKeys, providers, routeTargets, routes } from "@/db/schema";
+import {
+  assets,
+  models,
+  providerKeyLimits,
+  providerKeys,
+  providers,
+  routeTargets,
+  routes,
+  type ProviderKey,
+  type ProviderKeyLimit,
+} from "@/db/schema";
 import { isDemoMode } from "@/lib/config";
 import { isDbUnavailable } from "@/lib/db-circuit";
+import { invalidateCache } from "@/lib/catalog-cache";
 import { DEMO_MODEL_UPTIME, demoSource } from "@/lib/demo/store";
-import { cooldownUntilFrom, cooldownMinutesLeft, keyHealth, type KeyHealth } from "@/lib/rotation";
+import {
+  cooldownMinutesLeft,
+  cooldownUntilFrom,
+  keyHealth,
+  limitMinutesLeft,
+  type KeyHealth,
+} from "@/lib/rotation";
 
 export type ModelDTO = {
   id: number;
@@ -29,10 +46,16 @@ export type ProviderKeyDTO = {
   enabled: boolean;
   isPrimary: boolean;
   failureCount: number;
-  /** พร้อมใช้ / ติด cooldown / ปิดใช้งาน */
+  /** พร้อมใช้ / ติด cooldown / ติดลิมิตโควต้า / ปิดใช้งาน */
   health: KeyHealth;
   /** นาทีที่เหลือของ cooldown (0 = ไม่ติด) */
   cooldownMinutes: number;
+  /** นาทีที่เหลือก่อนเวลารีเซตของค่าย (0 = ไม่ติดลิมิต) */
+  limitMinutes: number;
+  /** เวลาที่คีย์กลับมาใช้ได้ (ISO) — null = ไม่ติดลิมิต */
+  limitUntil: string | null;
+  /** หลักฐานสั้น ๆ ที่ทำให้ระบบสรุปว่าติดลิมิต เช่น 402 · insufficient_quota */
+  limitReason: string;
 };
 
 export type ProviderDTO = {
@@ -81,6 +104,23 @@ function maskKey(key: string): string {
   return `${key.slice(0, 6)}${"•".repeat(10)}`;
 }
 
+/** คีย์ 1 แถว → DTO ที่ทั้งหน้า providers และ key-limits ใช้ร่วมกัน */
+function keyDTO(k: ProviderKey): ProviderKeyDTO {
+  return {
+    id: k.id,
+    label: k.label,
+    apiKeyMasked: maskKey(k.apiKey),
+    enabled: k.enabled,
+    isPrimary: k.isPrimary,
+    failureCount: k.failureCount,
+    health: keyHealth(k),
+    cooldownMinutes: cooldownMinutesLeft(k),
+    limitMinutes: limitMinutesLeft(k),
+    limitUntil: k.limitUntil ? k.limitUntil.toISOString() : null,
+    limitReason: k.limitReason,
+  };
+}
+
 function modelLabel(m: ModelDTO, providerName: string): string {
   return `${providerName} / ${m.modelId}`;
 }
@@ -100,16 +140,7 @@ export async function listProvidersWithModels(): Promise<ProviderDTO[]> {
       keys: store.providerKeys
         .filter((k) => k.providerId === p.id)
         .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary) || a.id - b.id)
-        .map((k) => ({
-          id: k.id,
-          label: k.label,
-          apiKeyMasked: maskKey(k.apiKey),
-          enabled: k.enabled,
-          isPrimary: k.isPrimary,
-          failureCount: k.failureCount,
-          health: keyHealth(k),
-          cooldownMinutes: cooldownMinutesLeft(k),
-        })),
+        .map(keyDTO),
       models: store.models
         .filter((m) => m.providerId === p.id)
         .map((m) => ({
@@ -143,16 +174,7 @@ export async function listProvidersWithModels(): Promise<ProviderDTO[]> {
     keys: keyRows
       .filter((k) => k.providerId === p.id)
       .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary) || a.id - b.id)
-      .map((k) => ({
-        id: k.id,
-        label: k.label,
-        apiKeyMasked: maskKey(k.apiKey),
-        enabled: k.enabled,
-        isPrimary: k.isPrimary,
-        failureCount: k.failureCount,
-        health: keyHealth(k),
-        cooldownMinutes: cooldownMinutesLeft(k),
-      })),
+      .map(keyDTO),
     models: modelRows
       .filter((m) => m.providerId === p.id)
       .map((m) => ({
@@ -315,6 +337,9 @@ export async function addProviderKey(input: {
       cooldownUntil: null,
       lastErrorAt: null,
       lastUsedAt: null,
+      limitUntil: null,
+      limitReason: "",
+      lastLimitedAt: null,
       createdAt: new Date(),
     });
     return { ok: true };
@@ -409,12 +434,13 @@ export async function deleteProviderKey(id: number): Promise<ActionResult> {
 }
 
 /**
- * บันทึกผลการใช้คีย์ — ใช้โดย gateway/worker ตอนยิง request จริง
+ * บันทึกผลการใช้คีย์ — ใช้โดย gateway ตอนยิง request จริง
  *
- * สําเร็จ   → รีเซ็ต failureCount + ปลด cooldown + อัปเดต lastUsedAt
+ * สําเร็จ   → รีเซ็ต failureCount + ปลด cooldown/ลิมิต + อัปเดต lastUsedAt
  * ล้มเหลว   → failureCount++ แล้วตั้ง cooldown ตามลําดับ backoff
  *
- * ยังไม่มีจุดเรียกในระบบตอนนี้ (ยังไม่มี gateway) แต่พร้อมให้ต่อทันที
+ * คีย์ที่ "โควต้าของค่ายหมด" ไม่ใช้ฟังก์ชันนี้ แต่ใช้ markKeyLimited() ซึ่งพัก
+ * ถึงเวลารีเซตของค่าย (backoff สั้น ๆ ไม่มีประโยชน์กับลิมิตแบบทั้งวัน)
  */
 export async function recordKeyResult(
   keyId: number,
@@ -429,6 +455,8 @@ export async function recordKeyResult(
     if (ok) {
       k.failureCount = 0;
       k.cooldownUntil = null;
+      k.limitUntil = null;
+      k.limitReason = "";
       k.lastUsedAt = now;
     } else {
       k.failureCount += 1;
@@ -445,7 +473,7 @@ export async function recordKeyResult(
   if (ok) {
     await db
       .update(providerKeys)
-      .set({ failureCount: 0, cooldownUntil: null, lastUsedAt: now })
+      .set({ failureCount: 0, cooldownUntil: null, limitUntil: null, limitReason: "", lastUsedAt: now })
       .where(eq(providerKeys.id, keyId));
   } else {
     const next = k.failureCount + 1;
@@ -454,6 +482,154 @@ export async function recordKeyResult(
       .set({ failureCount: next, lastErrorAt: now, cooldownUntil: cooldownUntilFrom(next, now) })
       .where(eq(providerKeys.id, keyId));
   }
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------
+// คีย์ติดลิมิตโควต้า (พักถึงเวลารีเซตของค่าย)
+// ---------------------------------------------------------------------
+
+/**
+ * ตั้งสถานะ "ติดลิมิต" ให้คีย์ — gateway เรียกเมื่อ response ตรงกติกาของ provider นั้น
+ *
+ * ไม่แตะ failureCount/cooldown เพราะสาเหตุไม่ใช่ระบบพังชั่วคราว แต่เป็นโควต้าหมด
+ * และต้องล้างแคชบัญชีคีย์ด้วย ไม่งั้น request ถัดไปยังเห็นคีย์นี้ว่าใช้ได้
+ */
+export async function markKeyLimited(
+  keyId: number,
+  until: Date,
+  reason: string,
+): Promise<ActionResult> {
+  const now = new Date();
+
+  if (isDemoMode || isDbUnavailable()) {
+    const k = demoSource().providerKeys.find((x) => x.id === keyId);
+    if (!k) return { ok: false, error: "ไม่พบคีย์" };
+    k.limitUntil = until;
+    k.limitReason = reason;
+    k.lastLimitedAt = now;
+    k.lastErrorAt = now;
+    return { ok: true };
+  }
+
+  await getDb()
+    .update(providerKeys)
+    .set({ limitUntil: until, limitReason: reason, lastLimitedAt: now, lastErrorAt: now })
+    .where(eq(providerKeys.id, keyId));
+  invalidateCache("keys:");
+  return { ok: true };
+}
+
+/** ปลดลิมิตก่อนเวลา — แอดมินกดเมื่อเติมเครดิต/อัปเกรดแผนแล้วไม่ต้องรอรีเซต */
+export async function clearKeyLimit(keyId: number): Promise<ActionResult> {
+  if (isDemoMode || isDbUnavailable()) {
+    const k = demoSource().providerKeys.find((x) => x.id === keyId);
+    if (!k) return { ok: false, error: "ไม่พบคีย์" };
+    k.limitUntil = null;
+    k.limitReason = "";
+    return { ok: true };
+  }
+  await getDb()
+    .update(providerKeys)
+    .set({ limitUntil: null, limitReason: "" })
+    .where(eq(providerKeys.id, keyId));
+  invalidateCache("keys:");
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------
+// กติกาจับลิมิตต่อ provider (หน้า /admin/key-limits)
+// ---------------------------------------------------------------------
+
+/** กติกา + ชื่อ provider + สถานะคีย์แต่ละตัว ของ provider รายหนึ่ง */
+export type KeyLimitDTO = {
+  providerId: number;
+  providerName: string;
+  baseUrl: string;
+  rule: ProviderKeyLimit | null;
+  keys: ProviderKeyDTO[];
+};
+
+/** ทุก provider เรียงตาม id (แถวไหนยังไม่มีกติกา = rule null) */
+export async function listKeyLimits(): Promise<KeyLimitDTO[]> {
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
+    return store.providers.map((p) => ({
+      providerId: p.id,
+      providerName: p.name,
+      baseUrl: p.baseUrl,
+      rule: store.keyLimits.find((r) => r.providerId === p.id) ?? null,
+      keys: store.providerKeys
+        .filter((k) => k.providerId === p.id)
+        .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary) || a.id - b.id)
+        .map(keyDTO),
+    }));
+  }
+
+  const db = getDb();
+  const [providerRows, keyRows, ruleRows] = await Promise.all([
+    db.select().from(providers).orderBy(asc(providers.id)),
+    db.select().from(providerKeys).orderBy(asc(providerKeys.id)),
+    db.select().from(providerKeyLimits),
+  ]);
+  return providerRows.map((p) => ({
+    providerId: p.id,
+    providerName: p.name,
+    baseUrl: p.baseUrl,
+    rule: ruleRows.find((r) => r.providerId === p.id) ?? null,
+    keys: keyRows
+      .filter((k) => k.providerId === p.id)
+      .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary) || a.id - b.id)
+      .map(keyDTO),
+  }));
+}
+
+/** ตั้ง/แก้กติกาของ provider หนึ่งราย — ต้องมีเงื่อนไขจับอย่างน้อยหนึ่งช่อง */
+export async function upsertKeyLimit(input: {
+  providerId: number;
+  enabled: boolean;
+  httpStatuses: number[];
+  errorCodes: string[];
+  keywords: string[];
+  resetTime: string;
+  resetTimezone: string;
+}): Promise<ActionResult> {
+  if (!input.providerId) return { ok: false, error: "ไม่พบ provider" };
+  if (!/^\d{1,2}:\d{2}$/.test(input.resetTime.trim())) {
+    return { ok: false, error: "เวลารีเซตต้องเป็น HH:MM" };
+  }
+  if (input.enabled && input.httpStatuses.length === 0 && input.errorCodes.length === 0 && input.keywords.length === 0) {
+    return { ok: false, error: "กรอกเงื่อนไขจับอย่างน้อยหนึ่งช่อง (status / code / คำสำคัญ)" };
+  }
+
+  const row = {
+    enabled: input.enabled,
+    httpStatuses: input.httpStatuses,
+    errorCodes: input.errorCodes,
+    keywords: input.keywords,
+    resetTime: input.resetTime.trim(),
+    resetTimezone: input.resetTimezone.trim() || "UTC",
+    updatedAt: new Date(),
+  };
+
+  if (isDemoMode || isDbUnavailable()) {
+    const store = demoSource();
+    const found = store.keyLimits.find((r) => r.providerId === input.providerId);
+    if (found) Object.assign(found, row);
+    else store.keyLimits.push({ providerId: input.providerId, ...row });
+    return { ok: true };
+  }
+
+  const db = getDb();
+  const exists = (
+    await db.select().from(providerKeyLimits).where(eq(providerKeyLimits.providerId, input.providerId))
+  )[0];
+  if (exists) {
+    await db.update(providerKeyLimits).set(row).where(eq(providerKeyLimits.providerId, input.providerId));
+  } else {
+    await db.insert(providerKeyLimits).values({ providerId: input.providerId, ...row });
+  }
+  invalidateCache("keylimit:");
   return { ok: true };
 }
 

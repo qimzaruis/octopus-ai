@@ -73,6 +73,15 @@ export const providerKeys = pgTable(
     cooldownUntil: timestamp("cooldown_until", { withTimezone: true }),
     lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    /**
+     * ---- สถานะ "ติดลิมิต" ของโควต้าค่าย (ดูตาราง provider_key_limits) ----
+     * ต่างจาก cooldownUntil ตรงนี้เป็นลิมิตระดับโควต้าที่ไม่หายเองuntil รีเซต
+     * จึงพักยาวถึงเวลารีเซตของค่าย แล้วค่อยกลับมาหมุนใช้เองอัตโนมัติ
+     */
+    limitUntil: timestamp("limit_until", { withTimezone: true }),
+    /** เหตุผลสั้น ๆ ที่ทำให้ติดลิมิต เช่น "402 insufficient_quota" */
+    limitReason: text("limit_reason").notNull().default(""),
+    lastLimitedAt: timestamp("last_limited_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -81,6 +90,34 @@ export const providerKeys = pgTable(
     providerIdx: index("provider_keys_provider_idx").on(t.providerId),
   }),
 );
+
+/**
+ * กติกา "คีย์ติดลิมิต" ของแต่ละ provider (แอดมินตั้งที่ /admin/key-limits)
+ *
+ * สำคัญ: ลิมิตของโควต้าต่าง behaviour กันตามค่าย — Tenixe ตอบ 402 + code
+ * `insufficient_quota` เมื่อเครดิตหมดและรีเซตทุกวัน 13:00 (ไทย) ส่วนค่ายอื่น
+ * อาจใช้ 429 พร้อม header รีเซตคนละแบบ จึงตั้งเป็นข้อมูลต่อรายแทนที่จะ hardcode
+ * ชื่อค่ายในโค้ด แล้ว match กับ 3 ช่องทาง (HTTP status / error code / คำในข้อความ)
+ */
+export const providerKeyLimits = pgTable("provider_key_limits", {
+  providerId: integer("provider_id")
+    .primaryKey()
+    .references(() => providers.id, { onDelete: "cascade" }),
+  /** ปิด = ไม่ใช้กฎนี้กับ provider นี้เลย (คีย์ล้มเหลวจะกลับไปใช้ backoff ปกติ) */
+  enabled: boolean("enabled").notNull().default(false),
+  /** HTTP status ที่ถือว่า "คีย์นี้ติดลิมิต" เช่น [402, 429] */
+  httpStatuses: integer("http_statuses").array().notNull(),
+  /** ค่า error.code / error.type ใน body ที่ถือว่าตรง (เทียบแบบไม่สนตัวพิมพ์) */
+  errorCodes: text("error_codes").array().notNull(),
+  /** คำที่ถ้าพบใน body ถือว่าติดลิมิต (เทียบแบบไม่สนตัวพิมพ์) */
+  keywords: text("keywords").array().notNull(),
+  /** เวลา "HH:MM" ที่โควต้าของค่ายนี้รีเซต */
+  resetTime: text("reset_time").notNull().default("13:00"),
+  resetTimezone: text("reset_timezone").notNull().default("Asia/Bangkok"),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
 
 /** คลังรูปที่อัปโหลดขึ้น Supabase Storage — อัปครั้งเดียวแล้วเลือกใช้ซ้ำได้ */
 export const assets = pgTable("assets", {
@@ -323,6 +360,7 @@ export const creditTransactions = pgTable(
 export type User = typeof users.$inferSelect;
 export type Provider = typeof providers.$inferSelect;
 export type ProviderKey = typeof providerKeys.$inferSelect;
+export type ProviderKeyLimit = typeof providerKeyLimits.$inferSelect;
 export type Asset = typeof assets.$inferSelect;
 export type Model = typeof models.$inferSelect;
 export type Route = typeof routes.$inferSelect;

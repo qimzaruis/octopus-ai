@@ -4,10 +4,12 @@
  * ผู้ใช้เรียกด้วย "route" (เช่น octopus-free) แล้วระบบไล่โมเดลปลายทางตาม priority
  * ของ route นั้น จนกว่าจะมีค่ายไหนตอบกลับมา (fallback อัตโนมัติ)
  *
- * การหมุน API key ของแต่ละค่ายใช้ pickKey() ใน lib/rotation (primary → ใช้นานสุดแล้ว
- * → fail น้อยสุด) และบันทึกผลสำเร็จ/ล้มเหลวผ่าน recordKeyResult() เพื่อให้คีย์ที่
- * พังบ่อยถูกพัก (cooldown) เอง ส่วนทุก request ที่ผ่านจะถูกเขียนลงตาราง requests
- * เพื่อให้หน้า dashboard / requests เห็นตัวเลขจริง
+ * การหมุน API key ของแต่ละค่ายใช้ orderedKeys() ใน lib/rotation (primary → ใช้นานสุดแล้ว
+ * → fail น้อยสุด) และไล่ลองคีย์ตามลำดับนั้นจนกว่าจะสำเร็จ
+ *
+ * คีย์ที่ตรงกติกาลิมิตของค่าย (lib/key-limit) จะถูกพักถึงเวลารีเซตของค่ายนั้น ไม่ใช่
+ * แค่ backoff สั้น ๆ ส่วนทุก request ที่ผ่านจะถูกเขียนลงตาราง requests เพื่อให้หน้า
+ * dashboard / requests เห็นตัวเลขจริง
  */
 
 import { asc, eq, sql } from "drizzle-orm";
@@ -24,8 +26,9 @@ import { isDemoMode } from "@/lib/config";
 import { isDbUnavailable } from "@/lib/db-circuit";
 import { cached, invalidateCache } from "@/lib/catalog-cache";
 import { getDemoStore } from "@/lib/demo/store";
-import { pickKey, type RotatableKey } from "@/lib/rotation";
-import { recordKeyResult } from "@/lib/data/admin";
+import { isKeyLimited, orderedKeys, type RotatableKey } from "@/lib/rotation";
+import { keyLimitRule, matchKeyLimit, nextResetAt } from "@/lib/key-limit";
+import { markKeyLimited, recordKeyResult } from "@/lib/data/admin";
 
 /** การเรียกเครื่องมือที่โมเดลขอ (OpenAI function calling) */
 export type UpstreamToolCall = {
@@ -66,6 +69,7 @@ export type GatewayErrorCode =
   | "no_route"
   | "no_target"
   | "no_provider_key"
+  | "keys_limited"
   | "upstream_error";
 
 /** ข้อผิดพลาดที่แปลงเป็น status code ตอบลูกค้าได้ทันที */
@@ -165,7 +169,7 @@ async function loadTargets(publicModel: string): Promise<GatewayTarget[]> {
     });
 }
 
-type UsableKey = RotatableKey & { apiKey: string };
+type UsableKey = RotatableKey & { apiKey: string; label: string };
 
 /**
  * บัญชีคีย์ของค่ายหนึ่ง — แคชไว้เพราะอ่านทีละ query (~350ms) ทุกครั้งที่เรียกโมเดล
@@ -185,11 +189,13 @@ async function loadKeys(providerId: number): Promise<UsableKey[]> {
       .providerKeys.filter((k) => k.providerId === providerId)
       .map((k) => ({
         id: k.id,
+        label: k.label,
         enabled: k.enabled,
         isPrimary: k.isPrimary,
         failureCount: k.failureCount,
         cooldownUntil: k.cooldownUntil,
         lastUsedAt: k.lastUsedAt,
+        limitUntil: k.limitUntil,
         apiKey: k.apiKey,
       }));
   }
@@ -199,11 +205,13 @@ async function loadKeys(providerId: number): Promise<UsableKey[]> {
     .where(eq(providerKeys.providerId, providerId));
   return rows.map((k) => ({
     id: k.id,
+    label: k.label,
     enabled: k.enabled,
     isPrimary: k.isPrimary,
     failureCount: k.failureCount,
     cooldownUntil: k.cooldownUntil,
     lastUsedAt: k.lastUsedAt,
+    limitUntil: k.limitUntil,
     apiKey: k.apiKey,
   }));
 }
@@ -236,11 +244,18 @@ function joinUrl(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/${path}`;
 }
 
+/** กันกรณี provider มีคีย์หลายสิบตัว แล้ว request หนึ่งรอบลากยาวเกินไป */
+const MAX_KEYS_PER_TARGET = 4;
+
 /**
  * ไล่ยิงปลายทางตาม priority
  *
- * คีย์ไหนล้มจะถูกบันทึกเพื่อให้ rotation พักคีย์นั้น แล้วลองคีย์/ค่ายถัดไป
- * ถ้าหมดทุกทางแล้วจึงโยน GatewayError ให้ caller แปลงเป็น response
+ * ต่อ 1 ปลายทาง จะลองคีย์ของค่ายนั้นตามลำดับ rotation จนกว่าจะสำเร็จ
+ * เพราะค่ายเดียวมักมีหลายคีย์ และ "โควต้าหมด" เกิดกับแค่คีย์ใดคีย์หนึ่ง
+ * ถ้าเอาแต่ข้ามไปโมเดลอื่นตั้งแต่คีย์แรกพัง จะเสียโมเดลดี ๆ ไปทั้งที่คีย์สำรองยังใช้ได้
+ *
+ * คีย์ที่ตรงกติกาลิมิตของ provider (ตาราง provider_key_limits) จะถูกพักถึง
+ * เวลารีเซตของค่ายนั้น แล้วข้ามไปคีย์ถัดไปทันที ส่วน error อื่นใช้ backoff ปกติ
  */
 export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> {
   const all = await resolveTargets(input.publicModel);
@@ -254,6 +269,11 @@ export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> 
 
   let lastError = "";
   let attempted = false;
+  /** เจอลิมิตโควต้าในบาง attempt (ไว้ตอบ 429 แทน 502 เมื่อไม่มีสาเหตุอื่น) */
+  let sawLimit = false;
+  /** เจอ error แบบอื่นที่ไม่ใช่ลิมิต — ถ้ามี แสดงว่า 429 ไม่ใช่คำตอบที่ตรง */
+  let sawOtherFailure = false;
+
   for (const target of targets) {
     const keys = await keysOf(target.providerId);
     const usable = keys.filter((k) => k.enabled && k.apiKey.trim());
@@ -262,6 +282,20 @@ export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> 
       continue;
     }
 
+    // orderedKeys กรองคีย์ที่ติด cooldown/ติดลิมิตออกให้แล้ว เหลือเฉพาะตัวที่เลือกใช้ได้
+    const candidates = orderedKeys(usable).slice(0, MAX_KEYS_PER_TARGET);
+    if (candidates.length === 0) {
+      if (usable.every((k) => isKeyLimited(k))) {
+        sawLimit = true;
+        lastError = `${target.providerName}: คีย์ทุกตัวติดลิมิตโควต้า (รอเวลารีเซตของค่าย)`;
+      } else {
+        sawOtherFailure = true;
+        lastError = `${target.providerName}: คีย์ทุกตัวกำลังถูกพัก (cooldown)`;
+      }
+      continue;
+    }
+
+    const rule = await keyLimitRule(target.providerId);
     const payload: Record<string, unknown> = {
       model: target.modelId,
       messages: input.messages,
@@ -272,49 +306,65 @@ export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> 
     if (input.tools?.length) payload.tools = input.tools;
     if (input.stream) payload.stream_options = { include_usage: true };
 
-    const picked = pickKey(usable);
-    if (!picked) {
-      lastError = `${target.providerName}: คีย์ทุกตัวกำลังถูกพัก (cooldown)`;
-      continue;
-    }
+    for (const picked of candidates) {
+      attempted = true;
 
-    attempted = true;
+      let res: Response;
+      try {
+        res = await fetch(joinUrl(target.baseUrl, "chat/completions"), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${picked.apiKey}`,
+          },
+          body: JSON.stringify(payload),
+        });
+      } catch (err) {
+        sawOtherFailure = true;
+        lastError = `${target.providerName}: ${(err as Error).message}`;
+        await markKey(picked.id, false);
+        invalidateCache("keys:"); // ห้ามเลือกคีย์ที่เพิ่งพังกลับมาใช้ซ้ำจากแคชเก่า
+        break; // เครือข่ายล่ม — ลองคีย์อื่นก็น่าจะพังเหมือนกัน ไปปลายทางถัดไป
+      }
 
-    let res: Response;
-    try {
-      res = await fetch(joinUrl(target.baseUrl, "chat/completions"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${picked.apiKey}`,
-        },
-        body: JSON.stringify(payload),
-      });
-    } catch (err) {
-      lastError = `${target.providerName}: ${(err as Error).message}`;
-      await markKey(picked.id, false);
-      invalidateCache("keys:"); // ห้ามเลือกคีย์ที่เพิ่งพังกลับมาใช้ซ้ำจากแคชเก่า
-      continue;
-    }
+      if (res.ok && res.body) {
+        // จดว่าคีย์นี้สำเร็จแบบไม่รอ — ถ้า await จะเพิ่ม ~350ms ให้ผู้ใช้ต้องรอฟรี ๆ
+        // หลังค่ายต้นทางตอบมาแล้ว (ผลข้างเคียงมีแค่สถิติ "ใช้นานสุดแล้ว" ที่คลาดเคลื่อนไม่กี่ร้อย ms)
+        void markKey(picked.id, true);
+        return { body: res.body, target, httpStatus: res.status };
+      }
 
-    if (!res.ok || !res.body) {
       const detail = await res.text().catch(() => "");
+      if (rule) {
+        const reason = matchKeyLimit(res.status, detail, rule);
+        if (reason) {
+          const until = nextResetAt(rule);
+          sawLimit = true;
+          lastError = `${target.providerName} คีย์ "${picked.label}" ติดลิมิต (${reason}) — จะกลับมาใช้อีกที ${until.toISOString()}`;
+          await markLimited(picked.id, until, reason);
+          invalidateCache("keys:");
+          continue; // คีย์ถัดไปของค่ายเดียวกันยังใช้ได้
+        }
+      }
+
+      sawOtherFailure = true;
       lastError = `${target.providerName} ตอบกลับ ${res.status}: ${detail.slice(0, 300)}`;
       await markKey(picked.id, res.status !== 400 && res.status !== 404);
       invalidateCache("keys:");
-      continue;
+      break; // โมเดลไม่มีอยู่จริง / 5xx — เปลี่ยนปลายทางดีกว่าเปลี่ยนคีย์
     }
-
-    // จดว่าคีย์นี้สำเร็จแบบไม่รอ — ถ้า await จะเพิ่ม ~350ms ให้ผู้ใช้ต้องรอฟรี ๆ
-    // หลังค่ายต้นทางตอบมาแล้ว (ผลข้างเคียงมีแค่สถิติ "ใช้นานสุดแล้ว" ที่คลาดเคลื่อนไม่กี่ร้อย ms)
-    void markKey(picked.id, true);
-    return { body: res.body, target, httpStatus: res.status };
   }
 
+  const code: GatewayErrorCode =
+    sawLimit && !sawOtherFailure
+      ? "keys_limited"
+      : attempted
+        ? "upstream_error"
+        : "no_provider_key";
   throw new GatewayError(
-    attempted ? "upstream_error" : "no_provider_key",
+    code,
     lastError || "ทุกค่ายต้นทางล้มเหลว",
-    attempted ? 502 : 503,
+    code === "keys_limited" ? 429 : code === "upstream_error" ? 502 : 503,
   );
 }
 
@@ -324,6 +374,18 @@ async function markKey(keyId: number, ok: boolean): Promise<void> {
     await recordKeyResult(keyId, ok);
   } catch (err) {
     console.error("[gateway] บันทึกสถานะคีย์ไม่สำเร็จ:", err);
+  }
+}
+
+/**
+ * บันทึกว่าคีย์นี้ติดลิมิตโควต้า — DB เขียนไม่สำเร็จก็ห้ามทำให้ request พังตาม
+ * ผลเสียกรณีนั้นมีแค่คีย์นั้นยังไม่ถูกพักถาวร ซึ่งรอบถัดไปก็จะเจอ 402 ซ้ำแล้วลองบันทึกใหม่
+ */
+async function markLimited(keyId: number, until: Date, reason: string): Promise<void> {
+  try {
+    await markKeyLimited(keyId, until, reason);
+  } catch (err) {
+    console.error("[gateway] บันทึกสถานะติดลิมิตของคีย์ไม่สำเร็จ:", err);
   }
 }
 
@@ -342,12 +404,21 @@ export function userSafeMessage(err: unknown): string {
       return "บัญชีของคุณใช้โมเดลนี้ไม่ได้";
     case "no_provider_key":
       return "ยังไม่ได้ตั้งค่าการเชื่อมต่อโมเดลนี้ กรุณาแจ้งผู้ดูแลระบบ";
+    case "keys_limited":
+      return "ผู้ให้บริการใช้โควต้าครบแล้วสำหรับรอบนี้ กรุณาลองใหม่ภายหลัง";
     case "upstream_error":
       return "โมเดลต้นทางตอบกลับผิดพลาด กรุณาลองใหม่";
     default:
       return "เกิดข้อผิดพลาดขณะเรียกโมเดล กรุณาลองใหม่";
   }
 }
+
+/**
+ * ทุก request ที่ล้มเหลวจะถูก log เป็น "error" หรือ "rate_limited"
+ * (case หลัง = `err.code === "keys_limited"`) — caller ตรวจเองผ่าน GatewayError
+ * เพราะ route ถูก hot-reload แยกไฟล์นี้ จึงไม่เพิ่ม helper ข้ามโมดูลให้ chunk
+ * เก่าเรียกแล้วพัง
+ */
 
 // ---------------------------------------------------------------------------
 // คํานวณ token / ค่าใช้จ่าย และเขียน log

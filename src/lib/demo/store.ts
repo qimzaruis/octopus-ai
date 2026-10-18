@@ -8,6 +8,7 @@ import type {
   Model,
   Provider,
   ProviderKey,
+  ProviderKeyLimit,
   RequestRow,
   Route,
   RouteTarget,
@@ -187,6 +188,8 @@ export const DEMO_MODEL_UPTIME = {
 export type DemoStore = {
   providers: Provider[];
   providerKeys: ProviderKey[];
+  /** กติกาจับ "คีย์ติดลิมิต" ต่อ provider (ของจริงตั้งที่ /admin/key-limits) */
+  keyLimits: ProviderKeyLimit[];
   assets: Asset[];
   models: Model[];
   routes: Route[];
@@ -210,14 +213,23 @@ function buildStore(): DemoStore {
   ];
 
   const now0 = new Date();
+  // สถานะ "ไม่ติดลิมิต" ใช้ร่วมกันทุกคีย์ตัวอย่าง
+  const noLimit = { limitUntil: null, limitReason: "", lastLimitedAt: null };
   // OpenAI มี 2 คีย์ เพื่อสาธิตการหมุน; Groq มีคีย์ที่ติด cooldown ให้เห็นสถานะใน UI
   const providerKeys: ProviderKey[] = [
-    { id: 1, providerId: 1, label: "main", apiKey: "sk-proj-demo-************", enabled: true, isPrimary: true, failureCount: 0, cooldownUntil: null, lastErrorAt: null, lastUsedAt: new Date(now0.getTime() - 60_000), createdAt: new Date() },
-    { id: 2, providerId: 1, label: "backup-1", apiKey: "sk-proj-demo-backup-******", enabled: true, isPrimary: false, failureCount: 0, cooldownUntil: null, lastErrorAt: null, lastUsedAt: null, createdAt: new Date() },
-    { id: 3, providerId: 2, label: "main", apiKey: "sk-ant-demo-************", enabled: true, isPrimary: true, failureCount: 0, cooldownUntil: null, lastErrorAt: null, lastUsedAt: new Date(now0.getTime() - 120_000), createdAt: new Date() },
-    { id: 4, providerId: 3, label: "main", apiKey: "AIza-demo-************", enabled: true, isPrimary: true, failureCount: 0, cooldownUntil: null, lastErrorAt: null, lastUsedAt: new Date(now0.getTime() - 300_000), createdAt: new Date() },
-    { id: 5, providerId: 4, label: "main", apiKey: "gsk_demo-************", enabled: true, isPrimary: true, failureCount: 3, cooldownUntil: new Date(now0.getTime() + 600_000), lastErrorAt: new Date(now0.getTime() - 30_000), lastUsedAt: new Date(now0.getTime() - 400_000), createdAt: new Date() },
-    { id: 6, providerId: 5, label: "main", apiKey: "mistral-demo-************", enabled: true, isPrimary: true, failureCount: 0, cooldownUntil: null, lastErrorAt: null, lastUsedAt: null, createdAt: new Date() },
+    { id: 1, providerId: 1, label: "main", apiKey: "sk-proj-demo-************", enabled: true, isPrimary: true, failureCount: 0, cooldownUntil: null, lastErrorAt: null, lastUsedAt: new Date(now0.getTime() - 60_000), ...noLimit, createdAt: new Date() },
+    { id: 2, providerId: 1, label: "backup-1", apiKey: "sk-proj-demo-backup-******", enabled: true, isPrimary: false, failureCount: 0, cooldownUntil: null, lastErrorAt: null, lastUsedAt: null, ...noLimit, createdAt: new Date() },
+    { id: 3, providerId: 2, label: "main", apiKey: "sk-ant-demo-************", enabled: true, isPrimary: true, failureCount: 0, cooldownUntil: null, lastErrorAt: null, lastUsedAt: new Date(now0.getTime() - 120_000), ...noLimit, createdAt: new Date() },
+    { id: 4, providerId: 3, label: "main", apiKey: "AIza-demo-************", enabled: true, isPrimary: true, failureCount: 0, cooldownUntil: null, lastErrorAt: null, lastUsedAt: new Date(now0.getTime() - 300_000), ...noLimit, createdAt: new Date() },
+    { id: 5, providerId: 4, label: "main", apiKey: "gsk_demo-************", enabled: true, isPrimary: true, failureCount: 3, cooldownUntil: new Date(now0.getTime() + 600_000), lastErrorAt: new Date(now0.getTime() - 30_000), lastUsedAt: new Date(now0.getTime() - 400_000), ...noLimit, createdAt: new Date() },
+    // Mistral เป็นตัวอย่าง "คีย์ติดลิมิตโควต้า" → พักถึงเที่ยงคืนของโซนนั้นแล้วถึงกลับมาใช้
+    { id: 6, providerId: 5, label: "main", apiKey: "mistral-demo-************", enabled: true, isPrimary: true, failureCount: 0, cooldownUntil: null, lastErrorAt: null, lastUsedAt: new Date(now0.getTime() - 90_000), limitUntil: new Date(now0.getTime() + 6 * 3_600_000), limitReason: '429 · "quota exceeded"', lastLimitedAt: new Date(now0.getTime() - 90_000), createdAt: new Date() },
+  ];
+
+  // ตัวอย่างกติกาจับลิมิตต่อ provider (ของจริงตั้งที่ /admin/key-limits)
+  const keyLimits: ProviderKeyLimit[] = [
+    { providerId: 1, enabled: true, httpStatuses: [429], errorCodes: ["rate_limit_exceeded"], keywords: ["please try again later"], resetTime: "00:00", resetTimezone: "UTC", updatedAt: new Date() },
+    { providerId: 5, enabled: true, httpStatuses: [429], errorCodes: [], keywords: ["quota exceeded"], resetTime: "00:00", resetTimezone: "UTC", updatedAt: new Date() },
   ];
 
   const models: Model[] = MODELS.map((m, i) => ({
@@ -329,6 +341,7 @@ function buildStore(): DemoStore {
   return {
     providers,
     providerKeys,
+    keyLimits,
     assets,
     models,
     routes,
@@ -371,6 +384,7 @@ function emptyStore(): DemoStore {
   return {
     providers: [],
     providerKeys: [],
+    keyLimits: [],
     assets: [],
     models: [],
     routes: [],

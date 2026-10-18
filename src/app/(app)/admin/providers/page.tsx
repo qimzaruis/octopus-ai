@@ -11,7 +11,8 @@ import {
   toggleProviderKeyAction,
   updateProviderKeyAction,
 } from "@/app/(app)/admin/actions";
-import { listProvidersWithModels, type ProviderKeyDTO } from "@/lib/data/admin";
+import { listProvidersWithModels } from "@/lib/data/admin";
+import KeyHealthBadge from "@/components/KeyHealthBadge";
 import ToggleSwitch from "@/components/ToggleSwitch";
 import ConfirmButton from "@/components/ConfirmButton";
 import StopPropagation from "@/components/StopPropagation";
@@ -23,32 +24,6 @@ import { getT } from "@/lib/i18n/server";
 import Icon from "@/components/Icon";
 
 export const dynamic = "force-dynamic";
-
-/** ป้ายสถานะสุขภาพของคีย์ — เตือนก่อนที่ผู้ใช้จะเจอ error เอง */
-function KeyHealthBadge({ k, t }: { k: ProviderKeyDTO; t: (s: string, v?: Record<string, string | number>) => string }) {
-  if (k.health === "disabled") {
-    return (
-      <span className="inline-flex items-center gap-1.5 rounded-md bg-white/[0.06] px-2 py-0.5 text-label text-fg-subtle">
-        <Icon name="fa-circle-pause" className="text-micro" />
-        {t("ปิด")}
-      </span>
-    );
-  }
-  if (k.health === "cooling") {
-    return (
-      <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-glow/10 px-2 py-0.5 text-label text-amber-glow">
-        <Icon name="fa-hourglass-half" className="text-micro" />
-        {t("พัก {n} นาที", { n: k.cooldownMinutes })}
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-md bg-leaf/10 px-2 py-0.5 text-label text-leaf">
-      <Icon name="fa-circle-check" className="text-micro" />
-      {t("พร้อมใช้")}
-    </span>
-  );
-}
 
 export default async function AdminProvidersPage({
   searchParams,
@@ -240,7 +215,7 @@ export default async function AdminProvidersPage({
                                 {t("คีย์หลัก")}
                               </span>
                             )}
-                            <KeyHealthBadge k={k} t={t} />
+                            <KeyHealthBadge k={k} />
                           </p>
                           <p className="truncate font-mono text-label text-fg-subtle">
                             {k.apiKeyMasked}

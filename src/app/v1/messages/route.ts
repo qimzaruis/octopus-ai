@@ -80,12 +80,16 @@ export async function POST(req: NextRequest) {
     const gw = err instanceof GatewayError ? err : null;
     call.log({
       target: failedTarget(model),
-      status: "error",
+      status: gw?.code === "keys_limited" ? "rate_limited" : "error",
       httpStatus: gw?.status ?? 502,
       usage: { inputTokens: estimateTokensFromChars(chars), outputTokens: 0 },
       error: gw?.message ?? (err as Error).message,
     });
-    return fail({ status: gw?.status ?? 502, kind: "upstream_error", message: userSafeMessage(err) });
+    return fail({
+      status: gw?.status ?? 502,
+      kind: gw?.code === "keys_limited" ? "rate_limit_error" : "upstream_error",
+      message: userSafeMessage(err),
+    });
   }
 
   const id = apiId("msg");

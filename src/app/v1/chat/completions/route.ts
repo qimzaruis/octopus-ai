@@ -190,12 +190,17 @@ export async function POST(req: NextRequest) {
     // รายละเอียดเต็ม (รวมชื่อค่าย) เก็บไว้ที่ log ฝั่งเซิร์ฟเวอร์เท่านั้น
     log({
       target: failedTarget(model),
-      status: "error",
+      status: gw?.code === "keys_limited" ? "rate_limited" : "error",
       httpStatus: gw?.status ?? 502,
       usage: { inputTokens: estimateTokensFromChars(chars), outputTokens: 0 },
       error: message,
     });
-    return openaiError(userSafeMessage(err), "upstream_error", gw?.status ?? 502, gw?.code);
+    return openaiError(
+      userSafeMessage(err),
+      gw?.code === "keys_limited" ? "rate_limit_error" : "upstream_error",
+      gw?.status ?? 502,
+      gw?.code,
+    );
   }
 
   if (!stream) {

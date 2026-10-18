@@ -301,4 +301,41 @@ export const adminPages = {
     "This value applies to both the UI and the server (1–50)",
   "บันทึกการตั้งค่าแล้ว": "Settings saved",
   "จำนวนไฟล์ต้องอยู่ระหว่าง 1–50": "The file count must be between 1 and 50",
+
+  // ---------- จำกัดคีย์ต่อ provider (/admin/key-limits) ----------
+  "จำกัดคีย์": "Key limits",
+  "จำกัดคีย์ต่อ provider": "Per-provider key limits",
+  "ตั้งเงื่อนไขที่ถือว่า “คีย์นี้โควต้าหมด” ของแต่ละค่าย ระบบจะพักคีย์นั้นถึงเวลารีเซต แล้วข้ามไปใช้คีย์ถัดไปของค่ายเดียวกันอัตโนมัติ":
+    "Define what counts as “quota exhausted” for each provider. The key is paused until its reset time, then the next healthy key of the same provider is used automatically",
+  "ตั้งแล้ว {a} จาก {b} ค่าย": "{a} of {b} providers configured",
+  "{n} คีย์กำลังติดลิมิต": "{n} keys are quota-limited",
+  "ลิมิตของแต่ละค่ายไม่เหมือนกัน Tenixe ตอบ HTTP 402 พร้อม code insufficient_quota เมื่อเครดิตหมดและรีเซตทุกวัน 13:00 เวลาไทย ส่วนค่ายอื่นมักใช้ 429 จึงกรอกเงื่อนไขจับเองได้ (HTTP status / error code / คำในข้อความ) ถ้าช่องไหนว่างจะถือว่าไม่ใช้ช่องนั้น":
+    "Limits differ per provider. Tenixe replies HTTP 402 with code insufficient_quota when credits run out and resets daily at 13:00 Thailand time, while others usually use 429 — so set the match rules yourself (HTTP status / error code / message text). An empty field is not used.",
+  "เพิ่ม provider ในหน้า Providers ก่อน แล้วกลับมาตั้งกติกาการหมุนคีย์ที่นี่":
+    "Add a provider on the Providers page first, then come back here to set its key rules",
+  "ยังไม่ได้ตั้ง": "Not configured",
+  "ติดลิมิต {n} คีย์": "{n} keys limited",
+  "รีเซต {time}": "Resets {time}",
+  "คลิกเพื่อปิดกฎลิมิตของค่ายนี้": "Click to disable the limit rule for this provider",
+  "คลิกเพื่อเปิดกฎลิมิตของค่ายนี้": "Click to enable the limit rule for this provider",
+  "สถานะคีย์ — ระบบจะข้ามคีย์ที่ติดลิมิตไปใช้คีย์ถัดไปเอง":
+    "Key status — a limited key is skipped for the next one automatically",
+  "ยังไม่มีคีย์ในหน้านี้ — เพิ่มได้ที่หน้า Providers": "No keys here yet — add them on the Providers page",
+  "กลับมาใช้ {time}": "Back in service {time}",
+  "ปลดลิมิต": "Clear limit",
+  "ปลดลิมิตตอนนี้ ใช้หลังเติมเครดิตหรืออัปเกรดแผนแล้ว":
+    "Clear the limit now — use this after topping up credits or upgrading the plan",
+  "HTTP status ที่ถือว่าติดลิมิต": "HTTP statuses that mean the key is limited",
+  "error code / type ในข้อความตอบกลับ": "error code / type in the response body",
+  "คำสำคัญในข้อความ error": "Keywords in the error message",
+  "เวลารีเซตของค่าย": "Provider reset time",
+  "ไทม์โซนของเวลาดังกล่าว": "Timezone of that time",
+  "บันทึกกติกา": "Save rule",
+  "ถ้ายิงแล้วตรงเงื่อนไข คีย์นั้นจะถูกพักจนถึง {time}":
+    "When a response matches, that key is paused until {time}",
+  "ติดลิมิต · อีก {n} ชม.": "Limited · {n} h left",
+  "ติดลิมิต · อีก {n} นาที": "Limited · {n} min left",
+  "เวลารีเซตต้องเป็น HH:MM": "The reset time must be HH:MM",
+  "กรอกเงื่อนไขจับอย่างน้อยหนึ่งช่อง (status / code / คำสำคัญ)":
+    "Fill in at least one match rule (status / code / keyword)",
 } as const;

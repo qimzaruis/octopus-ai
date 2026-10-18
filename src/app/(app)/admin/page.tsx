@@ -34,6 +34,9 @@ actions={
             <Link href="/admin/providers" className="btn-ghost !py-2 text-caption">
               <Icon name="fa-plug" className="text-label" /> Providers
             </Link>
+            <Link href="/admin/key-limits" className="btn-ghost !py-2 text-caption">
+              <Icon name="fa-signal" className="text-label" /> {t("จำกัดคีย์")}
+            </Link>
             <Link href="/admin/models" className="btn-ghost !py-2 text-caption">
               <Icon name="fa-list-check" className="text-label" /> {t("โมเดลที่แสดง")}
             </Link>

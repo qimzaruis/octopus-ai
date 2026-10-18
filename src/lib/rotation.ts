@@ -1,12 +1,11 @@
 /**
- * Rotation engine — เลือกคีย์ถัดไปของ provider และคำนวณ backoff
+ * Rotation engine — ลำดับคีย์ของ provider และคำนวณ backoff
  *
  * เป็นฟังก์ชันบริสุทธิ์ (ไม่แตะ DB) เพื่อให้เทสได้ตรง ๆ
- * ส่วนที่บันทึกผลลง DB อยู่ที่ recordKeyResult() ใน lib/data/admin.ts
+ * ส่วนที่บันทึกผลลง DB อยู่ที่ recordKeyResult()/markKeyLimited() ใน lib/data/admin.ts
  *
- * เหตุผลที่แยกออกมา: ตอนนี้ยังไม่มี API gateway จริงที่รับ request จากลูกค้า
- * engine นี้จึงยังไม่มีจุดเรียกใน runtime — เตรียมไว้ให้ gateway เรียก pickKey()
- * ตอนเลือกคีย์, แล้วเรียก recordKeyResult() ตอนรู้ผล เพื่อให้ระบบหมุนคีย์เองได้ทันทีที่ต่อ gateway
+ * gateway เรียก orderedKeys() เพื่อไล่ลองคีย์ของค่ายเดียวกันตามลำดับ
+ * (primary → ใช้นานสุดแล้ว → พลาดน้อยสุด) และข้ามคีย์ที่ติด cooldown หรือติดลิมิตโควต้า
  */
 
 /** ข้อมูลคีย์เท่าที่ engine ต้องใช้ตัดสินใจ */
@@ -17,6 +16,11 @@ export type RotatableKey = {
   failureCount: number;
   cooldownUntil: Date | string | null;
   lastUsedAt: Date | string | null;
+  /**
+   * พักเพราะ "โควต้าของค่ายหมด" (ต่างจาก cooldownUntil ที่เกิดจาก error ชั่วคราว)
+   * ค่านี้คือเวลารีเซตของค่าย จึงข้ามคีย์นี้จนกว่าจะถึงเวลานั้น — ดู lib/key-limit
+   */
+  limitUntil?: Date | string | null;
 };
 
 function timeOf(v: Date | string | null | undefined): number {
@@ -29,6 +33,11 @@ function timeOf(v: Date | string | null | undefined): number {
 export function isCoolingDown(key: RotatableKey, now: Date = new Date()): boolean {
   const until = timeOf(key.cooldownUntil);
   return until > now.getTime();
+}
+
+/** คีย์นี้กำลังติดลิมิตโควต้าอยู่หรือยัง */
+export function isKeyLimited(key: RotatableKey, now: Date = new Date()): boolean {
+  return timeOf(key.limitUntil) > now.getTime();
 }
 
 /**
@@ -49,38 +58,38 @@ export function cooldownUntilFrom(failureCount: number, now: Date = new Date()):
 }
 
 /**
- * เลือกคีย์ที่ควรใช้ถัดไป
+ * ลำดับคีย์ที่ควรใช้ (มาก → น้อย)
  *
- * เกณฑ์: เปิดใช้งาน และไม่ติด cooldown
+ * เกณฑ์: เปิดใช้งาน, ไม่ติด cooldown, ไม่ติดลิมิตโควต้า
  * เรียง: isPrimary ก่อน → ใช้นานที่สุดแล้ว (lastUsedAt เก่าสุด / ยังไม่เคยใช้)
  *        → failureCount น้อยสุด → id น้อยสุด (ให้ผลคงที่)
  *
- * คืน null ถ้าไม่มีคีย์ที่ใช้ได้ (ให้ caller ตัดสินใจ fallback ไป provider ถัดไป)
+ * gateway ไล่รายการนี้จนครบ เพื่อ "ข้ามไปคีย์ถัดไปที่ไม่ติดลิมิต" ของค่ายเดียวกัน
+ * (เดิมลองได้แค่ตัวเดียว แล้วกระโดดไปโมเดลอื่นทั้งที่คีย์สำรองยังใช้ได้)
  */
-export function pickKey<T extends RotatableKey>(
+export function orderedKeys<T extends RotatableKey>(
   keys: T[],
   now: Date = new Date(),
-): T | null {
-  const usable = keys.filter((k) => k.enabled && !isCoolingDown(k, now));
-  if (usable.length === 0) return null;
-
-  const sorted = [...usable].sort((a, b) => {
-    if (a.isPrimary !== b.isPrimary) return a.isPrimary ? -1 : 1;
-    const la = timeOf(a.lastUsedAt);
-    const lb = timeOf(b.lastUsedAt);
-    if (la !== lb) return la - lb; // ยังไม่เคยใช้ (0) มาก่อน, ใช้นานสุดมาก่อน
-    if (a.failureCount !== b.failureCount) return a.failureCount - b.failureCount;
-    return a.id - b.id;
-  });
-
-  return sorted[0] ?? null;
+): T[] {
+  return keys
+    .filter((k) => k.enabled && !isCoolingDown(k, now) && !isKeyLimited(k, now))
+    .sort((a, b) => {
+      if (a.isPrimary !== b.isPrimary) return a.isPrimary ? -1 : 1;
+      const la = timeOf(a.lastUsedAt);
+      const lb = timeOf(b.lastUsedAt);
+      if (la !== lb) return la - lb; // ยังไม่เคยใช้ (0) มาก่อน, ใช้นานสุดมาก่อน
+      if (a.failureCount !== b.failureCount) return a.failureCount - b.failureCount;
+      return a.id - b.id;
+    });
 }
 
 /** สถานะสุขภาพของคีย์ สำหรับแสดงใน UI */
-export type KeyHealth = "ready" | "cooling" | "disabled";
+export type KeyHealth = "ready" | "cooling" | "limited" | "disabled";
 
 export function keyHealth(key: RotatableKey, now: Date = new Date()): KeyHealth {
   if (!key.enabled) return "disabled";
+  // ลิมิตโควต้า informative กว่า cooldown เพราะยาวกว่าและรีเซตตามเวลาของค่าย
+  if (isKeyLimited(key, now)) return "limited";
   if (isCoolingDown(key, now)) return "cooling";
   return "ready";
 }
@@ -88,6 +97,13 @@ export function keyHealth(key: RotatableKey, now: Date = new Date()): KeyHealth 
 /** เวลาที่เหลือของ cooldown (นาที, ปัดขึ้น) — ใช้แสดงผล */
 export function cooldownMinutesLeft(key: RotatableKey, now: Date = new Date()): number {
   const ms = timeOf(key.cooldownUntil) - now.getTime();
+  if (ms <= 0) return 0;
+  return Math.ceil(ms / 60_000);
+}
+
+/** เวลาที่เหลือของลิมิตโควต้า (นาที, ปัดขึ้น) — ใช้แสดงผล */
+export function limitMinutesLeft(key: RotatableKey, now: Date = new Date()): number {
+  const ms = timeOf(key.limitUntil) - now.getTime();
   if (ms <= 0) return 0;
   return Math.ceil(ms / 60_000);
 }

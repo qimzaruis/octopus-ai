@@ -412,7 +412,7 @@ export async function POST(req: NextRequest) {
       target: UNKNOWN_TARGET,
       publicModel: model,
       agent: WEB_AGENT,
-      status: "error",
+      status: gw?.code === "keys_limited" ? "rate_limited" : "error",
       httpStatus: gw?.status ?? 502,
       usage: { inputTokens: 0, outputTokens: 0 },
       latencyMs: Date.now() - startedAt,

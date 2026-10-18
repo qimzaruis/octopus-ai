@@ -25,6 +25,7 @@ function revalidateAdmin() {
   revalidatePath("/admin/models");
   revalidatePath("/admin/plans");
   revalidatePath("/admin/chat");
+  revalidatePath("/admin/key-limits");
   revalidatePath("/agent");
   revalidatePath("/models");
   revalidatePath("/dashboard");
@@ -89,6 +90,75 @@ export async function setPrimaryProviderKeyAction(formData: FormData) {
 export async function deleteProviderKeyAction(formData: FormData) {
   await requireAdmin();
   await admin.deleteProviderKey(Number(str(formData, "id")));
+  revalidateAdmin();
+}
+
+// ---------------------------------------------------------------------------
+// กติกา "คีย์ติดลิมิต" ต่อ provider + สถานะลิมิตของคีย์ (/admin/key-limits)
+// ---------------------------------------------------------------------------
+
+/** "402, 429" → [402, 429] — ทิ้งค่าที่อ่านเป็นเลข HTTP ไม่ใช่ */
+function statusList(raw: string): number[] {
+  return [
+    ...new Set(
+      raw
+        .split(/[\s,]+/)
+        .map((s) => Number(s))
+        .filter((n) => Number.isInteger(n) && n >= 400 && n <= 599),
+    ),
+  ];
+}
+
+/** แยกข้อความด้วย , หรือขึ้นบรรทัดใหม่ → รายการคำที่ไม่ซ้ำ (เก็บพิมพ์เล็กเพราะเทียบไม่สน case) */
+function wordList(raw: string): string[] {
+  return [
+    ...new Set(
+      raw
+        .split(/[,\n]/)
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  ];
+}
+
+export async function saveKeyLimitAction(formData: FormData) {
+  await requireAdmin();
+  const result = await admin.upsertKeyLimit({
+    providerId: Number(str(formData, "providerId")),
+    enabled: str(formData, "enabled") === "true",
+    httpStatuses: statusList(str(formData, "httpStatuses")),
+    errorCodes: wordList(str(formData, "errorCodes")),
+    keywords: wordList(str(formData, "keywords")),
+    resetTime: str(formData, "resetTime"),
+    resetTimezone: str(formData, "resetTimezone"),
+  });
+  if (!result.ok) redirect(`/admin/key-limits?error=${encodeURIComponent(result.error!)}`);
+  revalidateAdmin();
+}
+
+/** ToggleSwitch ส่งมาแค่ providerId/enabled — เงื่อนไขที่ตั้งไว้ต้องคงเดิม */
+export async function toggleKeyLimitAction(formData: FormData) {
+  await requireAdmin();
+  const providerId = Number(str(formData, "id"));
+  const current = (await admin.listKeyLimits()).find((p) => p.providerId === providerId)?.rule;
+  const result = await admin.upsertKeyLimit({
+    providerId,
+    enabled: str(formData, "enabled") === "true",
+    httpStatuses: current?.httpStatuses ?? [],
+    errorCodes: current?.errorCodes ?? [],
+    keywords: current?.keywords ?? [],
+    resetTime: current?.resetTime ?? "13:00",
+    resetTimezone: current?.resetTimezone ?? "Asia/Bangkok",
+  });
+  if (!result.ok) redirect(`/admin/key-limits?error=${encodeURIComponent(result.error!)}`);
+  revalidateAdmin();
+}
+
+/** ปลดลิมิตก่อนเวลารีเซต — ใช้หลังเติมเครดิต/อัปเกรดแผนแล้ว */
+export async function clearKeyLimitAction(formData: FormData) {
+  await requireAdmin();
+  const result = await admin.clearKeyLimit(Number(str(formData, "keyId")));
+  if (!result.ok) redirect(`/admin/key-limits?error=${encodeURIComponent(result.error!)}`);
   revalidateAdmin();
 }
 
