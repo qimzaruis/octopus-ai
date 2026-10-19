@@ -330,6 +330,50 @@ export async function deleteConversation(userId: string, id: string): Promise<vo
 }
 
 /**
+ * ลบถาวรห้องที่ผู้ใช้ลบไปแล้วและเก่ากว่ากำหนด — ให้ตัวจับเวลาเรียก
+ *
+ * soft delete ทำให้ห้องหายไปจากสายตาเจ้าของ แต่ข้อความ ไฟล์แนบ และ artifact
+ * ยังกินดิสก์กับ bandwidth ของ Turso ตลอดไป จึงตัดตามรอบ (ครั้งละไม่เกิน 200 ห้อง
+ * เพื่อไม่ให้ request ของ cron ยาวเกินจำเป็น)
+ */
+export async function purgeDeletedConversations(
+  beforeIso: string,
+): Promise<{ conversations: number; messages: number }> {
+  await ensureChatSchema();
+  const db = getChatDb();
+  const found = await db.execute({
+    sql: `select id from chat_conversations
+          where deleted_at is not null and deleted_at < ? limit 200`,
+    args: [beforeIso],
+  });
+  const ids = found.rows.map((r) => String(r.id));
+  if (ids.length === 0) return { conversations: 0, messages: 0 };
+
+  const marks = ids.map(() => "?").join(",");
+  const counted = await db.execute({
+    sql: `select count(*) as c from chat_messages where conversation_id in (${marks})`,
+    args: ids,
+  });
+
+  // batch เดียว = one round trip + ทรานแซกชันเดียว ไม่มีห้องที่ถูกลบครึ่งเดียว
+  await db.batch(
+    [
+      {
+        sql: `delete from chat_attachments
+              where message_id in (select id from chat_messages where conversation_id in (${marks}))`,
+        args: ids,
+      },
+      { sql: `delete from chat_messages where conversation_id in (${marks})`, args: ids },
+      { sql: `delete from chat_files where conversation_id in (${marks})`, args: ids },
+      { sql: `delete from chat_conversations where id in (${marks})`, args: ids },
+    ],
+    "write",
+  );
+
+  return { conversations: ids.length, messages: Number(counted.rows[0]?.c ?? 0) };
+}
+
+/**
  * ตัดข้อความตั้งแต่ลำดับที่ `from` (0-based) จนถึงท้ายห้อง — ใช้ตอนผู้ใช้แก้คำถามแล้วส่งใหม่
  *
  * เรียงลำดับเดียวกับที่หน้า /c/<id> อ่านไปแสดง จึงคำนวณ index ฝั่ง client ได้ตรงกัน

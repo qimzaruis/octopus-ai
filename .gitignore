@@ -17,6 +17,7 @@ next-env.d.ts
 #  เพราะ Next dev watcher จับไฟล์ที่เปลี่ยนในโปรเจกต์แล้ว trigger refresh วนได้)
 .tmp-*
 *.log
+.zcode/
 
 # OS / editor
 .DS_Store
