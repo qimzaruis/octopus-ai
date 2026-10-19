@@ -27,10 +27,11 @@ export function getDb() {
     const isDevHost = (process.env.APP_ENV ?? process.env.NODE_ENV ?? "development") === "development";
     client = postgres(normalizeDbUrl(raw), {
       prepare: false,
-      // ไม่เปิด connection ใหม่ทุก query เพราะการเปิดหนึ่งครั้งไป Supabase pooler วัดได้ ~2.5 วินาที
-      // (query ปกติบน connection ที่เปิดแล้วเพียง ~350ms) แต่ต้องถือไว้น้อยตัวที่สุด
-      max: isDevHost ? 1 : 2,
-      // คืน connection เร็วลงมาก ถ้าทิงไว้ lambda ตัวอื่นจะขอไม่ได้
+      // 1 connection ต่อ process ก็พอ: postgres.js วาง query ที่ยิงพร้อมกัน (Promise.all)
+      // ไว้ใน pipeline เดียว วัดจริง 4 query พร้อมกันบน connection เดียวใช้เวลาเท่ากับการยิงตัวเดียว
+      // (การเปิด connection ใหม่ไป pooler วัดได้ ~2.5 วินาที ส่วน query บนตัวเดิม ~350ms)
+      max: 1,
+      // คืน connection เร็ว เพราะ lambda เครื่อง dev และเว็บจริงแย่ง quota กันจาก pooler ชุดเดียวกัน
       idle_timeout: isDevHost ? 10 : 30,
       max_lifetime: 60 * 10,
       // DB เข้าถึงไม่ได้ให้ล้มเร็ว อย่าค้าง 20+ วินาที (auth.ts มี fallback profile อยู่แล้ว)
