@@ -210,6 +210,10 @@ export default function AgentWorkspace({
   const [renameBusy, setRenameBusy] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  /** ห้องที่กำลังดึงข้อความมาแทน (สลับห้องฝั่ง client) — แสดง spinner ที่แถวนั้น */
+  const [switchingId, setSwitchingId] = useState<string | null>(null);
+  /** ผลของ fetch ห้องเก่าต้องไม่ทับห้องที่ผู้ใช้กดทีหลัง */
+  const switchSeqRef = useRef(0);
 
   // ---- เครื่องมือเอเจนต์ — การอ่าน/เขียนไฟล์เกิดในเครื่องผู้ใช้ ----
   const [workspace, setWorkspace] = useState<FileSystemDirectoryHandle | null>(null);
@@ -352,11 +356,12 @@ export default function AgentWorkspace({
     };
   }, [scrollToBottom]);
 
-  /* เปิดห้องเก่า: ต้องเห็นข้อความล่าสุด ไม่ใช่จุดเริ่มต้นของบทสนทนา */
+  /* เปิดห้องเก่า: ต้องเห็นข้อความล่าสุด ไม่ใช่จุดเริ่มต้นของบทสนทนา
+     ใช้ activeId (ไม่ใช่ prop conversationId) เพราะการสลับห้องฝั่ง client ไม่ทำให้ prop เปลี่ยน */
   useEffect(() => {
     requestAnimationFrame(() => scrollToBottom(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId]);
+  }, [activeId]);
 
   /* drawer บนมือถือคือ modal: ต้องมี Escape, ล็อกสครอลล์หลังผ้าม่าน, ย้าย focus เข้าแผง
      และคืน focus ตอนปิด — ไม่งั้นปุ่ม "ปิดเมนู" เป็นทางออกเดียวของคนใช้คีย์บอร์ด */
@@ -388,6 +393,68 @@ export default function AgentWorkspace({
     setDrawerOpen(false);
     // replaceState ไม่ทำให้ page component รีเมานต์ → ข้อความที่พิมพ์ไว้ไม่หาย
     if (pathname !== "/agent") window.history.replaceState(null, "", "/agent");
+  }
+
+  /**
+   * เปิดห้องแชทอื่นโดยไม่ render หน้าที่เซิร์ฟเวอร์
+   *
+   * เดิมทุกการกดใน "ประวัติแชท" เป็น <Link> → Next ต้อง render /c/<id> ใหม่ทั้งต้น:
+   * proxy ไปถาม Supabase Auth 1 รอบ + layout กับ page เรียก getSessionUser() ซ้ำอีก
+   * + อ่าน catalog/ประวัติแชทอีกหลายรอบ ทั้งที่บนหน้าจอมีโครงเดิมอยู่แล้ว
+   * ทางนี้เรียก API ที่คืนเฉพาะข้อความ (1 request) แล้ว swap state ในเครื่องผู้ใช้
+   * เร็วกว่าเดิมหลายเท่าและใช้ CPU ของ function เพียงเสี้ยวเดียว
+   * (ยังเข้าห้องทางลิงก์/รีเฟรช/ส่งต่อ URL ได้ตามเดิม เพราะหน้า /c/<id> ยังอยู่)
+   */
+  async function switchConversation(id: string) {
+    if (id === activeId) {
+      setDrawerOpen(false);
+      return;
+    }
+    const seq = ++switchSeqRef.current;
+    abortRef.current?.abort(); // ห้องก่อนหน้ายังตอบไม่จบ — หยุดก่อน ไม่งั้นข้อความจะข้ามห้อง
+    setDrawerOpen(false);
+    setActiveId(id);
+    setSwitchingId(id);
+    setInput("");
+    setAttachments([]);
+    setEditingIndex(null);
+    setNotice(null);
+    setSteps([]);
+    setNotes([]);
+    setMessages([]);
+    if (pathname !== `/c/${id}`) window.history.replaceState(null, "", `/c/${id}`);
+    try {
+      const res = await fetch(`/api/agent/conversations/${id}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(String(res.status));
+      const data = (await res.json()) as {
+        conversation: {
+          model?: string;
+          messages?: {
+            id: string;
+            role: string;
+            content: string;
+            attachments?: ChatAttachment[];
+          }[];
+        };
+      };
+      if (seq !== switchSeqRef.current) return; // มีคลิกที่ใหม่กว่านำไปแล้ว — ผลเก่าต้องทิ้ง
+      setMessages(
+        (data.conversation.messages ?? [])
+          .filter((m) => m.role !== "system")
+          .map((m) => ({
+            id: m.id,
+            role: m.role === "assistant" ? ("assistant" as const) : ("user" as const),
+            content: m.content,
+            attachments: m.attachments ?? [],
+          })),
+      );
+      const want = data.conversation.model ?? "";
+      if (want && models.some((m) => m.id === want)) setModel(want);
+    } catch {
+      if (seq === switchSeqRef.current) setNotice(t("เปิดห้องแชทไม่สำเร็จ ลองอีกครั้ง"));
+    } finally {
+      if (seq === switchSeqRef.current) setSwitchingId(null);
+    }
   }
 
   /** ขอยืนยันผ่าน Dialog ก่อนลบ (ไม่ใช้ confirm() ของเบราว์เซอร์) */
@@ -920,23 +987,34 @@ export default function AgentWorkspace({
           <Link
             href={`/c/${c.id}`}
             title={titleOf(c)}
-            onClick={() => setDrawerOpen(false)}
-            className={`block truncate rounded-md py-2 pl-3 pr-10 text-left text-caption transition-colors ${
+            onClick={(e) => {
+              // คลิกซ้ายธรรมดา = สลับห้องฝั่ง client ไม่ต้อง render ทั้งหน้าที่เซิร์ฟเวอร์
+              // ส่วน ctrl/shift/คลิกกลาง ยังให้เบราว์เซอร์เปิดลิงก์แบบเดิม
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+              e.preventDefault();
+              void switchConversation(c.id);
+            }}
+            className={`flex min-h-11 items-center gap-1.5 rounded-md py-2 pl-3 pr-11 text-left text-caption transition-colors ${
               activeId === c.id
                 ? "bg-white/[0.10] text-fg"
                 : "text-fg-muted hover:bg-white/[0.06] hover:text-fg"
             }`}
           >
-            {titleOf(c)}
+            {switchingId === c.id && (
+              <Icon name="fa-circle-notch" className="h-3 w-3 shrink-0 animate-spin text-brand-300" />
+            )}
+            <span className="truncate">{titleOf(c)}</span>
           </Link>
           {/* row-actions: จอสัมผัสต้องเห็นเสมอ (ดู globals.css) — เดิม opacity-0 + group-hover
-              อย่างเดียว ทำให้บนมือถือเมนู ⋮ มองไม่เห็นแต่ยังกดถูก (ช่อง pr-10 เว้นไว้) */}
-          <span className="row-actions absolute right-1 top-1/2 -translate-y-1/2">
+              อย่างเดียว ทำให้บนมือถือเมนู ⋮ มองไม่เห็นแต่ยังกดถูก (ช่อง pr-11 เว้นไว้)
+              ไม่มีพื้นหลังทึบ: เดิม bg-ink-950/40 + ปุ่มสูง 44px ล้นแถว 36px
+              แถวจึงกลายเป็นคอลัมน์บล็อกดำทับชื่อแชทอ่านไม่ออก */}
+          <span className="row-actions absolute right-0 top-1/2 -translate-y-1/2">
             <Menu
               label={t("ตัวเลือกแชท")}
               widthPx={176}
               placement="right"
-              triggerClassName="touch-min-icon h-7 w-7 bg-ink-950/40"
+              triggerClassName="h-7 w-7"
               items={[
                 {
                   icon: "fa-pen",
@@ -955,7 +1033,7 @@ export default function AgentWorkspace({
         </li>
       )),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [conversations, activeId],
+    [conversations, activeId, switchingId],
   );
 
   const activeTitle = activeId
@@ -985,13 +1063,14 @@ export default function AgentWorkspace({
             <span className="min-w-0 flex-1 truncate text-body-sm font-semibold tracking-tight text-fg">
               Web <span className="text-brand-300">Agent</span>
             </span>
-            {/* ปุ่มย่ออยู่ใน sidebar ฝั่งขวา ตามที่ผู้ใช้ขอ */}
+            {/* ปุ่มย่ออยู่ใน sidebar ฝั่งขวา ตามที่ผู้ใช้ขอ — โชว์เฉพาะจอใหญ่
+                เพราะใน drawer มือถือตำแหน่งนี้ทับปุ่ม ✕ ปิดเมนูจนอ่านไม่รู้เรื่อง */}
             <button
               type="button"
               onClick={() => setCollapsed(true)}
               aria-label={t("ย่อแถบข้าง")}
               title={t("ย่อแถบข้าง")}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted transition hover:bg-white/[0.08] hover:text-fg"
+              className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted transition hover:bg-white/[0.08] hover:text-fg lg:flex"
             >
               <PanelIcon />
             </button>
@@ -1004,7 +1083,7 @@ export default function AgentWorkspace({
           type="button"
           onClick={startNewChat}
           title={t("แชทใหม่")}
-          className={`flex w-full items-center gap-2.5 rounded-lg bg-brand-500/90 px-3 py-2.5 text-caption font-semibold text-fg transition hover:bg-brand-500 ${
+          className={`touch-min flex w-full items-center gap-2.5 rounded-lg bg-brand-500/90 px-3 py-2.5 text-caption font-semibold text-fg transition hover:bg-brand-500 ${
             collapsed ? "justify-center px-0" : ""
           }`}
         >
@@ -1015,7 +1094,7 @@ export default function AgentWorkspace({
           href="/images"
           onClick={() => setDrawerOpen(false)}
           title={t("สร้างรูปภาพ")}
-          className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-caption font-medium text-fg-muted transition hover:bg-white/[0.06] hover:text-fg ${
+          className={`touch-min flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-caption font-medium text-fg-muted transition hover:bg-white/[0.06] hover:text-fg ${
             collapsed ? "justify-center px-0" : ""
           }`}
         >
@@ -1029,7 +1108,7 @@ export default function AgentWorkspace({
             setDrawerOpen(false);
           }}
           title={t("คลังไฟล์")}
-          className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-caption font-medium text-fg-muted transition hover:bg-white/[0.06] hover:text-fg ${
+          className={`touch-min flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-caption font-medium text-fg-muted transition hover:bg-white/[0.06] hover:text-fg ${
             collapsed ? "justify-center px-0" : ""
           }`}
         >
@@ -1061,7 +1140,7 @@ export default function AgentWorkspace({
         <Link
           href="/dashboard"
           title={t("กลับหน้าหลัก")}
-          className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-caption text-fg-muted transition hover:bg-white/[0.06] hover:text-fg ${
+          className={`touch-min flex items-center gap-2.5 rounded-md px-3 py-2 text-caption text-fg-muted transition hover:bg-white/[0.06] hover:text-fg ${
             collapsed ? "justify-center px-0" : ""
           }`}
         >
@@ -1147,10 +1226,14 @@ export default function AgentWorkspace({
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-clip px-3 py-6 sm:px-6 sm:[scrollbar-gutter:stable_both-edges]"
+          className={`min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-clip px-3 py-6 sm:px-6 sm:[scrollbar-gutter:stable_both-edges] ${
+            messages.length === 0 ? "flex items-center" : ""
+          }`}
         >
           {messages.length === 0 && (
-            <div className="mx-auto mt-16 max-w-md text-center">
+            // ห้องว่าง: ให้โลโก้+ข้อความอยู่กึ่งกลางพื้นที่ที่เหลือ ไม่ใช่เกาะขอบบน
+            // แล้วปล่อยที่ว่างทั้งดุ้นไว้ข้างล่าง (จอตall ดูเหมือนหน้าพัง)
+            <div className="mx-auto w-full max-w-md text-center">
               <Logo size={46} className="mx-auto mb-4" />
               <p className="text-body-sm text-fg-muted">
                 {models.length === 0
@@ -1362,7 +1445,7 @@ export default function AgentWorkspace({
                 disabled={models.length === 0 || remaining === 0}
                 title={t("แนบไฟล์ (สูงสุด {n})", { n: maxAttachments })}
                 aria-label={t("แนบไฟล์")}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-fg-muted transition hover:bg-white/[0.08] hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
+                className="touch-min-icon flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-fg-muted transition hover:bg-white/[0.08] hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Icon name="fa-plus" />
               </button>
@@ -1384,7 +1467,7 @@ export default function AgentWorkspace({
                 disabled={!loading && (models.length === 0 || (!input.trim() && attachments.length === 0))}
                 aria-label={loading ? t("หยุด") : t("ส่งข้อความ")}
                 title={loading ? t("หยุด") : t("ส่ง")}
-                className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-500 text-fg transition hover:bg-brand-600 active:scale-95 disabled:cursor-not-allowed disabled:bg-white/[0.07] disabled:text-fg-subtle"
+                className="touch-min-icon ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-500 text-fg transition hover:bg-brand-600 active:scale-95 disabled:cursor-not-allowed disabled:bg-white/[0.07] disabled:text-fg-subtle"
               >
                 {loading ? (
                   <Icon name="fa-stop" />

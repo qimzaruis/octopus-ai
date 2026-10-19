@@ -76,7 +76,7 @@ export function ModelPicker({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={t("เลือกโมเดล")}
-        className="flex max-w-[13rem] items-center gap-1.5 rounded-full bg-white/[0.06] px-2.5 py-1.5 text-caption text-fg-muted transition-colors duration-fast hover:bg-white/[0.11] hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
+        className="touch-min flex max-w-[13rem] items-center gap-1.5 rounded-full bg-white/[0.06] px-2.5 py-1.5 text-caption text-fg-muted transition-colors duration-fast hover:bg-white/[0.11] hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
       >
         <Icon name="fa-wand-magic-sparkles" className="shrink-0 text-micro text-brand-300" />
         <span className="truncate font-medium text-fg">
