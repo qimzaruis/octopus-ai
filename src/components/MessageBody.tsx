@@ -11,6 +11,9 @@ type Segment = {
   name?: string;
 };
 
+/** สิ่งที่ปุ่มแชร์ส่งให้เจ้าของแชทไว้ไปจับคู่กับไฟล์ในคลัง */
+export type ShareRequest = { name: string; lang: string; bytes: number };
+
 /** ภาษาที่เปิดดูเป็นหน้าเว็บ/ภาพในแท็บใหม่ได้จากข้อความในแชท */
 const VIEWABLE = new Set(["html", "htm", "svg", "xml", "xhtml"]);
 
@@ -80,9 +83,20 @@ function InlineText({ text }: { text: string }) {
   });
 }
 
-function CodeBlock({ segment, live }: { segment: Segment; live: boolean }) {
+function CodeBlock({
+  segment,
+  live,
+  onShare,
+}: {
+  segment: Segment;
+  live: boolean;
+  /** ขอลิงก์แชร์ของไฟล์นี้ (ไม่มีในคลังไฟล์ → ปุ่มจะไม่ทำงาน) */
+  onShare?: (block: ShareRequest) => Promise<string | null>;
+}) {
   const t = useT();
   const [copied, setCopied] = useState(false);
+  const [shared, setShared] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const preRef = useRef<HTMLPreElement>(null);
   const code = segment.text;
   const file = segment.name ?? "";
@@ -100,6 +114,25 @@ function CodeBlock({ segment, live }: { segment: Segment; live: boolean }) {
       window.setTimeout(() => setCopied(false), 1600);
     } catch {
       /* เบราว์เซอร์ไม่อนุญาต clipboard (ไม่ใช่ https) — เงียบไว้ */
+    }
+  }
+
+  /** สร้าง/ใช้ลิงก์แชร์ของไฟล์นี้แล้วคัดลอกให้ทันที — ผู้ใช้ไม่ต้องไปหาในคลังไฟล์ */
+  async function share() {
+    if (sharing) return;
+    setSharing(true);
+    try {
+      const url = await onShare?.({ name: file, lang: segment.lang, bytes: code.length });
+      if (!url) return;
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch {
+        /* clipboard ต้อง https — ยังแสดงสถานะว่าแชร์แล้วให้ผู้ใช้คัดลอกเองจากคลังไฟล์ได้ */
+      }
+      setShared(true);
+      window.setTimeout(() => setShared(false), 2000);
+    } finally {
+      setSharing(false);
     }
   }
 
@@ -148,6 +181,22 @@ function CodeBlock({ segment, live }: { segment: Segment; live: boolean }) {
             {t("เปิดดู")}
           </button>
         )}
+        {viewable && onShare && (
+          <button
+            type="button"
+            onClick={share}
+            disabled={sharing}
+            title={t("คัดลอกลิงก์แชร์ไฟล์นี้")}
+            aria-label={t("คัดลอกลิงก์แชร์ไฟล์นี้")}
+            className="touch-min inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-caption text-fg-muted transition hover:bg-white/[0.08] hover:text-fg disabled:opacity-50"
+          >
+            <Icon
+              name={shared ? "fa-check" : sharing ? "fa-circle-notch" : "fa-share-nodes"}
+              className={shared ? "text-leaf" : sharing ? "animate-spin" : ""}
+            />
+            {shared ? t("คัดลอกลิงก์แล้ว") : t("แชร์")}
+          </button>
+        )}
         <button
           type="button"
           onClick={copy}
@@ -176,13 +225,21 @@ function CodeBlock({ segment, live }: { segment: Segment; live: boolean }) {
  *
  * `live` = กำลัง stream อยู่ ให้กล่องโค้ดเลื่อนตามข้อความล่าสุดเอง
  */
-export default function MessageBody({ text, live = false }: { text: string; live?: boolean }) {
+export default function MessageBody({
+  text,
+  live = false,
+  onShare,
+}: {
+  text: string;
+  live?: boolean;
+  onShare?: (block: ShareRequest) => Promise<string | null>;
+}) {
   const segments = splitSegments(text);
   return (
     <div className="text-body-sm leading-relaxed">
       {segments.map((segment, i) =>
         segment.kind === "code" ? (
-          <CodeBlock key={`code-${i}`} segment={segment} live={live} />
+          <CodeBlock key={`code-${i}`} segment={segment} live={live} onShare={onShare} />
         ) : (
           <div
             key={`text-${i}`}

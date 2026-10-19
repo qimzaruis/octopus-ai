@@ -17,6 +17,36 @@ function requiresSession(pathname: string): boolean {
   return !PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));
 }
 
+/**
+ * ผลการยืนยัน session ต่อ cookie ชุดหนึ่ง — เก็บสั้น ๆ ไว้ในเครื่อง
+ *
+ * ทุก navigation ต้องเรียก auth.getUser() ซึ่งคือหนึ่ง request ข้ามเครือข่ายไปถึง
+ * GoTrue จริง ๆ (log dev วัดได้ 0.5–2.8 วินาทีต่อ request) ทั้งที่ผู้ใช้คนเดิมกดไป
+ * หลายหน้าในนาทีเดียว จำผลไว้ 15 วินาทีจึงตัดค่าเดินทางนั้นออกได้ทั้งแถบ
+ *
+ * กุญแจคือค่า cookie auth ทั้งก้อน: token หมุน/ล็อกเอาต์/หมดอายุ = คนละกุญแจทันที
+ * note: นี่เป็นแค่ประตู "ต้องพาไปหน้าล็อกอินไหม" — หน้าที่มีข้อมูลผู้ใช้ยังเรียก
+ * getSessionUser() เพื่อยืนยันซ้ำเสมอ
+ */
+const VERIFY_TTL_MS = 15_000;
+const verified = new Map<string, { at: number; signedIn: boolean }>();
+
+function authCookieKey(request: NextRequest): string | null {
+  const parts = request.cookies
+    .getAll()
+    .filter((c) => c.name.startsWith("sb-") && c.name.includes("auth-token"))
+    .map((c) => `${c.name}=${c.value}`);
+  return parts.length > 0 ? parts.join(";") : null;
+}
+
+function remember(key: string, signedIn: boolean): void {
+  if (verified.size > 200) {
+    const cutoff = Date.now() - VERIFY_TTL_MS;
+    for (const [k, entry] of verified) if (entry.at <= cutoff) verified.delete(k);
+  }
+  verified.set(key, { at: Date.now(), signedIn });
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -43,11 +73,25 @@ export async function proxy(request: NextRequest) {
     },
   );
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // ไม่มี cookie session เลย = ยังไม่ได้ล็อกอิน ไม่ต้องเสียเวลาถามเซิร์ฟเวอร์
+  const cookieKey = authCookieKey(request);
+  let signedIn = false;
+  if (!cookieKey) {
+    signedIn = false;
+  } else {
+    const hit = verified.get(cookieKey);
+    if (hit && hit.at + VERIFY_TTL_MS > Date.now()) {
+      signedIn = hit.signedIn;
+    } else {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      signedIn = Boolean(user);
+      remember(cookieKey, signedIn);
+    }
+  }
 
-  if (!user && requiresSession(pathname)) {
+  if (!signedIn && requiresSession(pathname)) {
     const url = request.nextUrl.clone();
     url.pathname = "/signin";
     url.searchParams.set("next", pathname);

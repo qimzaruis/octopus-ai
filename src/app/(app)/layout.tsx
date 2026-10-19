@@ -29,7 +29,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       title: t("บริการ"),
       items: [
         { href: "/agent", label: "Web Agent", icon: "fa-solid fa-robot" },
-        { href: "/images", label: t("สร้างรูปภาพ"), icon: "fa-solid fa-wand-magic-sparkles" },
+        { href: "/images", label: t("สร้างรูปภาพ"), icon: "fa-solid fa-image" },
       ],
     },
     {

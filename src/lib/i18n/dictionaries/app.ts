@@ -65,6 +65,9 @@ export const appPages = {
   "เบราว์เซอร์นี้ยังไม่รองรับการเลือกโฟลเดอร์":
     "This browser cannot pick folders yet — use Chrome or Edge",
   "เลือกโฟลเดอร์งาน": "Pick workspace",
+  "โฟลเดอร์งาน: {name}": "Workspace: {name}",
+  "แปลงโค้ดที่วางเป็นไฟล์ {name} ให้แล้ว — พิมพ์คำถามสั้น ๆ ต่อได้เลย":
+    "Pasted code was attached as {name} — now type a short question",
   "ตั้งค่าเครื่องมือเอเจนต์": "Agent tool settings",
   "การค้นหาเว็บ": "Web search",
   "ค้นหาจากเบราว์เซอร์ของคุณเอง คีย์เก็บอยู่ในเครื่องนี้ ไม่ส่งขึ้นเซิร์ฟเวอร์ของเรา":
@@ -414,9 +417,15 @@ export const appPages = {
   "โหลดคลังไฟล์ไม่สำเร็จ": "Couldn't load the file library",
   "ดาวน์โหลดไม่สำเร็จ ลองอีกครั้ง": "Download failed — try again",
   "แชร์ไม่สำเร็จ ลองอีกครั้ง": "Share failed — try again",
+  "แชร์ {name} แล้ว": "Shared {name}",
+  "ยังหาไฟล์นี้ในคลังไม่เจอ — ลองใหม่อีกครั้ง":
+    "Couldn't find this file in your library yet — try again",
   "แชร์เป็นลิงก์สาธารณะ": "Share as a public link",
   "ลิงก์สาธารณะถึง {date}": "Public link until {date}",
   "คัดลอกลิงก์": "Copy link",
+  "คัดลอกลิงก์แล้ว": "Link copied",
+  "คัดลอกลิงก์แชร์ไฟล์นี้": "Copy this file's share link",
+  "แชร์": "Share",
   "เปิดลิงก์": "Open link",
   "ดาวน์โหลด": "Download",
   "กำลังโหลด...": "Loading...",

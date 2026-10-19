@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { supabaseConfigured } from "@/lib/config";
@@ -11,43 +12,52 @@ import { cached, invalidateCache } from "@/lib/catalog-cache";
 const PROFILE_TTL_MS = 15_000;
 
 /**
- * แคช "ผู้ใช้ของ request นี้" ผูกกับ id จาก cookie
+ * แคช "ผู้ใช้ของ request นี้" ผูกกับ access token
  *
  * หนึ่งการเปิดหน้า layout + page (+ API ที่เรียกซ้อน) เรียก getSessionUser() ซ้ำหลายรอบ
  * และแต่ละรอบคือการเดินทางไปถึง Supabase Auth จริง (วัดจากเครื่องผู้ใช้ได้ ~135ms ต่อรอบ
  * และบน Vercel ก็เป็น request ไป GoTrue ฟรี ๆ เท่าจำนวนครั้งที่เรียกซ้ำ)
  * เก็บผลไว้รอบเดียวจึงเร็วขึ้นทั้งหน้าและประหยัด quota ฝั่ง auth
  *
- * ล็อกกุญแจไว้ที่ token: ถ้า token หมุน (refresh) จะตรวจใหม่ทันที ไม่ใช้ผลของ token เก่า
+ * กุญแจคือค่า digest ของ token ไม่ได้เก็บ token เต็ม ๆ และไม่ได้แตะ `session.user`
+ * เลย — supabase-js จะเตือนใน log ทุกครั้งที่อ่านอ็อบเจกต์นั้นบนเซิร์ฟเวอร์
+ * เพราะมันยังไม่ผ่านการยืนยัน ตัวที่ยืนยันจริงคือ getUser() ข้างใน loader
  */
-type SessionMemo = { at: number; token: string; value: Promise<SessionUser | null> };
+type SessionMemo = { at: number; token: string; uid?: string; value: Promise<SessionUser | null> };
 const sessionMemo = new Map<string, SessionMemo>();
 
-function memoGet(uid: string, token: string): SessionMemo | null {
-  const hit = sessionMemo.get(uid);
+function tokenKey(token: string): string {
+  return createHash("sha256").update(token).digest("hex").slice(0, 32);
+}
+
+function memoGet(key: string, token: string): SessionMemo | null {
+  const hit = sessionMemo.get(key);
   if (!hit) return null;
   if (hit.at + PROFILE_TTL_MS <= Date.now() || hit.token !== token) {
-    sessionMemo.delete(uid);
+    sessionMemo.delete(key);
     return null;
   }
   return hit;
 }
 
-function memoSet(uid: string, token: string, value: Promise<SessionUser | null>): void {
+function memoSet(key: string, token: string, value: Promise<SessionUser | null>): void {
   // ผู้ใช้ที่เลิกเข้าเว็บไปแล้วไม่ควรทิ้งของค้างไว้ในหน่วยความจำของ lambda
   if (sessionMemo.size > 500) {
     const cutoff = Date.now() - PROFILE_TTL_MS;
-    for (const [id, entry] of sessionMemo) if (entry.at <= cutoff) sessionMemo.delete(id);
+    for (const [k, entry] of sessionMemo) if (entry.at <= cutoff) sessionMemo.delete(k);
   }
-  sessionMemo.set(uid, { at: Date.now(), token, value });
+  const entry: SessionMemo = { at: Date.now(), token, value };
+  sessionMemo.set(key, entry);
+  // จำ uid ไว้เผื่อแอดมินแก้บัญชีนี้แล้วต้องล้างของเก่าทิ้ง
+  void value.then((u) => { entry.uid = u?.id; }).catch(() => undefined);
 }
 
 /**
- * ล้างแคช session ของผู้ใช้หนึ่ง — แอดมินแก้เครดิต/แผน/แบน หรือผู้ใช้ล็อกเอาต์
- * ต้องล้างทั้งชั้นนี้และชั้น profile underneath ไม่งั้นค่าเก่ายังถูกใช้ต่ออีก 15 วินาที
+ * ล้างแคช session ของผู้ใช้หนึ่ง — แอดมินแก้เครดิต/แผน/แบนเมื่อไหร่ต้องล้างทันที
+ * ไม่งั้นค่าเก่ายังถูกใช้ต่อได้อีก 15 วินาที
  */
 export function invalidateSessionUser(userId: string): void {
-  sessionMemo.delete(userId);
+  for (const [key, entry] of sessionMemo) if (entry.uid === userId) sessionMemo.delete(key);
   invalidateCache(`session:${userId}`);
 }
 
@@ -82,25 +92,23 @@ export async function getSessionUser(): Promise<SessionUser | null> {
 
   const supabase = await createClient();
 
-  // getSession() อ่านจาก cookie เท่านั้น (ไม่ไปถามเซิร์ฟเวอร์) ใช้เป็นประตูกับกุญแจแคช
+  // อ่าน access token จาก cookie เพื่อใช้เป็นที่ตั้งกุญแจแคชเท่านั้น
+  // (ไม่แตะ session.user เลย เพราะค่าจาก storage ยังไม่ผ่านการยืนยัน — ตัวที่ยืนยันจริงคือ getUser())
   const {
     data: { session },
   } = await supabase.auth.getSession();
   const token = session?.access_token ?? "";
-  const uid = session?.user?.id ?? "";
-  if (!token || !uid) {
-    if (uid) sessionMemo.delete(uid); // ล็อกเอาต์แล้ว — ห้ามใช้ profile เก่าตอบ request ถัดไป
-    return null;
-  }
+  if (!token) return null;
 
-  const hit = memoGet(uid, token);
+  const key = tokenKey(token);
+  const hit = memoGet(key, token);
   if (hit) return cloneUser(await hit.value);
 
   const value = resolveSessionUser(supabase).catch((err) => {
-    sessionMemo.delete(uid); // promise ที่ล้มเหลวต้องไม่ถูกใช้ตอบ request ถัดไปอีก 15 วินาที
+    sessionMemo.delete(key); // promise ที่ล้มเหลวต้องไม่ถูกใช้ตอบ request ถัดไปอีก 15 วินาที
     throw err;
   });
-  memoSet(uid, token, value);
+  memoSet(key, token, value);
   return cloneUser(await value);
 }
 

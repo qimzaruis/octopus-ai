@@ -148,18 +148,57 @@ function extractHtmlArtifacts(content: string, roomTitle: string): { name: strin
   return out;
 }
 
+/**
+ * ไฟล์แนบประเภทข้อความ/โค้ด → ส่วนของ prompt ที่โมเดลอ่านได้จริง
+ *
+ * เดิมทุกไฟล์ที่ไม่ใช่รูปถูกย่อเหลือแค่ "[แนบไฟล์: ชื่อ]" ซึ่งทำให้ไฟล์ .txt
+ * ที่ผู้ใช้วางให้ (หรือเอเจนต์เคยบันทึกไว้) กลายเป็นชื่อเปล่า โมเดลไม่เห็นเนื้อหา
+ * จึงถอด data URL กลับเป็นข้อความ จำกัดขนาดต่อไฟล์ไว้กันบริบทบวม
+ */
+const TEXT_FILE_CHARS = 20_000;
+const TEXT_MIME = /^(text\/|application\/(json|xml|x-sh|javascript|typescript|sql|yaml|x-yaml|csv))/i;
+
+function textFileBody(a: ChatAttachment): string | null {
+  if (a.mime.startsWith("image/")) return null;
+  if (!TEXT_MIME.test(a.mime) && !/\.(txt|md|markdown|json|csv|log|ya?ml|env|ini|tsv|py|rb|go|rs|java|c|h|cpp|hpp|cs|php|pl|lua|sh|bat|ps1|sql|txt)$/i.test(a.name)) {
+    return null;
+  }
+  const comma = a.dataUrl.indexOf(",");
+  if (comma < 0) return null;
+  const meta = a.dataUrl.slice(0, comma);
+  const body = a.dataUrl.slice(comma + 1);
+  try {
+    const text = meta.includes(";base64")
+      ? Buffer.from(body, "base64").toString("utf8")
+      : decodeURIComponent(body);
+    if (!text.trim()) return null;
+    return text.length > TEXT_FILE_CHARS ? `${text.slice(0, TEXT_FILE_CHARS)}\n…(ตัดเพราะยาวเกิน)` : text;
+  } catch {
+    return null;
+  }
+}
+
+/** ส่วนหนึ่งของ message ตามประเภทไฟล์แนบ (รูป = image_url, ไฟล์ข้อความ = เนื้อหาเต็ม) */
+function attachmentPart(a: ChatAttachment): Record<string, unknown> {
+  if (a.mime.startsWith("image/")) return { type: "image_url", image_url: { url: a.dataUrl } };
+  const body = textFileBody(a);
+  if (body === null) return { type: "text", text: `\n[แนบไฟล์: ${a.name}]` };
+  return { type: "text", text: `\n[ไฟล์ ${a.name}]\n${body}\n[จบไฟล์]` };
+}
+
 async function saveAssistantMessage(
   userId: string,
   conversationId: string,
   content: string,
   roomTitle: string,
-): Promise<void> {
+): Promise<{ id: string; name: string; kind: string; sizeBytes: number }[]> {
   try {
     // ข้อความกับ artifact ไม่ผูกกันด้วย FK → ส่งสอง request พร้อมกันแทนที่จะไล่รอ
-    await Promise.all([
+    const artifacts = extractHtmlArtifacts(content, roomTitle);
+    const [, files] = await Promise.all([
       addMessage({ conversationId, role: "assistant", content }),
       addFiles(
-        extractHtmlArtifacts(content, roomTitle).map((a) => ({
+        artifacts.map((a) => ({
           userId,
           conversationId,
           name: a.name,
@@ -168,8 +207,10 @@ async function saveAssistantMessage(
         })),
       ),
     ]);
+    return files.map((f) => ({ id: f.id, name: f.name, kind: f.kind, sizeBytes: f.sizeBytes }));
   } catch (err) {
     console.error("[agent] save assistant message failed:", err);
+    return [];
   }
 }
 
@@ -351,12 +392,12 @@ export async function POST(req: NextRequest) {
     if (m.role === "user" && m.attachments.length > 0) {
       const parts: Record<string, unknown>[] = [{ type: "text", text: m.content || "" }];
       for (const a of m.attachments) {
-        if (!a.mime.startsWith("image/")) {
-          parts.push({ type: "text", text: `\n[แนบไฟล์: ${a.name}]` });
-        } else if (keepImage.has(mi)) {
-          parts.push({ type: "image_url", image_url: { url: a.dataUrl } });
-        } else {
+        // รูปเก่าถูกตัดออก (เหลือแค่หมายเหตุ) ส่วนไฟล์ข้อความเป็นบริบทที่มีประโยชน์
+        // ของทุกข้อความ — ส่งเนื้อหาไปด้วย_trimToCharBudget_ที่กรองด้านเก่าอยู่ดี
+        if (a.mime.startsWith("image/") && !keepImage.has(mi)) {
           parts.push({ type: "text", text: `\n[รูป ${a.name} ถูกตัดออกจากบริบทเก่า]` });
+        } else {
+          parts.push(attachmentPart(a));
         }
       }
       return { role: "user", content: parts };
@@ -383,11 +424,7 @@ export async function POST(req: NextRequest) {
         attachments.length > 0
           ? [
               { type: "text", text: content },
-              ...attachments.map((a) =>
-                a.mime.startsWith("image/")
-                  ? { type: "image_url", image_url: { url: a.dataUrl } }
-                  : { type: "text", text: `[แนบไฟล์: ${a.name}]` },
-              ),
+              ...attachments.map((a) => attachmentPart(a)),
             ]
           : content,
     });
@@ -502,8 +539,9 @@ export async function POST(req: NextRequest) {
         return;
       }
 
+      let saved: Awaited<ReturnType<typeof saveAssistantMessage>> = [];
       try {
-        await saveAssistantMessage(
+        saved = await saveAssistantMessage(
           user.id,
           conversationId,
           // ข้อความ error ดิบของค่าย/ของ bundler ห้ามถูกบันทึกค้างในประวัติแชทของผู้ใช้
@@ -512,6 +550,8 @@ export async function POST(req: NextRequest) {
           conversation.title,
         );
       } finally {
+        // บอกรายชื่อไฟล์ที่บันทึกเสร็จแล้ว → ปุ่ม "แชร์" บน artifact ใช้ได้ทันทีโดยไม่ต้องโหลดห้องใหม่
+        if (saved.length > 0) controller.enqueue(event({ t: "files", v: saved }));
         controller.enqueue(event({ t: "done", fr: reason }));
         controller.close();
       }

@@ -140,10 +140,6 @@ export type ChatConversation = {
   updatedAt: string;
 };
 
-export type ChatConversationWithMessages = ChatConversation & {
-  messages: ChatMessage[];
-};
-
 export type ChatSettings = { maxAttachments: number };
 
 export const DEFAULT_CHAT_SETTINGS: ChatSettings = { maxAttachments: 5 };
@@ -174,12 +170,27 @@ export async function listConversations(userId: string): Promise<ChatConversatio
   return res.rows.map((r) => rowToConversation(r as Record<string, unknown>));
 }
 
+export type ChatConversationWithMessages = ChatConversation & {
+  messages: ChatMessage[];
+  /** ไฟล์ที่เอเจนต์สร้างในห้องนี้ (ไม่มีเนื้อหา) — ใช้จับคู่ artifact ในข้อความกับปุ่มแชร์ */
+  artifacts: ChatArtifactRef[];
+};
+
+export type ChatArtifactRef = {
+  id: string;
+  name: string;
+  kind: string;
+  sizeBytes: number;
+  shareUrl: string | null;
+  shareExpiresAt: string | null;
+};
+
 /**
- * อ่านห้องทั้งห้อง (ข้อความ + ไฟล์แนบ) ใน 1 รอบไป Turso
+ * อ่านห้องทั้งห้อง (ข้อความ + ไฟล์แนบ + artifact) ใน 1 รอบไป Turso
  *
  * เดิมไล่ query ไฟล์แนบทีละข้อความ = 1+N รอบ (วัดได้ ~107ms ต่อรอบบนเครื่องผู้ใช้
  * แชท 17 ข้อความจึงค้างเกือบ 2 วินาทีทั้งที่ตารางแนบไฟล์ว่างเปล่า)
- * batch() ส่งทั้งสองคำสั่งใน request เดียว และการ left join ทำให้จำนวนรอบคงที่
+ * batch() ส่งทุกคำสั่งใน request เดียว และการ left join ทำให้จำนวนรอบคงที่
  */
 export async function getConversation(
   userId: string,
@@ -198,6 +209,11 @@ export async function getConversation(
             left join chat_attachments a on a.message_id = m.id
             where m.conversation_id = ?
             order by m.created_at, m.rowid, a.rowid`,
+      args: [id],
+    },
+    {
+      sql: `select id, name, kind, size_bytes, share_url, share_expires_at
+            from chat_files where conversation_id = ? order by created_at`,
       args: [id],
     },
   ]);
@@ -230,9 +246,22 @@ export async function getConversation(
     }
   }
 
+  const artifacts: ChatArtifactRef[] = rows[2].rows.map((r) => {
+    const row = r as Record<string, unknown>;
+    return {
+      id: String(row.id),
+      name: String(row.name ?? ""),
+      kind: String(row.kind ?? "html"),
+      sizeBytes: Number(row.size_bytes ?? 0),
+      shareUrl: row.share_url ? String(row.share_url) : null,
+      shareExpiresAt: row.share_expires_at ? String(row.share_expires_at) : null,
+    };
+  });
+
   return {
     ...rowToConversation(conv.rows[0] as Record<string, unknown>),
     messages: [...byMessage.values()],
+    artifacts,
   };
 }
 

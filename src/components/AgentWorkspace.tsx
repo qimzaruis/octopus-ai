@@ -62,6 +62,52 @@ type AgentFile = {
   createdAt: string;
 };
 
+/**
+ * ไฟล์ที่เอเจนต์สร้างในห้องปัจจุบัน (เฉพาะข้อมูลที่พอจะจับคู่กับกล่องโค้ดในข้อความ)
+ * ใช้กด "แชร์" จาก artifact ตรง ๆ ไม่ต้องเปิดคลังไฟล์ก่อน
+ */
+export type AgentArtifact = {
+  id: string;
+  name: string;
+  kind: string;
+  sizeBytes: number;
+  shareUrl: string | null;
+  shareExpiresAt: string | null;
+};
+
+/**
+ * จับคู่กล่องโค้ดในข้อความกับไฟล์ที่เอเจนต์บันทึกไว้
+ *
+ * โมเดลมักไม่พิมพ์ชื่อไฟล์หลัง ``` และชื่อในคลังก็ตั้งจาก <title> ของโค้ด
+ * จึงลอง ตรงชื่อ → ชื่อโผล่ในอีกชื่อ → ไฟล์ชนิดเดียวกันที่ขนาดใกล้ที่สุด
+ */
+function pickArtifact(
+  list: AgentArtifact[],
+  block: { name: string; lang: string; bytes: number },
+): AgentArtifact | undefined {
+  if (list.length === 0) return undefined;
+  const want = block.name.trim().toLowerCase();
+  const stem = want.replace(/\.[a-z0-9]+$/, "");
+  if (stem.length > 3) {
+    const loose = list.find((a) => {
+      const name = a.name.toLowerCase();
+      const other = name.replace(/\.[a-z0-9]+$/, "");
+      return name === want || name.includes(stem) || (other.length > 3 && stem.includes(other));
+    });
+    if (loose) return loose;
+  }
+
+  const kind = (block.lang || "html").toLowerCase();
+  const sameKind = list.filter((a) => (a.kind || "html").toLowerCase() === kind);
+  // เอาเฉพาะไฟล์ชนิดเดียวกับกล่องโค้ด — กันไปแชร์คนละไฟล์ตอนที่ชื่อไม่ตรงกันเลย
+  const pool = sameKind;
+  if (pool.length === 0) return undefined;
+  if (pool.length === 1) return pool[0];
+  return pool.reduce((best, a) =>
+    Math.abs(a.sizeBytes - block.bytes) < Math.abs(best.sizeBytes - block.bytes) ? a : best,
+  );
+}
+
 const COLLAPSE_KEY = "octopus.agent.sidebar.collapsed";
 const AUTOWRITE_KEY = "octopus.agent.autowrite";
 
@@ -171,6 +217,7 @@ export default function AgentWorkspace({
   conversationId = null,
   initialMessages,
   initialModel,
+  initialArtifacts,
 }: {
   userName: string;
   initialConversations: ChatConversation[];
@@ -181,12 +228,16 @@ export default function AgentWorkspace({
   conversationId?: string | null;
   initialMessages?: UiMessage[];
   initialModel?: string;
+  /** ไฟล์ที่เอเจนต์สร้างไว้ในห้องนี้ มากับหน้าแรกเพื่อไม่ต้อง fetch ซ้ำ */
+  initialArtifacts?: AgentArtifact[];
 }) {
   const t = useT();
   const pathname = usePathname();
   const [conversations, setConversations] = useState<ChatConversation[]>(initialConversations);
   const [activeId, setActiveId] = useState<string | null>(conversationId);
   const [messages, setMessages] = useState<UiMessage[]>(initialMessages ?? []);
+  /** artifact ของห้องนี้ (id + ชื่อไฟล์) — ปุ่มแชร์ในกล่องโค้ดใช้ตามชื่อไฟล์ */
+  const [artifacts, setArtifacts] = useState<AgentArtifact[]>(initialArtifacts ?? []);
   const [model, setModel] = useState(
     initialModel && models.some((m) => m.id === initialModel)
       ? initialModel
@@ -214,6 +265,8 @@ export default function AgentWorkspace({
   const [switchingId, setSwitchingId] = useState<string | null>(null);
   /** ผลของ fetch ห้องเก่าต้องไม่ทับห้องที่ผู้ใช้กดทีหลัง */
   const switchSeqRef = useRef(0);
+  /** ตั้งชื่อไฟล์จากที่วาง (pasted-1.txt, pasted-2.txt) */
+  const pasteSeqRef = useRef(0);
 
   // ---- เครื่องมือเอเจนต์ — การอ่าน/เขียนไฟล์เกิดในเครื่องผู้ใช้ ----
   const [workspace, setWorkspace] = useState<FileSystemDirectoryHandle | null>(null);
@@ -258,6 +311,7 @@ export default function AgentWorkspace({
   useEffect(() => {
     setActiveId(conversationId);
     setMessages(initialMessages ?? []);
+    setArtifacts(initialArtifacts ?? []);
     if (initialModel && models.some((m) => m.id === initialModel)) setModel(initialModel);
     setInput("");
     setAttachments([]);
@@ -387,6 +441,7 @@ export default function AgentWorkspace({
   function startNewChat() {
     setActiveId(null);
     setMessages([]);
+    setArtifacts([]);
     setInput("");
     setAttachments([]);
     setNotice(null);
@@ -429,6 +484,7 @@ export default function AgentWorkspace({
       const data = (await res.json()) as {
         conversation: {
           model?: string;
+          artifacts?: AgentArtifact[];
           messages?: {
             id: string;
             role: string;
@@ -438,6 +494,7 @@ export default function AgentWorkspace({
         };
       };
       if (seq !== switchSeqRef.current) return; // มีคลิกที่ใหม่กว่านำไปแล้ว — ผลเก่าต้องทิ้ง
+      setArtifacts(data.conversation.artifacts ?? []);
       setMessages(
         (data.conversation.messages ?? [])
           .filter((m) => m.role !== "system")
@@ -564,6 +621,63 @@ export default function AgentWorkspace({
     }
   }
 
+  /**
+   * แชร์ artifact จากในข้อความเลย ไม่ต้องเปิดคลังไฟล์ก่อน
+   *
+   * กล่องโค้ดในข้อความมีแค่ชื่อที่โมเดลพิมพ์หลัง ``` (บ่อย kali ไม่พิมพ์) ขณะที่ไฟล์ในคลัง
+   * ถูกตั้งชื่อจาก <title>/<h1> ของโค้ด จึงต้องจับตัวอื่นด้วย: ตรงชื่อ → มีคำในชื่อซึ่งกัน
+   * → ขนาดใกล้สุดในกลุ่มชนิดเดียวกัน และแจ้งชื่อไฟล์ที่แชร์ให้ผู้ใช้เห็น จะได้รู้ว่าลิงก์คือไฟล์ไหน
+   */
+  async function shareArtifact(block: { name: string; lang: string; bytes: number }): Promise<string | null> {
+    if (!activeId) return null;
+    let file = pickArtifact(artifacts, block);
+    if (!file) {
+      try {
+        const res = await fetch(`/api/agent/conversations/${activeId}`, { cache: "no-store" });
+        if (!res.ok) return null;
+        const data = (await res.json()) as { conversation?: { artifacts?: AgentArtifact[] } };
+        const list = data.conversation?.artifacts ?? [];
+        setArtifacts(list);
+        file = pickArtifact(list, block);
+      } catch {
+        return null;
+      }
+    }
+    if (!file) {
+      setNotice(t("ยังหาไฟล์นี้ในคลังไม่เจอ — ลองใหม่อีกครั้ง"));
+      return null;
+    }
+    if (file.shareUrl) {
+      setNotice(t("แชร์ {name} แล้ว", { name: file.name }));
+      return file.shareUrl;
+    }
+
+    const id = file.id;
+    try {
+      const res = await fetch(`/api/agent/files/${id}/share`, { method: "POST" });
+      const data = (await res.json().catch(() => null)) as {
+        shareUrl?: string;
+        expiresAt?: string;
+      } | null;
+      const url = data?.shareUrl;
+      if (!res.ok || !url || !data) {
+        setNotice(t("แชร์ไม่สำเร็จ ลองอีกครั้ง"));
+        return null;
+      }
+      const expiresAt = data.expiresAt ?? null;
+      setArtifacts((prev) =>
+        prev.map((a) =>
+          a.id === id ? { ...a, shareUrl: url, shareExpiresAt: expiresAt } : a,
+        ),
+      );
+      setNotice(t("แชร์ {name} แล้ว", { name: file.name }));
+      return url;
+    } catch {
+      setNotice(t("แชร์ไม่สำเร็จ ลองอีกครั้ง"));
+      return null;
+    }
+  }
+
   async function copyShare(url: string) {
     try {
       await navigator.clipboard.writeText(url);
@@ -589,6 +703,32 @@ export default function AgentWorkspace({
       reader.onerror = reject;
       reader.readAsDataURL(file);
     });
+  }
+
+  /**
+   * วางโค้ดยาว ๆ ในช่องพิมพ์ → แปลงเป็นไฟล์ .txt แนบให้เอง
+   *
+   * เดิมวางไฟล์ทั้งก้อนแล้วข้อความ 500 บรรทัดไปกองอยู่ในกล่องพิมพ์ ทั้งเลื่อนทั้งกดผิด
+   * จึงย้ายไปเป็นไฟล์แนบ (เซิร์ฟเวอร์ถอดเนื้อหาจากไฟล์ส่งให้โมเดลอ่านเต็ม ๆ)
+   * ข้อความสั้นยังวางเป็นข้อความตามปกติไม่แตะเลย
+   */
+  function onPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const text = e.clipboardData.getData("text/plain");
+    if (!text || attachments.length >= maxAttachments) return;
+    const lines = text.split("\n").length;
+    if (text.length < 1200 && lines < 24) return;
+    e.preventDefault();
+    const n = pasteSeqRef.current + 1;
+    pasteSeqRef.current = n;
+    const name = `pasted-${n}.txt`;
+    setAttachments((prev) =>
+      [...prev, { name, mime: "text/plain", dataUrl: `data:text/plain;charset=utf-8,${encodeURIComponent(text)}` }].slice(
+        0,
+        maxAttachments,
+      ),
+    );
+    setNotice(t("แปลงโค้ดที่วางเป็นไฟล์ {name} ให้แล้ว — พิมพ์คำถามสั้น ๆ ต่อได้เลย", { name }));
+    inputRef.current?.focus();
   }
 
   async function handleFiles(files: FileList | null) {
@@ -769,6 +909,26 @@ export default function AgentWorkspace({
           if (typeof event.text === "string") text = event.text;
         } else if (event.t === "notice") {
           setNotice(String(event.v ?? ""));
+        } else if (event.t === "files") {
+          // เซิร์ฟเวอร์เพิ่งบันทึก artifact ลงคลังไฟล์ → จับชื่อไว้ให้ปุ่มแชร์ในกล่องโค้ด
+          const created =
+            (event.v as { id: string; name: string; kind: string; sizeBytes: number }[]) ?? [];
+          if (created.length > 0) {
+            setArtifacts((prev) => {
+              const byName = new Map(prev.map((a) => [a.name.toLowerCase(), a]));
+              for (const f of created) {
+                byName.set(f.name.toLowerCase(), {
+                  id: f.id,
+                  name: f.name,
+                  kind: f.kind,
+                  sizeBytes: f.sizeBytes,
+                  shareUrl: null,
+                  shareExpiresAt: null,
+                });
+              }
+              return [...byName.values()];
+            });
+          }
         }
       }
     }
@@ -1036,6 +1196,19 @@ export default function AgentWorkspace({
     [conversations, activeId, switchingId],
   );
 
+  /** แถบเครื่องมือเอเจนต์ — เวอร์ชันไอคอนสำหรับมือถือกับเวอร์ชันเต็มสำหรับจอใหญ่ */
+  const toolsBar = (compact: boolean) => (
+    <AgentToolsBar
+      workspaceName={workspace?.name ?? null}
+      canPick={folderApi}
+      autoWrite={autoWrite}
+      onPick={chooseWorkspace}
+      onDisconnect={dropWorkspace}
+      onAutoWriteChange={toggleAutoWrite}
+      compact={compact}
+    />
+  );
+
   const activeTitle = activeId
     ? titleOf(conversations.find((c) => c.id === activeId) ?? { title: "" } as ChatConversation)
     : t("แชทใหม่");
@@ -1070,7 +1243,7 @@ export default function AgentWorkspace({
               onClick={() => setCollapsed(true)}
               aria-label={t("ย่อแถบข้าง")}
               title={t("ย่อแถบข้าง")}
-              className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted transition hover:bg-white/[0.08] hover:text-fg lg:flex"
+              className="touch-min-icon hidden h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted transition hover:bg-white/[0.08] hover:text-fg lg:flex"
             >
               <PanelIcon />
             </button>
@@ -1098,7 +1271,7 @@ export default function AgentWorkspace({
             collapsed ? "justify-center px-0" : ""
           }`}
         >
-          <Icon name="fa-wand-magic-sparkles" className="h-4 w-4 shrink-0 text-brand-300" />
+          <Icon name="fa-image" className="h-4 w-4 shrink-0 text-brand-300" />
           {!collapsed && <span>{t("สร้างรูป")}</span>}
         </Link>
         <button
@@ -1112,7 +1285,7 @@ export default function AgentWorkspace({
             collapsed ? "justify-center px-0" : ""
           }`}
         >
-          <Icon name="fa-folder-open" className="h-4 w-4 shrink-0 text-aqua" />
+          <Icon name="fa-folder-open" className="h-4 w-4 shrink-0 text-brand-300" />
           {!collapsed && <span>{t("คลังไฟล์")}</span>}
         </button>
       </div>
@@ -1289,7 +1462,13 @@ export default function AgentWorkspace({
                       ))}
                     </div>
                   )}
-                  {m.content && <MessageBody text={m.content} live={streaming} />}
+                  {m.content && (
+                    <MessageBody
+                      text={m.content}
+                      live={streaming}
+                      onShare={m.role === "assistant" ? shareArtifact : undefined}
+                    />
+                  )}
                   {streaming && loading && m.content === "" && notes.length === 0 && steps.length === 0 && (
                     <span className="inline-flex items-center gap-2 text-fg-subtle">
                       <Icon name="fa-circle-notch" className="animate-spin" />
@@ -1418,6 +1597,7 @@ export default function AgentWorkspace({
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onPaste={onPaste}
               onKeyDown={onKeyDown}
               rows={2}
               disabled={models.length === 0}
@@ -1450,16 +1630,14 @@ export default function AgentWorkspace({
                 <Icon name="fa-plus" />
               </button>
 
-              <ModelPicker models={models} value={model} onChange={setModel} />
+              {/* มือถือโชว์เฉพาะไอคอน: ชิป "เลือกโฟลเดอร์งาน" ทำให้แถวนี้ตกบรรทัด
+                  กลายเป็นสามแถวซ้อนกันจนกดไม่ถูกว่าอันไหนส่งข้อความ */}
+              <div className="min-w-0 flex-1">
+                <ModelPicker models={models} value={model} onChange={setModel} />
+              </div>
 
-              <AgentToolsBar
-                workspaceName={workspace?.name ?? null}
-                canPick={folderApi}
-                autoWrite={autoWrite}
-                onPick={chooseWorkspace}
-                onDisconnect={dropWorkspace}
-                onAutoWriteChange={toggleAutoWrite}
-              />
+              <div className="flex sm:hidden">{toolsBar(true)}</div>
+              <div className="hidden sm:flex">{toolsBar(false)}</div>
 
               <button
                 type="button"
@@ -1499,7 +1677,7 @@ export default function AgentWorkspace({
           />
           <aside className="animate-fade-in relative flex h-full w-full max-w-md flex-col border-l border-white/[0.07] bg-ink-900">
             <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-white/[0.07] px-4">
-              <Icon name="fa-folder-open" className="text-aqua" />
+              <Icon name="fa-folder-open" className="text-brand-300" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-body-sm font-semibold text-fg">{t("คลังไฟล์")}</p>
                 <p className="truncate text-micro text-fg-subtle">
@@ -1545,7 +1723,7 @@ export default function AgentWorkspace({
                         className="rounded-xl border border-white/[0.07] bg-white/[0.03] p-3"
                       >
                         <div className="flex items-start gap-2.5">
-                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-aqua/10 text-aqua">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-500/10 text-brand-300">
                             <Icon name={f.kind === "html" ? "fa-code" : "fa-file"} />
                           </span>
                           <div className="min-w-0 flex-1">

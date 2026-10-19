@@ -17,6 +17,8 @@ export default function AgentToolsBar({
   onPick,
   onDisconnect,
   onAutoWriteChange,
+  /** แถบเครื่องมือบนมือถือที่แคบ: เอาแค่ไอคอน มิฉะนั้นทั้งแถวจะตกบรรทัดดูงง */
+  compact = false,
 }: {
   workspaceName: string | null;
   canPick: boolean;
@@ -24,6 +26,7 @@ export default function AgentToolsBar({
   onPick: () => void;
   onDisconnect: () => void;
   onAutoWriteChange: (value: boolean) => void;
+  compact?: boolean;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
@@ -47,26 +50,50 @@ export default function AgentToolsBar({
 
   return (
     <div ref={wrapRef} className="relative flex items-center gap-1.5">
-      <button
-        type="button"
-        onClick={onPick}
-        disabled={!canPick}
-        title={
-          canPick
-            ? t("เลือกโฟลเดอร์งานบนเครื่องของคุณ")
-            : t("เบราว์เซอร์นี้ยังไม่รองรับการเลือกโฟลเดอร์ (ใช้ Chrome หรือ Edge)")
-        }
-        className={`touch-min flex max-w-[10rem] items-center gap-1.5 rounded-full px-2.5 py-1.5 text-caption transition-colors duration-fast ${
-          workspaceName
-            ? "bg-leaf/10 text-leaf hover:bg-leaf/15"
-            : "bg-white/[0.06] text-fg-muted hover:bg-white/[0.11] hover:text-fg"
-        } disabled:cursor-not-allowed disabled:opacity-40`}
-      >
-        <Icon name="fa-folder-open" className="shrink-0 text-micro" />
-        <span className="truncate font-medium">
-          {workspaceName ?? t("เลือกโฟลเดอร์งาน")}
-        </span>
-      </button>
+      {compact ? (
+        <button
+          type="button"
+          onClick={onPick}
+          disabled={!canPick}
+          aria-label={t("เลือกโฟลเดอร์งานบนเครื่องของคุณ")}
+          title={
+            canPick
+              ? workspaceName
+                ? t("โฟลเดอร์งาน: {name}", { name: workspaceName })
+                : t("เลือกโฟลเดอร์งานบนเครื่องของคุณ")
+              : t("เบราว์เซอร์นี้ยังไม่รองรับการเลือกโฟลเดอร์ (ใช้ Chrome หรือ Edge)")
+          }
+          className={`touch-min-icon relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition hover:bg-white/[0.08] ${
+            workspaceName ? "text-leaf" : "text-fg-muted"
+          } disabled:cursor-not-allowed disabled:opacity-40`}
+        >
+          <Icon name="fa-folder-open" />
+          {workspaceName && (
+            <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-leaf" aria-hidden />
+          )}
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={onPick}
+          disabled={!canPick}
+          title={
+            canPick
+              ? t("เลือกโฟลเดอร์งานบนเครื่องของคุณ")
+              : t("เบราว์เซอร์นี้ยังไม่รองรับการเลือกโฟลเดอร์ (ใช้ Chrome หรือ Edge)")
+          }
+          className={`touch-min flex max-w-[10rem] items-center gap-1.5 rounded-full px-2.5 py-1.5 text-caption transition-colors duration-fast ${
+            workspaceName
+              ? "bg-leaf/10 text-leaf hover:bg-leaf/15"
+              : "bg-white/[0.06] text-fg-muted hover:bg-white/[0.11] hover:text-fg"
+          } disabled:cursor-not-allowed disabled:opacity-40`}
+        >
+          <Icon name="fa-folder-open" className="shrink-0 text-micro" />
+          <span className="truncate font-medium">
+            {workspaceName ?? t("เลือกโฟลเดอร์งาน")}
+          </span>
+        </button>
+      )}
 
       <button
         type="button"
