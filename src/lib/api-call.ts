@@ -10,7 +10,7 @@ import type { NextRequest } from "next/server";
 import { authenticateApiKey, type ApiPrincipal } from "@/lib/api-auth";
 import { detectAgent } from "@/lib/agent-detect";
 import { getPlanByKey } from "@/lib/data/plans";
-import { getUserQuota, listPublicRoutes } from "@/lib/data/models";
+import { getQuotaState, listPublicRoutes } from "@/lib/data/models";
 import {
   invokeUpstream,
   logRequest,
@@ -128,7 +128,7 @@ export async function authorizeCall(
     };
   }
 
-  const quota = await getUserQuota(principal.user.id, principal.user.plan);
+  const quota = await getQuotaState(principal.user.id, principal.user.plan);
   if (quota.cycleExhausted || quota.dailyExhausted) {
     return {
       ok: false,

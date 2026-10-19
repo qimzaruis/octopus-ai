@@ -1,20 +1,16 @@
 import Link from "next/link";
 import { getSessionUser } from "@/lib/auth";
-import {
-  getModelRanking,
-  getOverview,
-  getUsage,
-  getUsageTotals,
-  listRequests,
-  type UsageBucket,
-} from "@/lib/data/usage";
+import { getDashboardFacts, listRequests } from "@/lib/data/usage";
 import UsageChartCard from "@/components/UsageChartCard";
 import UsageSummaryCard from "@/components/UsageSummaryCard";
 import RankingList from "@/components/RankingList";
 import StatCard from "@/components/StatCard";
 import StatusBadge from "@/components/StatusBadge";
 import EmptyState from "@/components/EmptyState";
-import { listPublicRoutes, getUserQuota } from "@/lib/data/models";
+import { listPublicRoutes } from "@/lib/data/models";
+import { getPlanByKey } from "@/lib/data/plans";
+import { cycleStart, dayStart, computeQuota } from "@/lib/plans";
+import type { UsageBucket } from "@/lib/data/usage";
 import {
   formatLatency,
   formatNumber,
@@ -45,18 +41,21 @@ export default async function DashboardPage() {
   const user = (await getSessionUser())!;
   const t = await getT();
 
-  const [overview, hourly, d7, d30, ranking, recent, quota, routes, allTotals] =
-    await Promise.all([
-      getOverview(user.id),
-      getUsage(user.id, "hourly"),
-      getUsage(user.id, "7d"),
-      getUsage(user.id, "30d"),
-      getModelRanking(user.id, 6),
-      listRequests(user.id, { perPage: 8 }),
-      getUserQuota(user.id, user.plan),
-      listPublicRoutes(),
-      getUsageTotals(user.id, "all"),
-    ]);
+  // แผนมาจาก catalog snapshot (แคชไว้แล้ว) → อ่านรอบนี้ไม่มีค่าเดินทาง
+  const plan = await getPlanByKey(user.plan);
+  const [facts, recent, routes] = await Promise.all([
+    getDashboardFacts(user.id, cycleStart(plan.cycleDays), dayStart()),
+    listRequests(user.id, { perPage: 8 }),
+    listPublicRoutes(),
+  ]);
+  const quota = computeQuota(plan, facts.spend);
+  const { overview, hourly, daily7: d7, daily30: d30, ranking } = facts;
+  // ยอด "ทั้งหมด" คือ aggregate ชุดเดียวกับ overview เดิมเรียกซ้ำอีกคิวรีหนึ่งรอบ
+  const allTotals = {
+    requests: overview.requests,
+    tokens: overview.tokens,
+    costUsd: overview.costUsd,
+  };
 
   const todayTokens = hourly.reduce((s, b) => s + b.tokens, 0);
   const todayRequests = hourly.reduce((s, b) => s + b.requests, 0);

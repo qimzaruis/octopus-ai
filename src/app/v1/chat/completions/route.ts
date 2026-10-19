@@ -14,7 +14,7 @@ import { NextRequest } from "next/server";
 import { authenticateApiKey } from "@/lib/api-auth";
 import { detectAgent } from "@/lib/agent-detect";
 import { getPlanByKey } from "@/lib/data/plans";
-import { listPublicRoutes, getUserQuota } from "@/lib/data/models";
+import { listPublicRoutes, getQuotaState } from "@/lib/data/models";
 import {
   createSseAccumulator,
   estimateTokens,
@@ -142,7 +142,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const quota = await getUserQuota(principal.user.id, principal.user.plan);
+  const quota = await getQuotaState(principal.user.id, principal.user.plan);
   if (quota.cycleExhausted || quota.dailyExhausted) {
     return openaiError(
       "ใช้โควต้าครบแล้วสำหรับรอบนี้ — รอรีเซตหรืออัปเกรดแผน",

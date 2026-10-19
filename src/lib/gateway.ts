@@ -12,18 +12,12 @@
  * dashboard / requests เห็นตัวเลขจริง
  */
 
-import { asc, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import {
-  models,
-  providerKeys,
-  providers,
-  requests,
-  routeTargets,
-  routes,
-} from "@/db/schema";
+import { providerKeys, requests } from "@/db/schema";
 import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
 import { cached, invalidateCache } from "@/lib/catalog-cache";
+import { getCatalog } from "@/lib/data/catalog";
 import { isKeyLimited, orderedKeys, type RotatableKey } from "@/lib/rotation";
 import { keyLimitRule, matchKeyLimit, nextResetAt } from "@/lib/key-limit";
 import { internalIdentities, maskInternals, type InternalIdentities } from "@/lib/public-text";
@@ -93,7 +87,8 @@ const CATALOG_TTL_MS = 60_000;
 /**
  * เรียงตาม priority แล้ว (หลักก่อน) — ตัวที่ถูกปิดใช้จะถูกกรองออก
  *
- * ผลลัพธ์ถูกแคชไว้สั้น ๆ เพราะทุก request ต้องอ่านชุด query เดียวกันนี้
+ * อ่านจาก catalog snapshot ชุดเดียวกับหน้า /models (aggregate ทั้งระบบใน query เดียว)
+ * ผลลัพธ์ถูกแคชไว้สั้น ๆ เพราะทุก request ต้องอ่านชุดเดียวกันนี้
  * และแอดมินเป็นคนแก้ตารางนี้เท่านั้น (ล้างแคชให้ตอนบันทึก)
  */
 export function resolveTargets(publicModel: string): Promise<GatewayTarget[]> {
@@ -108,43 +103,34 @@ async function loadTargets(publicModel: string): Promise<GatewayTarget[]> {
   const name = publicModel.trim();
   if (!name) return [];
 
-  try {
-    const db = getDb();
-    const [routeRows, targetRows, modelRows, providerRows] = await Promise.all([
-      db.select().from(routes).where(eq(routes.enabled, true)),
-      db.select().from(routeTargets).orderBy(asc(routeTargets.priority)),
-      db.select().from(models),
-      db.select().from(providers),
-    ]);
-    const route = routeRows.find((r) => r.publicModel === name);
-    if (!route) return [];
+  const catalog = await getCatalog();
+  const route = catalog.routes.find((r) => r.enabled && r.publicModel === name);
+  if (!route) return [];
 
-    return targetRows
-      .filter((t) => t.routeId === route.id && t.enabled)
-      .sort((a, b) => a.priority - b.priority)
-      .flatMap((t) => {
-        const m = modelRows.find((x) => x.id === t.modelRefId && x.enabled);
-        const p = providerRows.find((x) => x.id === m?.providerId && x.enabled);
-        if (!m || !p) return [];
-        return [
-          {
-            modelRefId: m.id,
-            modelId: m.modelId,
-            providerId: p.id,
-            providerName: p.name,
-            baseUrl: p.baseUrl,
-            inputPricePerM: Number(m.inputPricePerM),
-            outputPricePerM: Number(m.outputPricePerM),
-            supportsVision: m.supportsVision,
-            contextWindow: m.contextWindow,
-          },
-        ];
-      });
-  } catch (err) {
-    // DB อ่านไม่ออก (เช่น pooler เต็ม) = ไม่มีรายการปลายทาง ให้ caller ตอบติดขัดเอง
-    markDbUnavailable(err);
-    return [];
-  }
+  const modelById = new Map(catalog.models.map((m) => [m.id, m]));
+  const providerById = new Map(catalog.providers.map((p) => [p.id, p]));
+
+  return catalog.targets
+    .filter((t) => t.routeId === route.id && t.enabled)
+    .flatMap((t) => {
+      const m = modelById.get(t.modelRefId);
+      if (!m || !m.enabled) return [];
+      const p = providerById.get(m.providerId);
+      if (!p || !p.enabled) return [];
+      return [
+        {
+          modelRefId: m.id,
+          modelId: m.modelId,
+          providerId: p.id,
+          providerName: p.name,
+          baseUrl: p.baseUrl,
+          inputPricePerM: m.inputPricePerM,
+          outputPricePerM: m.outputPricePerM,
+          supportsVision: m.supportsVision,
+          contextWindow: m.contextWindow,
+        },
+      ];
+    });
 }
 
 type UsableKey = RotatableKey & { apiKey: string; label: string };
@@ -583,8 +569,12 @@ export async function logRequest(input: LogInput): Promise<void> {
   };
 
   try {
-    await getDb().insert(requests).values(row);
-    await bumpModelUptime(input);
+    // สองเขียนนี้ไม่ผูกกัน (คนละตาราง) → ยิงพร้อมกันบน connection เดียว
+    // เดิมรอต่อง่าย 2 รอบไป Supabase ทุก request ทั้งที่ caller ไม่ได้ใช้ผลของมันอยู่แล้ว
+    await Promise.all([
+      getDb().insert(requests).values(row),
+      bumpModelUptime(input),
+    ]);
   } catch (err) {
     console.error("[gateway] เขียน log request ไม่สำเร็จ:", err);
   }

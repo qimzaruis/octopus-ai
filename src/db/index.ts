@@ -28,11 +28,13 @@ export function getDb() {
     client = postgres(normalizeDbUrl(raw), {
       prepare: false,
       // 1 connection ต่อ process ก็พอ: postgres.js วาง query ที่ยิงพร้อมกัน (Promise.all)
-      // ไว้ใน pipeline เดียว วัดจริง 4 query พร้อมกันบน connection เดียวใช้เวลาเท่ากับการยิงตัวเดียว
-      // (การเปิด connection ใหม่ไป pooler วัดได้ ~2.5 วินาที ส่วน query บนตัวเดิม ~350ms)
+      // ไว้ใน pipeline เดียว วัดจริง 6 query พร้อมกันบน connection เดียว ~= เวลาของ query ตัวเดียว
+      // (การเปิด connection ใหม่ไป pooler วัดได้ ~2.6 วินาที ส่วน query บนตัวเดิม ~350ms)
       max: 1,
-      // คืน connection เร็ว เพราะ lambda เครื่อง dev และเว็บจริงแย่ง quota กันจาก pooler ชุดเดียวกัน
-      idle_timeout: isDevHost ? 10 : 30,
+      // ฝั่ง production คืน connection เร็ว เพราะ lambda ที่พักยังถือ slot ของ pooler อยู่
+      // ส่วนเครื่อง dev ใช้ 60 วินาที: ถ้าสั้นกว่านั้น ผู้ใช้พิมพ์ต่อช้ากว่าค่านี้ทีไร
+      // ต้องจ่ายค่าเปิด connection ใหม่ 2.6 วินาทีก่อน query แรกของหน้าานั้นทั้งที่ใช้ slot ตัวเดียว
+      idle_timeout: isDevHost ? 60 : 30,
       max_lifetime: 60 * 10,
       // DB เข้าถึงไม่ได้ให้ล้มเร็ว อย่าค้าง 20+ วินาที (auth.ts มี fallback profile อยู่แล้ว)
       connect_timeout: 5,

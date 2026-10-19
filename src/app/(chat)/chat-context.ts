@@ -56,20 +56,25 @@ export async function loadChatContext(
   userId: string,
   planKey: string,
 ): Promise<ChatContext> {
-  const models = await loadAgentModels(planKey);
+  // ทั้งสามกลุ่มอยู่คนละฐานข้อมูล (Postgres / Turso) และไม่รู้ผลของกันและกัน
+  // เดิมรอ model list เสร็จก่อนแล้วค่อยอ่านประวัติแชท = เพิ่มเวลาอีก 1 รอบเต็ม ๆ ทุกการนำทาง
+  const modelsP = loadAgentModels(planKey);
+  const historyP = Promise.all([listConversations(userId), getChatSettings()]);
 
   let conversations: ChatConversation[] = [];
   let settings: ChatSettings = DEFAULT_CHAT_SETTINGS;
   let chatReady = true;
   try {
-    [conversations, settings] = await Promise.all([
-      listConversations(userId),
-      getChatSettings(),
-    ]);
+    [conversations, settings] = await historyP;
   } catch (err) {
     chatReady = false;
     console.error("[agent] เชื่อม CHAT_DATABASE ไม่ได้:", err);
   }
 
-  return { models, conversations, settings, chatReady };
+  return {
+    models: await modelsP,
+    conversations,
+    settings,
+    chatReady,
+  };
 }

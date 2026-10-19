@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getUserQuota } from "@/lib/data/models";
+import { getQuotaState } from "@/lib/data/models";
 import { listCreditTransactions } from "@/lib/data/users";
 import PageHeader from "@/components/PageHeader";
 import Badge from "@/components/Badge";
@@ -21,7 +21,7 @@ export default async function CreditsPage() {
   const t = await getT();
   const locale = await getLocale();
   const [quota, txs] = await Promise.all([
-    getUserQuota(user.id, user.plan),
+    getQuotaState(user.id, user.plan),
     listCreditTransactions(user.id),
   ]);
 

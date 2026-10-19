@@ -1,10 +1,11 @@
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { models, providers, routeTargets, routes } from "@/db/schema";
+import { models, providers } from "@/db/schema";
 import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
 import { getPlan, cycleStart, dayStart, computeQuota, type QuotaUsage } from "@/lib/plans";
 import { getUsage, type UsageBucket } from "@/lib/data/usage";
-import { modelPlanRequirements } from "@/lib/data/plans";
+import { planRequirementsOf } from "@/lib/data/plans";
+import { getCatalog, type CatalogTarget } from "@/lib/data/catalog";
 import { cached } from "@/lib/catalog-cache";
 import { brandNames } from "@/lib/public-text";
 
@@ -125,7 +126,7 @@ function routeRequirement(
  */
 export async function listPublicRoutes(): Promise<PublicRouteDTO[]> {
   // DB อ่านไม่ออก (เช่น pooler เต็ม): คืน catalog ชุดจริงที่อ่านสำเร็จล่าสุด
-  // ของเก่าที่แคชไว้ยังดีกว่า "ไม่มีโมเดลเลย" ซึ่งทำให้หน้า /models กับแช báo ว่า
+  // ของเก่าที่แคชไว้ยังดีกว่า "ไม่มีโมเดลเลย" ซึ่งทำให้หน้า /models กับห้องแชทสรุปว่า
   // route ที่ผู้ใช้เรียกหาไม่เจอ ทั้งที่ในฐานข้อมูลมีอยู่จริง
   if (isDbUnavailable()) return lastGoodRoutes ?? [];
   return cached("public-routes", CATALOG_TTL_MS, loadPublicRoutes);
@@ -156,8 +157,12 @@ function publicTargetLabel(displayName: string, modelId: string, names: string[]
     if (clean.length < 3) continue;
     out = out.replace(new RegExp(clean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "");
   }
+  // namespace หน้า slash คือชื่อบัญชีของผู้ขายโมเดล ("zai-org/GLM-5.3-Flash")
+  // เดิมแค่ลบตัว "/" ออก ทำให้ชื่อ org ไปชนกับชื่อโมเดลติดกันเป็น "zai-orgGLM-5.3-Flash"
+  // ทั้งอ่านไม่ออกและโผล่ชื่อแบรนด์ที่ไม่จำเป็น → เก็บเฉพาะส่วนหลัง slash
+  const slash = out.lastIndexOf("/");
+  if (slash >= 0) out = out.slice(slash + 1);
   out = out
-    .replace(/\/[a-z0-9._-]+/gi, (m) => m.slice(1)) // "xai/grok-4.5" → "grok-4.5"
     .replace(/[([][\s)*-]*[)\]]/g, "") // วงเล็บที่กลายเป็นช่องว่าง
     .replace(/[\s()*-]{2,}/g, " ")
     .replace(/^[\s()*-]+|[\s()*-]+$/g, "")
@@ -168,33 +173,33 @@ function publicTargetLabel(displayName: string, modelId: string, names: string[]
 }
 
 async function loadPublicRoutes(): Promise<PublicRouteDTO[]> {
-  const reqs = await modelPlanRequirements();
+  const catalog = await getCatalog();
+  const reqs = planRequirementsOf(catalog);
+  const names = brandNames(catalog.providers);
+  const modelById = new Map(catalog.models.map((m) => [m.id, m]));
+  const targetsByRoute = new Map<number, CatalogTarget[]>();
+  for (const t of catalog.targets) {
+    if (!t.enabled) continue;
+    const list = targetsByRoute.get(t.routeId);
+    if (list) list.push(t);
+    else targetsByRoute.set(t.routeId, [t]);
+  }
 
-  try {
-    const db = getDb();
-    const [routeRows, targetRows, modelRows, providerRows] = await Promise.all([
-      db.select().from(routes).where(eq(routes.enabled, true)).orderBy(asc(routes.id)),
-      db.select().from(routeTargets).orderBy(asc(routeTargets.priority)),
-      db.select().from(models),
-      db.select().from(providers),
-    ]);
-    const names = brandNames(providerRows);
-
-    const out = routeRows.map((r) => {
-      const targets = targetRows
-        .filter((t) => t.routeId === r.id && t.enabled)
-        .sort((a, b) => a.priority - b.priority);
+  const out = catalog.routes
+    .filter((r) => r.enabled)
+    .map((r) => {
+      const targets = targetsByRoute.get(r.id) ?? [];
       return {
         id: r.id,
         publicModel: r.publicModel,
         displayName: r.displayName || r.publicModel,
         description: r.description,
         displayMode: r.displayMode,
-        logoUrl: r.logoUrl ?? null,
-        inputPricePerM: Number(r.inputPricePerM ?? 0),
-        outputPricePerM: Number(r.outputPricePerM ?? 0),
+        logoUrl: r.logoUrl,
+        inputPricePerM: r.inputPricePerM,
+        outputPricePerM: r.outputPricePerM,
         targets: targets.map((t) => {
-          const m = modelRows.find((x) => x.id === t.modelRefId);
+          const m = modelById.get(t.modelRefId);
           return {
             label: publicTargetLabel(m?.displayName ?? "", m?.modelId ?? "", names),
             contextWindow: m?.contextWindow ?? 0,
@@ -204,21 +209,15 @@ async function loadPublicRoutes(): Promise<PublicRouteDTO[]> {
         ...routeRequirement(targets.map((t) => t.modelRefId), reqs),
       };
     });
-    lastGoodRoutes = out;
-    return out;
-  } catch (err) {
-    markDbUnavailable(err);
-    // อ่านไม่สำเร็จ (pool ล้น/DB ค้าง): ใช้ catalog ชุดล่าสุดที่เคยอ่านได้
-    // ดีกว่าคืนค่าว่างแล้วให้หน้าเว็บกับแชทสรุปว่า "โมเดลนี้ไม่มีอยู่"
-    return lastGoodRoutes ?? [];
-  }
+  lastGoodRoutes = out;
+  return out;
 }
 
 /** โมเดลทั้งหมดสําหรับหน้า admin */
 export async function listAllModelsForAdmin(): Promise<AdminModelDTO[]> {
   if (isDbUnavailable()) return [];
 
-  const reqs = await modelPlanRequirements();
+  const reqs = planRequirementsOf(await getCatalog());
   const reqOf = (id: number) => {
     const r = reqs.get(id);
     return r ? { requiredPlanTier: r.tier, requiredPlanLabel: r.label } : NO_REQ;
@@ -345,4 +344,22 @@ export async function getUserQuota(
     daily7,
     daily30,
   };
+}
+
+/**
+ * เฉพาะ "เหลือโควต้าไหม" สำหรับทางที่ถูกเรียกทุก request (/v1 และเอเจนต์)
+ *
+ * getUserQuota แถมกราฟรายชั่วโมง/7 วัน/30 วันมาด้วย (3 aggregate scan บน requests)
+ * ซึ่งหน้า dashboard เท่านั้นที่อ่าน — ถ้านำไปใช้ก่อนยิงโมเดล ทุก request ของลูกค้า
+ * จะต้องจ่ายค่า scan ที่ไม่มีทางถูกอ่าน และ latency ก็เพิ่มตามขนาดตาราง
+ */
+export async function getQuotaState(userId: string, planKey: string): Promise<QuotaUsage> {
+  const { getPlanByKey } = await import("@/lib/data/plans");
+  const { getSpendInWindows } = await import("@/lib/data/usage");
+  const plan = await getPlanByKey(planKey);
+  const spend = await getSpendInWindows(userId, {
+    cycleSince: cycleStart(plan.cycleDays),
+    daySince: dayStart(),
+  });
+  return computeQuota(plan, spend);
 }

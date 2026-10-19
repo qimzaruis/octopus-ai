@@ -337,6 +337,201 @@ export async function getSpendInWindows(
 }
 
 // ---------------------------------------------------------------------------
+// หน้า dashboard: ทุกตัวเลขใน query เดียว
+//
+// หนึ่งรอบไป Supabase pooler จากเครื่องผู้ใช้วัดได้ ~400ms และการยิงหลายคิวรีซ้อนกัน
+// บน connection เดียวไม่ได้ทำให้ขนานกันจริง (postgres.js ต้องรอคิวรีก่อนจบ)
+// เดิมหน้านี้เรียก 9 คิวรี = ค้าง ~8 วินาที ทั้งที่ข้อมูลทั้งหมดอยู่ในตารางเดียว
+// รวมเป็น statement เดียวจึงเหลือ 1 รอบ + 1 scan ของตาราง requests
+// ---------------------------------------------------------------------------
+
+export type DashboardFacts = {
+  overview: Overview;
+  hourly: UsageBucket[];
+  daily7: UsageBucket[];
+  daily30: UsageBucket[];
+  ranking: ModelRank[];
+  spend: { cycleSpendUsd: number; dailySpendUsd: number };
+};
+
+const EMPTY_FACTS: DashboardFacts = {
+  overview: { ...EMPTY_OVERVIEW },
+  hourly: [],
+  daily7: [],
+  daily30: [],
+  ranking: [],
+  spend: { cycleSpendUsd: 0, dailySpendUsd: 0 },
+};
+
+function jsonArr(v: unknown): Record<string, unknown>[] {
+  if (Array.isArray(v)) return v as Record<string, unknown>[];
+  if (typeof v === "string") {
+    try {
+      const p = JSON.parse(v);
+      return Array.isArray(p) ? p : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+/** วันที่แบบ YYYY-MM-DD ของ "ตอนนี้ในกรุงเทพฯ" (ไทยไม่มี DST จึงบวก offset ตรง ๆ ได้) */
+function bkkDateKey(offsetDays = 0): string {
+  const d = new Date(Date.now() + TZ_OFFSET_MS - offsetDays * 86_400_000);
+  return d.toISOString().slice(0, 10);
+}
+
+/** สร้างแถวรายวันย้อนหลัง n วัน (รวมวันนี้) จากของจริงที่ DB ส่งมา — วันที่ไม่มีข้อมูล = 0 */
+function daySeries(rows: Record<string, unknown>[], days: number): UsageBucket[] {
+  const byDay = new Map(rows.map((r) => [String(r.d), r]));
+  const out: UsageBucket[] = [];
+  for (let back = days - 1; back >= 0; back -= 1) {
+    const key = bkkDateKey(back);
+    const [, mm, dd] = key.split("-");
+    const r = byDay.get(key) ?? {};
+    out.push({
+      label: `${dd}/${mm}`,
+      fullLabel: `${dd}/${mm}`,
+      requests: num(r.requests),
+      tokens: num(r.tokens),
+      cost: num(r.cost),
+    });
+  }
+  return out;
+}
+
+export async function getDashboardFacts(
+  scope: Scope,
+  cycleSince: Date,
+  daySince: Date,
+  rankLimit = 6,
+): Promise<DashboardFacts> {
+  if (isDbUnavailable()) return EMPTY_FACTS;
+
+  const scopeFilter = scope === "all" ? sql`` : sql`where user_id = ${scope}`;
+
+  try {
+    const rows = await rawRows(sql`
+      with mine as materialized (
+        select created_at, input_tokens, output_tokens, cost_usd, latency_ms, status, public_model
+        from requests
+        ${scopeFilter}
+      ),
+      hr as (
+        select extract(hour from (created_at at time zone ${APP_TZ}))::int as h,
+               count(*)::int as requests,
+               coalesce(sum(input_tokens + output_tokens), 0)::int as tokens,
+               coalesce(sum(cost_usd), 0)::float8 as cost
+        from mine
+        where date_trunc('hour', (created_at at time zone ${APP_TZ}))
+                <= date_trunc('hour', (now() at time zone ${APP_TZ}))
+          and (created_at at time zone ${APP_TZ})::date = ((now() at time zone ${APP_TZ})::date)
+        group by 1
+      ),
+      dy as (
+        select ((created_at at time zone ${APP_TZ})::date)::text as d,
+               count(*)::int as requests,
+               coalesce(sum(input_tokens + output_tokens), 0)::int as tokens,
+               coalesce(sum(cost_usd), 0)::float8 as cost
+        from mine
+        where (created_at at time zone ${APP_TZ})::date
+                >= ((now() at time zone ${APP_TZ})::date - 29)
+        group by 1
+      ),
+      ov as (
+        select count(*)::int as requests,
+               coalesce(sum(input_tokens), 0)::int as input_tokens,
+               coalesce(sum(output_tokens), 0)::int as output_tokens,
+               coalesce(avg(latency_ms), 0)::int as avg_latency,
+               coalesce(sum(cost_usd), 0)::float8 as cost,
+               coalesce(sum(case when status != 'success' then 1 else 0 end), 0)::int as errors
+        from mine
+      ),
+      rk as (
+        select public_model as model,
+               count(*)::int as requests,
+               coalesce(sum(input_tokens), 0)::int as input_tokens,
+               coalesce(sum(output_tokens), 0)::int as output_tokens,
+               coalesce(avg(latency_ms), 0)::int as avg_latency,
+               coalesce(sum(cost_usd), 0)::float8 as cost,
+               coalesce(sum(case when status != 'success' then 1 else 0 end), 0)::int as errors
+        from mine
+        where public_model <> ''
+        group by 1
+        order by coalesce(sum(input_tokens + output_tokens), 0) desc
+        limit ${rankLimit}
+      ),
+      sp as (
+        select coalesce(sum(case when created_at >= ${cycleSince.toISOString()}::timestamptz then cost_usd else 0 end), 0)::float8 as cycle_cost,
+               coalesce(sum(case when created_at >= ${daySince.toISOString()}::timestamptz then cost_usd else 0 end), 0)::float8 as day_cost
+        from mine
+      )
+      select
+        (select jsonb_agg(o) from ov o) as overview,
+        (select coalesce(jsonb_agg(jsonb_build_object('h', h, 'requests', requests, 'tokens', tokens, 'cost', cost) order by h), '[]'::jsonb) from hr) as hourly,
+        (select coalesce(jsonb_agg(jsonb_build_object('d', d, 'requests', requests, 'tokens', tokens, 'cost', cost) order by d), '[]'::jsonb) from dy) as daily,
+        (select coalesce(jsonb_agg(jsonb_build_object('model', model, 'requests', requests, 'inputTokens', input_tokens, 'outputTokens', output_tokens, 'totalTokens', input_tokens + output_tokens, 'avgLatencyMs', avg_latency, 'errors', errors, 'costUsd', cost) order by (input_tokens + output_tokens) desc), '[]'::jsonb) from rk) as ranking,
+        (select jsonb_agg(s) from sp s) as spend
+    `);
+
+    const row = rows[0] ?? {};
+    const ov = jsonArr(row.overview)[0] ?? {};
+    const sp = jsonArr(row.spend)[0] ?? {};
+    const requests = num(ov.requests);
+    const errors = num(ov.errors);
+    const inputTokens = num(ov.input_tokens);
+    const outputTokens = num(ov.output_tokens);
+
+    const hourMap = new Map(jsonArr(row.hourly).map((r) => [num(r.h), r]));
+    const nowHourBkk = new Date(Date.now() + TZ_OFFSET_MS).getUTCHours();
+    const hourly: UsageBucket[] = [];
+    for (let h = 0; h <= nowHourBkk; h += 1) {
+      const v = hourMap.get(h) ?? {};
+      const hh = String(h).padStart(2, "0");
+      hourly.push({
+        label: `${hh}:00`,
+        fullLabel: `วันนี้ ${hh}:00 น.`,
+        requests: num(v.requests),
+        tokens: num(v.tokens),
+        cost: num(v.cost),
+      });
+    }
+
+    const daily = jsonArr(row.daily);
+    return {
+      overview: {
+        requests,
+        inputTokens,
+        outputTokens,
+        tokens: inputTokens + outputTokens,
+        avgLatencyMs: num(ov.avg_latency),
+        errors,
+        successRate: requests === 0 ? 100 : ((requests - errors) / requests) * 100,
+        costUsd: num(ov.cost),
+      },
+      hourly,
+      daily7: daySeries(daily, 7),
+      daily30: daySeries(daily, 30),
+      ranking: jsonArr(row.ranking).map((r) => ({
+        model: String(r.model ?? ""),
+        requests: num(r.requests),
+        inputTokens: num(r.inputTokens),
+        outputTokens: num(r.outputTokens),
+        totalTokens: num(r.totalTokens),
+        avgLatencyMs: num(r.avgLatencyMs),
+        errors: num(r.errors),
+        costUsd: num(r.costUsd),
+      })),
+      spend: { cycleSpendUsd: num(sp.cycle_cost), dailySpendUsd: num(sp.day_cost) },
+    };
+  } catch (err) {
+    markDbUnavailable(err);
+    return EMPTY_FACTS;
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 export type RequestFilter = { page?: number; perPage?: number; q?: string; status?: string };
 
@@ -359,15 +554,25 @@ async function listRequestsReal(
   }
   const where = sql.join(conds, sql` and `);
 
-  const countRows = await rawRows(sql`select count(*)::int as c from requests where ${where}`);
+  // count(*) over () = ได้จำนวนทั้งชุดมากับหน้าปัจจุบันใน query เดียว
+  // (เดิมนับหนึ่งรอบ แล้วดึงอีกหนึ่งรอบ = จ่ายค่าเดินทางไป Supabase เกินมาหนึ่งเท่า)
   const rows = await rawRows(sql`
     select id, public_model, agent, status, http_status,
-      input_tokens, output_tokens, latency_ms, cost_usd, error, created_at
+      input_tokens, output_tokens, latency_ms, cost_usd, error, created_at,
+      count(*) over ()::int as total
     from requests
     where ${where}
     order by created_at desc
     limit ${perPage} offset ${(page - 1) * perPage}
   `);
+
+  let total = num(rows[0]?.total);
+  if (rows.length === 0) {
+    // หน้าเปล่า (offset เลยจำนวนจริง) ยังต้องส่งจำนวนทั้งหมดให้ตัวแบ่งหน้าถูกต้อง
+    const countRows = await rawRows(sql`select count(*)::int as c from requests where ${where}`);
+    total = num(countRows[0]?.c);
+  }
+
   // แถวเก่าที่เก็บก่อนมีกติกานียังมีชื่อค่ายค้างอยู่ในคอลัมน์ error — ล้างตอนอ่านด้วย
   const ids = await internalIdentities();
 
@@ -385,7 +590,7 @@ async function listRequestsReal(
       error: r.error ? maskInternals(String(r.error), ids) : null,
       createdAt: new Date(r.created_at as string).toISOString(),
     })),
-    total: num(countRows[0]?.c),
+    total,
   };
 }
 

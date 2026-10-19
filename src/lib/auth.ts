@@ -10,6 +10,47 @@ import { cached, invalidateCache } from "@/lib/catalog-cache";
 /** อายุแคช profile ผู้ใช้ (ms) — แอดมินแก้เครดิต/แผน/แบนเมื่อไหร่ก็ล้างทันที */
 const PROFILE_TTL_MS = 15_000;
 
+/**
+ * แคช "ผู้ใช้ของ request นี้" ผูกกับ id จาก cookie
+ *
+ * หนึ่งการเปิดหน้า layout + page (+ API ที่เรียกซ้อน) เรียก getSessionUser() ซ้ำหลายรอบ
+ * และแต่ละรอบคือการเดินทางไปถึง Supabase Auth จริง (วัดจากเครื่องผู้ใช้ได้ ~135ms ต่อรอบ
+ * และบน Vercel ก็เป็น request ไป GoTrue ฟรี ๆ เท่าจำนวนครั้งที่เรียกซ้ำ)
+ * เก็บผลไว้รอบเดียวจึงเร็วขึ้นทั้งหน้าและประหยัด quota ฝั่ง auth
+ *
+ * ล็อกกุญแจไว้ที่ token: ถ้า token หมุน (refresh) จะตรวจใหม่ทันที ไม่ใช้ผลของ token เก่า
+ */
+type SessionMemo = { at: number; token: string; value: Promise<SessionUser | null> };
+const sessionMemo = new Map<string, SessionMemo>();
+
+function memoGet(uid: string, token: string): SessionMemo | null {
+  const hit = sessionMemo.get(uid);
+  if (!hit) return null;
+  if (hit.at + PROFILE_TTL_MS <= Date.now() || hit.token !== token) {
+    sessionMemo.delete(uid);
+    return null;
+  }
+  return hit;
+}
+
+function memoSet(uid: string, token: string, value: Promise<SessionUser | null>): void {
+  // ผู้ใช้ที่เลิกเข้าเว็บไปแล้วไม่ควรทิ้งของค้างไว้ในหน่วยความจำของ lambda
+  if (sessionMemo.size > 500) {
+    const cutoff = Date.now() - PROFILE_TTL_MS;
+    for (const [id, entry] of sessionMemo) if (entry.at <= cutoff) sessionMemo.delete(id);
+  }
+  sessionMemo.set(uid, { at: Date.now(), token, value });
+}
+
+/**
+ * ล้างแคช session ของผู้ใช้หนึ่ง — แอดมินแก้เครดิต/แผน/แบน หรือผู้ใช้ล็อกเอาต์
+ * ต้องล้างทั้งชั้นนี้และชั้น profile underneath ไม่งั้นค่าเก่ายังถูกใช้ต่ออีก 15 วินาที
+ */
+export function invalidateSessionUser(userId: string): void {
+  sessionMemo.delete(userId);
+  invalidateCache(`session:${userId}`);
+}
+
 export type SessionUser = {
   id: string;
   email: string;
@@ -30,15 +71,46 @@ export type SessionUser = {
  * - มี Supabase session จริง → ใช้ session นั้น + แถว users ใน DB (role/credits)
  * คืน null ถ้าไม่ได้เข้าสู่ระบบ
  *
- * ลําดับนี้สําคัญ: ในโหมดพัฒนา ผู้ใช้อาจ login Google จริงได้ด้วย
+ * ตัวนี้คือทางเข้าเดียวของทั้งแอป จึงวางแคชไว้ที่นี่ชั้นหนึ่ง: layout, page และ API route
+ * ของ request เดียวมักเรียกซ้ำ 2-3 รอบ และทุกรอบคือการเดินทางไปถึง Supabase Auth
+ * (อ่านเพิ่มใน sessionMemo ด้านบน)
  */
 export async function getSessionUser(): Promise<SessionUser | null> {
-
   if (!supabaseConfigured) {
     return null;
   }
 
   const supabase = await createClient();
+
+  // getSession() อ่านจาก cookie เท่านั้น (ไม่ไปถามเซิร์ฟเวอร์) ใช้เป็นประตูกับกุญแจแคช
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const token = session?.access_token ?? "";
+  const uid = session?.user?.id ?? "";
+  if (!token || !uid) {
+    if (uid) sessionMemo.delete(uid); // ล็อกเอาต์แล้ว — ห้ามใช้ profile เก่าตอบ request ถัดไป
+    return null;
+  }
+
+  const hit = memoGet(uid, token);
+  if (hit) return cloneUser(await hit.value);
+
+  const value = resolveSessionUser(supabase).catch((err) => {
+    sessionMemo.delete(uid); // promise ที่ล้มเหลวต้องไม่ถูกใช้ตอบ request ถัดไปอีก 15 วินาที
+    throw err;
+  });
+  memoSet(uid, token, value);
+  return cloneUser(await value);
+}
+
+function cloneUser(u: SessionUser | null): SessionUser | null {
+  return u ? { ...u } : null;
+}
+
+async function resolveSessionUser(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+): Promise<SessionUser | null> {
   const {
     data: { user },
   } = await supabase.auth.getUser();

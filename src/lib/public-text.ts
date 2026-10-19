@@ -9,11 +9,7 @@
  * ชั้นหลังจำเป็นเพราะแถวที่เก็บไว้ก่อนมีกติกานี้ยังมีชื่อค่ายค้างอยู่ในฐานข้อมูล
  */
 
-import { getDb } from "@/db";
-import { models, providers } from "@/db/schema";
-import { cached } from "@/lib/catalog-cache";
-
-const IDENTITIES_TTL_MS = 60_000;
+import { getCatalog } from "@/lib/data/catalog";
 
 function hostOf(baseUrl: string): string {
   try {
@@ -31,30 +27,20 @@ export function brandNames(list: { name: string; baseUrl: string }[]): string[] 
 export type InternalIdentities = {
   /** ชื่อค่าย + host ของค่ายต้นทางทุกตัวที่ระบบรู้จัก */
   brands: string[];
-  /** id และชื่อ display ของโมเดลปลายทางจริง (ผู้ใชไม่เห็นชื่อนี้) */
+  /** id และชื่อ display ของโมเดลปลายทางจริง (ผู้ใช้ไม่เห็นชื่อนี้) */
   targets: string[];
 };
 
 /**
- * อ่านจากแคชก่อน — ถูกใช้ในทุก request ที่ล้มเหลว
- * อ่านไม่สำเร็จให้ถือว่าไม่มี (ห้ามทำให้การส่งข้อความให้ผู้ใช้พังตาม)
+ * รายชื่อข้อมูลภายในทั้งหมดของระบบ — อ่านจาก catalog snapshot (แคชอยู่แล้ว)
+ * ตอน DB ไม่พร้อม snapshot จะเป็นค่าว่าง และ maskInternals จะ fail closed
+ * (ส่งข้อความกลาง ๆ แทน ไม่ส่งข้อความดิบที่มียี่ห้อปนออกเด็ดขาด)
  */
-export function internalIdentities(): Promise<InternalIdentities> {
-  return cached("internal-identities", IDENTITIES_TTL_MS, () =>
-    loadIdentities().catch(() => ({ brands: [], targets: [] })),
-  );
-}
-
-async function loadIdentities(): Promise<InternalIdentities> {
-  const [providerRows, modelRows] = await Promise.all([
-    getDb().select({ name: providers.name, baseUrl: providers.baseUrl }).from(providers),
-    getDb()
-      .select({ modelId: models.modelId, displayName: models.displayName })
-      .from(models),
-  ]);
+export async function internalIdentities(): Promise<InternalIdentities> {
+  const catalog = await getCatalog();
   return {
-    brands: providerRows.flatMap((r) => [r.name, hostOf(r.baseUrl)]),
-    targets: modelRows.flatMap((r) => [r.modelId, r.displayName]),
+    brands: brandNames(catalog.providers),
+    targets: catalog.models.flatMap((m) => [m.modelId, m.displayName]),
   };
 }
 

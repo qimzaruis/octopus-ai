@@ -17,7 +17,7 @@ import {
   type UpstreamToolCall,
 } from "@/lib/gateway";
 import {
-  addFile,
+  addFiles,
   addMessage,
   getChatSettings,
   getConversation,
@@ -155,19 +155,38 @@ async function saveAssistantMessage(
   roomTitle: string,
 ): Promise<void> {
   try {
-    await addMessage({ conversationId, role: "assistant", content });
-    for (const a of extractHtmlArtifacts(content, roomTitle)) {
-      await addFile({
-        userId,
-        conversationId,
-        name: a.name,
-        kind: "html",
-        content: a.content,
-      });
-    }
+    // ข้อความกับ artifact ไม่ผูกกันด้วย FK → ส่งสอง request พร้อมกันแทนที่จะไล่รอ
+    await Promise.all([
+      addMessage({ conversationId, role: "assistant", content }),
+      addFiles(
+        extractHtmlArtifacts(content, roomTitle).map((a) => ({
+          userId,
+          conversationId,
+          name: a.name,
+          kind: "html",
+          content: a.content,
+        })),
+      ),
+    ]);
   } catch (err) {
     console.error("[agent] save assistant message failed:", err);
   }
+}
+
+/**
+ * ชื่อห้องจากข้อความแรกของผู้ใช้
+ *
+ * เดิมใช้ 60 ตัวอักษรแรกของข้อความตรง ๆ ใครวาง HTML/โค้ดทั้งไฟล์จึงได้ชื่อห้องเป็น
+ * "<!doctype html><html lang=..." ทั้งในรายการประวัติและบน header
+ * ตัดโค้ดกับแท็กออกก่อน แล้วเก็บเฉพาะข้อความที่อ่านเป็นประโยค
+ */
+function titleFrom(content: string, fallback: string): string {
+  const clean = content
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/<\/?[a-z][^>]*>/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return (clean || fallback).slice(0, 60) || "แชทใหม่";
 }
 
 function error(message: string, status: number) {
@@ -303,7 +322,7 @@ export async function POST(req: NextRequest) {
 
   if (isFirstRound) {
     const patch: { title?: string; model?: string } = { model };
-    if (!conversation.title) patch.title = (content || attachments[0]?.name || "แชทใหม่").slice(0, 60);
+    if (!conversation.title) patch.title = titleFrom(content, attachments[0]?.name ?? "");
     try {
       // คนละตาราง เขียนพร้อมกันได้เลย — เดิมรอต่อกัน 2 รอบ (~230ms) ก่อนที่โมเดลจะเริ่มตอบ
       await Promise.all([

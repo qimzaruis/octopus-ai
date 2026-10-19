@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { getModelRanking, getOverview, getUsage } from "@/lib/data/usage";
+import { getDashboardFacts } from "@/lib/data/usage";
+import { cycleStart, dayStart } from "@/lib/plans";
 import UsageChartCard from "@/components/UsageChartCard";
 import StatCard from "@/components/StatCard";
 import PageHeader from "@/components/PageHeader";
@@ -11,13 +12,13 @@ export const dynamic = "force-dynamic";
 
 export default async function AdminOverviewPage() {
   const t = await getT();
-  const [overview, hourly, d7, d30, ranking] = await Promise.all([
-    getOverview("all"),
-    getUsage("all", "hourly"),
-    getUsage("all", "7d"),
-    getUsage("all", "30d"),
-    getModelRanking("all", 50),
-  ]);
+  // สรุปทั้งระบบใน query เดียว (เดิม 5 คิวรี = 5 รอบไป Supabase)
+  const { overview, hourly, daily7: d7, daily30: d30, ranking } = await getDashboardFacts(
+    "all",
+    cycleStart(30),
+    dayStart(),
+    50,
+  );
 
   const maxTokens = Math.max(1, ...ranking.map((r) => r.totalTokens));
 

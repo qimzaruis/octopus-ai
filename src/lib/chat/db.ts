@@ -1,4 +1,4 @@
-import { createClient, type Client } from "@libsql/client";
+import { createClient, type Client, type InStatement } from "@libsql/client";
 import { cached, invalidateCache } from "@/lib/catalog-cache";
 
 /**
@@ -174,47 +174,66 @@ export async function listConversations(userId: string): Promise<ChatConversatio
   return res.rows.map((r) => rowToConversation(r as Record<string, unknown>));
 }
 
+/**
+ * อ่านห้องทั้งห้อง (ข้อความ + ไฟล์แนบ) ใน 1 รอบไป Turso
+ *
+ * เดิมไล่ query ไฟล์แนบทีละข้อความ = 1+N รอบ (วัดได้ ~107ms ต่อรอบบนเครื่องผู้ใช้
+ * แชท 17 ข้อความจึงค้างเกือบ 2 วินาทีทั้งที่ตารางแนบไฟล์ว่างเปล่า)
+ * batch() ส่งทั้งสองคำสั่งใน request เดียว และการ left join ทำให้จำนวนรอบคงที่
+ */
 export async function getConversation(
   userId: string,
   id: string,
 ): Promise<ChatConversationWithMessages | null> {
   await ensureChatSchema();
-  const db = getChatDb();
-  const conv = await db.execute({
-    sql: `select id, title, model, created_at, updated_at
-          from chat_conversations where id = ? and user_id = ? and deleted_at is null`,
-    args: [id, userId],
-  });
+  const rows = await getChatDb().batch([
+    {
+      sql: `select id, title, model, created_at, updated_at
+            from chat_conversations where id = ? and user_id = ? and deleted_at is null`,
+      args: [id, userId],
+    },
+    {
+      sql: `select m.id, m.role, m.content, m.created_at, a.name, a.mime, a.data_url
+            from chat_messages m
+            left join chat_attachments a on a.message_id = m.id
+            where m.conversation_id = ?
+            order by m.created_at, m.rowid, a.rowid`,
+      args: [id],
+    },
+  ]);
+
+  const conv = rows[0];
   if (conv.rows.length === 0) return null;
 
-  const msgRes = await db.execute({
-    sql: `select id, role, content, created_at
-          from chat_messages where conversation_id = ? order by created_at, rowid`,
-    args: [id],
-  });
-  const messages: ChatMessage[] = [];
-  for (const r of msgRes.rows) {
-    const m = r as Record<string, unknown>;
-    const att = await db.execute({
-      sql: `select name, mime, data_url from chat_attachments where message_id = ?`,
-      args: [String(m.id)],
-    });
-    messages.push({
-      id: String(m.id),
-      role: String(m.role) as ChatMessage["role"],
-      content: String(m.content ?? ""),
-      createdAt: String(m.created_at),
-      attachments: att.rows.map((a) => {
-        const row = a as Record<string, unknown>;
-        return {
-          name: String(row.name ?? ""),
-          mime: String(row.mime ?? ""),
-          dataUrl: String(row.data_url ?? ""),
-        };
-      }),
-    });
+  // จัดกลุ่มไฟล์แนบกลับเข้าข้อความเป็นลำดับเดิม (ข้อความเป็นตัวคุมลำดับ)
+  const byMessage = new Map<string, ChatMessage>();
+  for (const r of rows[1].rows) {
+    const row = r as Record<string, unknown>;
+    const msgId = String(row.id);
+    let m = byMessage.get(msgId);
+    if (!m) {
+      m = {
+        id: msgId,
+        role: String(row.role) as ChatMessage["role"],
+        content: String(row.content ?? ""),
+        createdAt: String(row.created_at),
+        attachments: [],
+      };
+      byMessage.set(msgId, m);
+    }
+    if (row.data_url != null) {
+      m.attachments.push({
+        name: String(row.name ?? ""),
+        mime: String(row.mime ?? ""),
+        dataUrl: String(row.data_url),
+      });
+    }
   }
-  return { ...rowToConversation(conv.rows[0] as Record<string, unknown>), messages };
+
+  return {
+    ...rowToConversation(conv.rows[0] as Record<string, unknown>),
+    messages: [...byMessage.values()],
+  };
 }
 
 export async function createConversation(input: {
@@ -296,14 +315,10 @@ export async function deleteMessagesFromIndex(conversationId: string, from: numb
   const ids = rows.rows.slice(Math.max(0, from)).map((r) => String((r as Record<string, unknown>).id));
   if (ids.length === 0) return 0;
   const marks = ids.map(() => "?").join(",");
-  await db.execute({
-    sql: `delete from chat_attachments where message_id in (${marks})`,
-    args: ids,
-  });
-  await db.execute({
-    sql: `delete from chat_messages where conversation_id = ? and id in (${marks})`,
-    args: [conversationId, ...ids],
-  });
+  await db.batch([
+    { sql: `delete from chat_attachments where message_id in (${marks})`, args: ids },
+    { sql: `delete from chat_messages where conversation_id = ? and id in (${marks})`, args: [conversationId, ...ids] },
+  ]);
   return ids.length;
 }
 
@@ -318,7 +333,6 @@ export async function addMessage(input: {
   attachments?: ChatAttachment[];
 }): Promise<ChatMessage> {
   await ensureChatSchema();
-  const db = getChatDb();
   const now = new Date().toISOString();
   const msg: ChatMessage = {
     id: crypto.randomUUID(),
@@ -327,22 +341,27 @@ export async function addMessage(input: {
     attachments: input.attachments ?? [],
     createdAt: now,
   };
-  await db.execute({
-    sql: `insert into chat_messages (id, conversation_id, role, content, created_at)
-          values (?, ?, ?, ?, ?)`,
-    args: [msg.id, input.conversationId, msg.role, msg.content, now],
-  });
+  // ข้อความ + ไฟล์แนบ + เลื่อน updated_at ของห้อง = request เดียว
+  // (เดิมไล่ส่งทีละคำสั่ง ห้องที่มีรูปแนบจึงจ่ายค่ารอบละ ~107ms ฟรี ๆ ก่อนโมเดลจะเริ่มตอบ)
+  const stmts: InStatement[] = [
+    {
+      sql: `insert into chat_messages (id, conversation_id, role, content, created_at)
+            values (?, ?, ?, ?, ?)`,
+      args: [msg.id, input.conversationId, msg.role, msg.content, now],
+    },
+  ];
   for (const a of msg.attachments) {
-    await db.execute({
+    stmts.push({
       sql: `insert into chat_attachments (id, message_id, name, mime, data_url)
             values (?, ?, ?, ?, ?)`,
       args: [crypto.randomUUID(), msg.id, a.name, a.mime, a.dataUrl],
     });
   }
-  await db.execute({
+  stmts.push({
     sql: `update chat_conversations set updated_at = ? where id = ?`,
     args: [now, input.conversationId],
   });
+  await getChatDb().batch(stmts);
   return msg;
 }
 
@@ -424,37 +443,58 @@ export async function addFile(input: {
   kind: string;
   content: string;
 }): Promise<ChatFile> {
+  const [file] = await addFiles([input]);
+  return file;
+}
+
+/** เก็บหลายไฟล์ใน request เดียว — โมเดลหนึ่งรอบเขียน artifact พร้อมกันหลายไฟล์ได้ */
+export async function addFiles(
+  list: {
+    userId: string;
+    conversationId?: string;
+    name: string;
+    kind: string;
+    content: string;
+  }[],
+): Promise<ChatFile[]> {
   await ensureChatSchema();
   const now = new Date().toISOString();
-  const file: ChatFile = {
-    id: crypto.randomUUID(),
-    conversationId: input.conversationId ?? "",
-    name: input.name,
-    kind: input.kind,
-    content: input.content,
-    sizeBytes: new TextEncoder().encode(input.content).length,
-    shareUrl: null,
-    shareExpiresAt: null,
-    createdAt: now,
-  };
-  await getChatDb().execute({
-    sql: `insert into chat_files
-            (id, user_id, conversation_id, name, kind, content, size_bytes, share_url, share_expires_at, created_at)
-          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    args: [
-      file.id,
-      input.userId,
-      file.conversationId,
-      file.name,
-      file.kind,
-      file.content,
-      file.sizeBytes,
-      null,
-      null,
-      now,
-    ],
-  });
-  return file;
+  const rows = list.map((input) => ({
+    file: {
+      id: crypto.randomUUID(),
+      conversationId: input.conversationId ?? "",
+      name: input.name,
+      kind: input.kind,
+      content: input.content,
+      sizeBytes: new TextEncoder().encode(input.content).length,
+      shareUrl: null as string | null,
+      shareExpiresAt: null as string | null,
+      createdAt: now,
+    } satisfies ChatFile,
+    userId: input.userId,
+  }));
+  if (rows.length > 0) {
+    await getChatDb().batch(
+      rows.map(({ file, userId }) => ({
+        sql: `insert into chat_files
+                (id, user_id, conversation_id, name, kind, content, size_bytes, share_url, share_expires_at, created_at)
+              values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          file.id,
+          userId,
+          file.conversationId,
+          file.name,
+          file.kind,
+          file.content,
+          file.sizeBytes,
+          null,
+          null,
+          file.createdAt,
+        ],
+      })),
+    );
+  }
+  return rows.map((r) => r.file);
 }
 
 export async function listFiles(userId: string): Promise<ChatFile[]> {

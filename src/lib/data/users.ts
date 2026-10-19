@@ -4,11 +4,11 @@ import { creditTransactions, users } from "@/db/schema";
 import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
 import { listPlans } from "@/lib/data/plans";
 import { getUserMetrics, type UserMetrics } from "@/lib/data/models";
-import { invalidateCache } from "@/lib/catalog-cache";
+import { invalidateSessionUser } from "@/lib/auth";
 
 /** getSessionUser แคช profile ไว้เพื่อความเร็ว — แก้ข้อมูลผู้ใช้เมื่อไหร่ต้องล้างของเก่า */
 function invalidateSessionCache(userId: string): void {
-  invalidateCache(`session:${userId}`);
+  invalidateSessionUser(userId);
 }
 
 export type AdminUserDTO = {
