@@ -368,44 +368,31 @@ export const appPages = {
   "ไม่พบผู้ใช้": "User not found",
   "ไม่พบคีย์นี้": "Key not found",
 
-  // ---------- หมวด / แอดมินโมเดล ----------
-  "หมวด / แบรนด์ของโมเดล (ชื่อ + รูป)": "Model categories / brands (name + image)",
-  "ชื่อและรูปของหมวดถูกใช้กับการ์ดนี้ด้วย":
-    "The category name and image are used for this route too",
-  "หมวด / แบรนด์": "Category / brand",
-  "— ไม่ระบุหมวด —": "— No category —",
+  // ---------- รูป / หมวด / แอดมินโมเดล ----------
   "ไม่ระบุหมวด": "Uncategorized",
   "อื่น ๆ": "Other",
-  "ชื่อหมวด": "Category name",
-  "รูปของหมวด": "Category image",
-  "รูปของหมวด {name}": "Image for {name}",
-  "รูปของหมวดใหม่": "New category image",
-  "ชื่อหมวดใหม่": "New category name",
   "— ไม่มีรูป —": "— No image —",
+  "— ไม่ใช้รูป —": "— No image —",
   "รูปเดิม": "Current image",
-  "เพิ่มหมวดใหม่": "Add a new category",
-  "เพิ่มหมวด": "Add category",
-  "ลบหมวดนี้": "Delete this category",
-  "ลบหมวด {name}? route ในหมวดนี้จะกลายเป็นไม่ระบุหมวด (รูปเดิมยังอยู่)":
-    "Delete the {name} category? Its routes become uncategorized (their current image stays)",
-  "ยังไม่มีหมวด — สร้างหมวดแรกด้านล่าง (ใส่ชื่อและเลือกรูปจากคลัง)":
-    "No categories yet — create the first one below (name + an image from the library)",
-  "ยังไม่มีรูปในคลัง — สร้างหมวดได้เลยแล้วค่อยกลับมาใส่รูปทีหลัง":
-    "No images in the library yet — you can create a category now and add its image later",
-  "คลังรูป — อัปโหลดครั้งเดียว ใช้ซ้ำได้ทุกหมวด":
-    "Image library — upload once, reuse in every category",
+  "รูปของ {name}": "Image for {name}",
+  "คลังรูป — ชื่อรูปคือชื่อหมวดของโมเดล":
+    "Image library — the image name is the model category",
+  "ชื่อรูป / ชื่อหมวด": "Image / category name",
+  "ชื่อรูปจะถูกใช้เป็นชื่อหมวดของโมเดลอัตโนมัติ — ไม่ต้องสร้างหมวดแยก":
+    "The image name becomes the model category automatically — no separate category needed",
+  "ชื่อรูปจะกลายเป็นชื่อหมวดของโมเดลนี้":
+    "The image name becomes this model's category",
+  "รูป / หมวด": "Image / category",
   "เช่น Claude": "e.g. Claude",
-  "เช่น Claude, DeepSeek": "e.g. Claude, DeepSeek",
   "{n} หมวด": "{n} categories",
-  "{n} route ในหมวดนี้": "{n} routes in this category",
   "{n} ปลายทาง": "{n} targets",
   "{n} route": "{n} routes",
   "สร้างโมเดล / Route ใหม่": "Create a model / route",
-  "สร้างหมวดใหม่พร้อม route นี้": "Create a new category with this route",
-  "ถ้ากรอกชื่อหมวดใหม่ ระบบจะใช้หมวดใหม่นี้แทนหมวดที่เลือกด้านบน":
-    "If you enter a new category name, it is used instead of the category selected above",
   "ชื่อที่ผู้ใช้เห็น": "Display name",
+  "id ที่ใช้เรียก": "Callable id",
   "id ที่ใช้เรียก *": "Callable id *",
+  "เปลี่ยนแล้วไคลเอนต์ที่เรียก id เดิมจะใช้ไม่ได้":
+    "Clients still calling the old id will stop working",
   "ว่าง = ตั้งชื่อจาก id ให้อัตโนมัติ": "Leave empty to derive it from the id",
   "โมเดลปลายทางตัวแรก": "First target model",
   "— ยังไม่เพิ่มโมเดล —": "— No target yet —",
@@ -419,11 +406,10 @@ export const appPages = {
   "ราคา In / Out": "Price In / Out",
   "ราคา input": "Input price",
   "ราคา output": "Output price",
-  "หมวดของ {name}": "Category for {name}",
   "เช่น Claude Haiku 5.5": "e.g. Claude Haiku 5.5",
   "เช่น claude-haiku-5-5": "e.g. claude-haiku-5-5",
-  "แต่ละรายการคือโมเดลที่ผู้ใช้เรียกได้ — ตั้งชื่อ id หมวด/แบรนด์ ราคา และลําดับ fallback ได้จากที่นี่":
-    "Each entry is a model users can call — set its name, id, category/brand, price and fallback order here",
+  "แต่ละรายการคือโมเดลที่ผู้ใช้เรียกได้ — ตั้งชื่อ id รูป/หมวด ราคา และลําดับ fallback ได้จากที่นี่":
+    "Each entry is a model users can call — set its name, id, image/category, price and fallback order here",
 
   // ---------- โมเดลที่ใช้ได้ (หน้า /models) ----------
   "คัดลอก": "Copy",
@@ -435,6 +421,28 @@ export const appPages = {
   "ต้องใช้แผน {plan} ขึ้นไป": "Requires {plan} plan or higher",
   "โมเดลปลายทางที่พร้อมให้บริการ ({n})": "Target models available ({n})",
   "หลัก": "Primary",
+  "ค้นหาและกรองโมเดลที่บัญชีของคุณเรียกใช้ได้ พร้อมราคา uptime และ tokens ที่ใช้ไป":
+    "Search and filter the models your account can call, with pricing, uptime and total tokens",
+  "ค้นหาโมเดล, id หรือหมวด...": "Search models, id or category...",
+  "ค้นหาโมเดล": "Search models",
+  "ล้างคำค้นหา": "Clear search",
+  "เรียงตาม": "Sort by",
+  "ความนิยม (tokens รวม)": "Popularity (total tokens)",
+  "ชื่อโมเดล": "Model name",
+  "ราคาต่ำ → สูง": "Price low → high",
+  "uptime สูงสุด": "Highest uptime",
+  "ราคา": "Price",
+  "กรองตามราคา": "Filter by price",
+  "ฟรี": "Free",
+  "แสดง {n} จาก {total} โมเดล": "Showing {n} of {total} models",
+  "ไม่พบโมเดลที่ตรงกับตัวกรอง": "No models match these filters",
+  "ลองเปลี่ยนคำค้นหา หมวด หรือช่วงราคา":
+    "Try a different search, category or price range",
+  "ยังไม่มี request วันนี้": "No requests today yet",
+  "uptime วันนี้ · {n} requests": "Uptime today · {n} requests",
+  "uptime —": "uptime —",
+  "{n} tokens รวมทุกผู้ใช้ · {r} requests": "{n} tokens across all users · {r} requests",
+  "ดูรายละเอียด {name}": "View details for {name}",
 
   // ---------- โควต้า USD ----------
   "รอบ {d} วันนี้ · เทียบโควต้าของแผน (USD)": "This {d}-day cycle · vs. plan quota (USD)",

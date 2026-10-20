@@ -1,7 +1,8 @@
 import { asc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { models, planModels, plans as plansTable, routeCategories, routes } from "@/db/schema";
+import { planModels, plans as plansTable, routes } from "@/db/schema";
 import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
+import { resolveCategoryForAsset } from "@/lib/data/categories";
 import { DEFAULT_PLANS, CYCLE_DAY_OPTIONS, type Plan } from "@/lib/plans";
 import { getCatalog, type Catalog } from "@/lib/data/catalog";
 
@@ -84,16 +85,18 @@ export async function updatePlan(input: {
   return { ok: true };
 }
 
-/** บันทึกข้อมูลของ route (โหมดแสดงผล ชื่อ ราคา หมวด/โลโก้) */
+/** บันทึกข้อมูลของ route (id ที่ใช้เรียก ชื่อ โหมด ราคา รูป/หมวด) */
 export async function updateRouteSettings(input: {
   id: number;
+  publicModel: string;
   displayMode: string;
   displayName: string;
-  categoryId: number | null;
+  logoUrl: string | null;
   inputPricePerM: number;
   outputPricePerM: number;
 }): Promise<ActionResult> {
-  const mode = input.displayMode === "model" ? "model" : "router";
+  const publicModel = input.publicModel.trim().toLowerCase().replace(/\s+/g, "-");
+  if (!publicModel) return { ok: false, error: "กรอก id ที่ใช้เรียกก่อนบันทึก" };
   if (!Number.isFinite(input.inputPricePerM) || input.inputPricePerM < 0) {
     return { ok: false, error: "ราคา input ต้องไม่ติดลบ" };
   }
@@ -104,25 +107,31 @@ export async function updateRouteSettings(input: {
   if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
 
   const db = getDb();
-  const categoryId =
-    Number.isFinite(input.categoryId) && input.categoryId ? input.categoryId : null;
-  const category = categoryId
-    ? (await db.select().from(routeCategories).where(eq(routeCategories.id, categoryId)))[0]
-    : null;
-  if (categoryId && !category) return { ok: false, error: "ไม่พบหมวดที่เลือก" };
+  const logoUrl = input.logoUrl?.trim() || null;
+  const category = await resolveCategoryForAsset(logoUrl);
+  if (logoUrl && !category) return { ok: false, error: "ไม่พบรูปที่เลือก — อัปโหลดเข้าคลังก่อน" };
 
-  await db
-    .update(routes)
-    .set({
-      displayMode: mode,
-      displayName: input.displayName.trim(),
-      categoryId: category?.id ?? null,
-      // รูปของ route มาจากหมวดเสมอ — ไม่มีหมวดก็ไม่มีรูป
-      logoUrl: category?.logoUrl ?? null,
-      inputPricePerM: input.inputPricePerM,
-      outputPricePerM: input.outputPricePerM,
-    })
-    .where(eq(routes.id, input.id));
+  try {
+    await db
+      .update(routes)
+      .set({
+        publicModel,
+        displayMode: input.displayMode === "model" ? "model" : "router",
+        displayName: input.displayName.trim(),
+        categoryId: category?.id ?? null,
+        logoUrl: category?.logoUrl ?? null,
+        inputPricePerM: input.inputPricePerM,
+        outputPricePerM: input.outputPricePerM,
+      })
+      .where(eq(routes.id, input.id));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    if (/duplicate|unique|23505/i.test(msg)) {
+      return { ok: false, error: "มี id ของโมเดลนี้แล้ว" };
+    }
+    console.error("[routes] บันทึกการตั้งค่าไม่สำเร็จ:", err);
+    return { ok: false, error: "บันทึกไม่สำเร็จ" };
+  }
   return { ok: true };
 }
 

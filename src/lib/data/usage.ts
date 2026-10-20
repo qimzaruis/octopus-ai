@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
+import { cached } from "@/lib/catalog-cache";
 import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
 import { withDbRetry } from "@/lib/db-retry";
 import { bangkokDay, ensureUptimeColumns } from "@/lib/gateway";
@@ -637,7 +638,7 @@ async function getPublicModelUsageReal(
     select
       public_model,
       count(*)::int as requests,
-      coalesce(sum(input_tokens + output_tokens), 0)::int as tokens,
+      coalesce(sum(input_tokens + output_tokens), 0)::bigint as tokens,
       coalesce(sum(cost_usd), 0)::float8 as cost
     from requests
     ${userFilter}
@@ -654,15 +655,26 @@ async function getPublicModelUsageReal(
   return map;
 }
 
+const lastGoodPublicUsage = new Map<
+  string,
+  Map<string, { requests: number; tokens: number; costUsd: number }>
+>();
+
 export async function getPublicModelUsage(
   scope: Scope,
 ): Promise<Map<string, { requests: number; tokens: number; costUsd: number }>> {
-  if (isDbUnavailable()) return new Map();
+  const snapshot = lastGoodPublicUsage.get(scope);
+  if (isDbUnavailable() && snapshot) return snapshot;
   try {
-    return await getPublicModelUsageReal(scope);
+    // หน้า /models เปิดบ่อยแต่ยอดรวมเปลี่ยนช้า — แคชสั้น ๆ พอ
+    const value = await cached(`public-usage:${scope}`, 30_000, () =>
+      getPublicModelUsageReal(scope),
+    );
+    lastGoodPublicUsage.set(scope, value);
+    return value;
   } catch (err) {
     markDbUnavailable(err);
-    return new Map();
+    return snapshot ?? new Map();
   }
 }
 

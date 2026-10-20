@@ -16,6 +16,7 @@ import { getDb } from "@/db";
 import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
 import { cached } from "@/lib/catalog-cache";
 import { withDbRetry } from "@/lib/db-retry";
+import { categoryRank } from "@/lib/categories";
 
 export const CATALOG_TTL_MS = 60_000;
 
@@ -40,6 +41,12 @@ export type CatalogModel = {
   inputPricePerM: number;
   outputPricePerM: number;
   logoUrl: string | null;
+  /** สถิติวันนี้ของโมเดลปลายทาง (ใช้รวมเป็น uptime ของ route) */
+  uptimeDay: string | null;
+  uptime: number;
+  uptimeRequests: number;
+  uptimeOk: number;
+  uptimeTokens: number;
 };
 
 export type CatalogCategory = {
@@ -141,6 +148,14 @@ function normalize(row: Record<string, unknown>): Catalog {
       inputPricePerM: n(m.input_price_per_m ?? m.inputPricePerM),
       outputPricePerM: n(m.output_price_per_m ?? m.outputPricePerM),
       logoUrl: m.logo_url == null && m.logoUrl == null ? null : s(m.logo_url ?? m.logoUrl),
+      uptimeDay:
+        m.uptime_day == null && m.uptimeDay == null
+          ? null
+          : s(m.uptime_day ?? m.uptimeDay).slice(0, 10),
+      uptime: n(m.uptime),
+      uptimeRequests: n(m.uptime_requests ?? m.uptimeRequests),
+      uptimeOk: n(m.uptime_ok ?? m.uptimeOk),
+      uptimeTokens: n(m.uptime_tokens ?? m.uptimeTokens),
     })),
     categories: arr(row.route_categories ?? row.categories)
       .map((c) => ({
@@ -149,7 +164,12 @@ function normalize(row: Record<string, unknown>): Catalog {
         logoUrl: c.logo_url == null && c.logoUrl == null ? null : s(c.logo_url ?? c.logoUrl),
         sortOrder: n(c.sort_order ?? c.sortOrder),
       }))
-      .sort((a, b2) => a.sortOrder - b2.sortOrder || a.id - b2.id),
+      .sort(
+        (a, b2) =>
+          categoryRank(a.name) - categoryRank(b2.name) ||
+          a.sortOrder - b2.sortOrder ||
+          a.id - b2.id,
+      ),
     routes: arr(row.routes)
       .map((r) => ({
         id: n(r.id),

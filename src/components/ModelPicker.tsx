@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { useT } from "@/lib/i18n/client";
 import Icon from "@/components/Icon";
+import { categoryRank } from "@/lib/categories";
 
 /** หมวด/แบรนด์ของโมเดล (ชื่อ + รูป) — ใช้จัดกลุ่มในเมนู */
 export type AgentModelCategory = {
@@ -59,32 +60,15 @@ type ModelGroup = {
   models: AgentModel[];
 };
 
-function groupModels(models: AgentModel[]): ModelGroup[] {
-  const groups: ModelGroup[] = [];
-  const byKey = new Map<string, ModelGroup>();
-  for (const model of models) {
-    const key = model.category ? `cat-${model.category.id}` : "none";
-    let group = byKey.get(key);
-    if (!group) {
-      group = {
-        key,
-        name: model.category?.name ?? "",
-        logoUrl: model.category?.logoUrl ?? null,
-        models: [],
-      };
-      byKey.set(key, group);
-      groups.push(group);
-    }
-    group.models.push(model);
-  }
-  return groups;
+function categoryKey(model: AgentModel): string {
+  return model.category ? `cat-${model.category.id}` : "none";
 }
 
 /**
  * ตัวเลือกโมเดล — ชิปที่กางเมนูขึ้นข้างบน
  *
- * ใช้เมนูของตัวเองแทน <select> เพราะ native dropdown มีพื้นขาวของระบบ
- * ไม่เข้ากับธีมและคุมหน้าตาไม่ได้
+ * ในเมนูแสดงเป็นลิสต์จัดกลุ่ม: ชื่อหมวดเล็ก ๆ อยู่ด้านบน แล้วมีโมเดลอยู่ใต้หมวด
+ * ไม่มี dropdown/chevron ให้กดย่ออีก และหมวดของ OctopusAI อยู่บนสุดเสมอ
  */
 export function ModelPicker({
   models,
@@ -102,10 +86,29 @@ export function ModelPicker({
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const current = models.find((m) => m.id === value) ?? models[0];
-  const groups = groupModels(models);
-  const hasGroups = groups.length > 1 || Boolean(groups[0]?.name);
+
+  const groups = useMemo(() => {
+    const byKey = new Map<string, ModelGroup>();
+    for (const model of models) {
+      const key = categoryKey(model);
+      const existing = byKey.get(key);
+      if (existing) existing.models.push(model);
+      else
+        byKey.set(key, {
+          key,
+          name: model.category?.name ?? "",
+          logoUrl: model.category?.logoUrl ?? null,
+          models: [model],
+        });
+    }
+    return [...byKey.values()].sort((a, b) => {
+      // ไม่มีหมวดไปท้ายสุด
+      if (!a.name) return 1;
+      if (!b.name) return -1;
+      return categoryRank(a.name) - categoryRank(b.name) || a.name.localeCompare(b.name, "th");
+    });
+  }, [models]);
 
   // คีย์บอร์ดปิดเมนูได้ด้วย Escape (เดิม Tab ออกไปแล้วเมนูยังค้าง)
   useEffect(() => {
@@ -117,26 +120,9 @@ export function ModelPicker({
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
 
-  /** เปิดเมนู: กางเฉพาะหมวดของโมเดลที่เลือกอยู่ หมวดอื่นพับไว้ให้รายการสั้น */
-  function toggleMenu() {
-    if (!open) {
-      const currentGroup = groups.find((g) => g.models.some((m) => m.id === current?.id))?.key;
-      setCollapsed(new Set(groups.filter((g) => g.key !== currentGroup).map((g) => g.key)));
-    }
-    setOpen((v) => !v);
-  }
-
-  function toggleGroup(key: string) {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
-
   function renderModel(m: AgentModel) {
     const selected = m.id === value;
+    const sub = m.description ? t(m.description) : "";
     return (
       <button
         key={m.id}
@@ -154,13 +140,9 @@ export function ModelPicker({
         <ModelLogo model={m} className="h-7 w-7 rounded-md" />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-caption font-medium text-fg">{m.label}</span>
-          {m.description && (
-            <span className="block truncate text-label text-fg-subtle">{t(m.description)}</span>
-          )}
+          {sub && <span className="block truncate text-label text-fg-subtle">{sub}</span>}
         </span>
-        {selected && (
-          <Icon name="fa-check" className="shrink-0 text-body-sm text-brand-300" />
-        )}
+        {selected && <Icon name="fa-check" className="shrink-0 text-body-sm text-brand-300" />}
       </button>
     );
   }
@@ -169,7 +151,7 @@ export function ModelPicker({
     <div className="relative">
       <button
         type="button"
-        onClick={toggleMenu}
+        onClick={() => setOpen((v) => !v)}
         disabled={models.length === 0}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -203,46 +185,29 @@ export function ModelPicker({
             <p className="px-2.5 pb-1.5 pt-1 text-micro font-semibold uppercase tracking-[0.14em] text-fg-subtle">
               {t("โมเดลที่ใช้ได้")}
             </p>
-            {hasGroups
-              ? groups.map((group) => {
-                  const isCollapsed = collapsed.has(group.key);
-                  return (
-                    <div key={group.key} className="mb-0.5 last:mb-0">
-                      <button
-                        type="button"
-                        onClick={() => toggleGroup(group.key)}
-                        aria-expanded={!isCollapsed}
-                        className="touch-min flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors duration-fast hover:bg-white/[0.04]"
-                      >
-                        {group.logoUrl ? (
-                          <Image
-                            src={group.logoUrl}
-                            alt=""
-                            width={18}
-                            height={18}
-                            className="h-[1.125rem] w-[1.125rem] shrink-0 object-contain"
-                          />
-                        ) : (
-                          <Icon name="fa-layer-group" className="shrink-0 text-micro text-fg-subtle" />
-                        )}
-                        <span className="min-w-0 flex-1 truncate text-label font-semibold text-fg-muted">
-                          {group.name || t("อื่น ๆ")}
-                        </span>
-                        <span className="shrink-0 text-micro text-fg-subtle">
-                          {group.models.length}
-                        </span>
-                        <Icon
-                          name="fa-chevron-down"
-                          className={`shrink-0 text-micro text-fg-subtle transition-transform duration-fast ${
-                            isCollapsed ? "-rotate-90" : ""
-                          }`}
-                        />
-                      </button>
-                      {!isCollapsed && <div className="pb-1">{group.models.map(renderModel)}</div>}
-                    </div>
-                  );
-                })
-              : models.map(renderModel)}
+
+            {/* ชื่อหมวดเล็ก ๆ ด้านบนของแต่ละกลุ่ม แล้วมีโมเดลอยู่ใต้หมวด */}
+            <div className="pb-1">
+              {groups.map((group) => (
+                <div key={group.key}>
+                  <div className="flex items-center gap-1.5 px-2.5 pb-0.5 pt-2 text-micro font-semibold uppercase tracking-[0.12em] text-fg-subtle">
+                    {group.logoUrl && (
+                      <Image
+                        src={group.logoUrl}
+                        alt=""
+                        width={14}
+                        height={14}
+                        className="h-3.5 w-3.5 shrink-0 rounded object-contain"
+                      />
+                    )}
+                    <span className="truncate">{group.name || t("อื่น ๆ")}</span>
+                  </div>
+                  <div className="ml-3 border-l border-white/[0.07] pl-1">
+                    {group.models.map(renderModel)}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </>
       )}

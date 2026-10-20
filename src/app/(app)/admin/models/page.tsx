@@ -3,11 +3,9 @@ import {
   addRouteTargetAction,
   deleteAssetAction,
   deleteRouteAction,
-  deleteRouteCategoryAction,
   moveRouteTargetAction,
   removeRouteTargetAction,
   saveRouteAction,
-  saveRouteCategoryAction,
   toggleRouteAction,
   toggleRouteTargetAction,
   updateRouteSettingsAction,
@@ -34,8 +32,9 @@ export const dynamic = "force-dynamic";
 /**
  * หน้า "โมเดลที่แสดง" = routing + หมวด/แบรนด์
  *
- * route 1 รายการ = "โมเดล" ที่ผู้ใช้เห็นและเรียกใช้ — ตั้งชื่อ, id, หมวด (ชื่อ+รูป),
+ * route 1 รายการ = "โมเดล" ที่ผู้ใช้เห็นและเรียกใช้ — ตั้งชื่อ, id, รูป/หมวด,
  * ราคา, โหมดแสดงผล และลําดับ fallback ได้จากที่นี่
+ * หมวดมาจากชื่อรูปในคลังอัตโนมัติ ไม่ต้องสร้างหมวดแยก
  * การ์ด route ถูกย่อไว้ก่อน กดหัวการ์ดเพื่อกางตั้งค่า — หน้าไม่ยาวจนหาอะไรไม่เจอ
  */
 export default async function AdminModelsPage({
@@ -65,10 +64,6 @@ export default async function AdminModelsPage({
     .filter((g) => g.models.length > 0);
 
   const categoryById = new Map(categories.map((c) => [c.id, c]));
-  const routeCount = new Map<number, number>();
-  for (const r of routes) {
-    if (r.categoryId) routeCount.set(r.categoryId, (routeCount.get(r.categoryId) ?? 0) + 1);
-  }
 
   const activeRoutes = routes.filter((r) => r.enabled).length;
 
@@ -91,7 +86,7 @@ export default async function AdminModelsPage({
       <PageHeader
         title={t("โมเดลที่แสดง")}
         description={t(
-          "แต่ละรายการคือโมเดลที่ผู้ใช้เรียกได้ — ตั้งชื่อ id หมวด/แบรนด์ ราคา และลําดับ fallback ได้จากที่นี่",
+          "แต่ละรายการคือโมเดลที่ผู้ใช้เรียกได้ — ตั้งชื่อ id รูป/หมวด ราคา และลําดับ fallback ได้จากที่นี่",
         )}
         actions={
           <div className="flex flex-wrap items-center gap-2">
@@ -122,7 +117,7 @@ export default async function AdminModelsPage({
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-aqua/15 text-aqua">
               <Icon name="fa-image" />
             </span>
-            {t("คลังรูป — อัปโหลดครั้งเดียว ใช้ซ้ำได้ทุกหมวด")}
+            {t("คลังรูป — ชื่อรูปคือชื่อหมวดของโมเดล")}
           </span>
           <span className="flex items-center gap-3">
             <span className="shrink-0 whitespace-nowrap rounded-lg bg-white/5 px-2.5 py-1 text-label text-fg-muted">
@@ -144,13 +139,13 @@ export default async function AdminModelsPage({
                   key={a.id}
                   className="flex items-center gap-3 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3"
                 >
-                  <span className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-lg bg-white/5 p-1">
+                  <span className="h-10 w-10 shrink-0 overflow-hidden rounded-lg">
                     <Image
                       src={a.publicUrl}
                       alt={a.name}
                       width={40}
                       height={40}
-                      className="h-full w-full object-contain"
+                      className="h-full w-full rounded-lg object-contain"
                     />
                   </span>
                   <div className="min-w-0">
@@ -176,7 +171,7 @@ export default async function AdminModelsPage({
             className="flex flex-col gap-3 rounded-xl border border-dashed border-white/[0.07] p-4 sm:flex-row sm:items-end"
           >
             <label className="flex-1 text-xs text-fg-subtle">
-              {t("ชื่อรูป (ไว้เลือกใช้)")}
+              {t("ชื่อรูป / ชื่อหมวด")}
               <input
                 name="name"
                 className="input mt-1.5"
@@ -198,149 +193,10 @@ export default async function AdminModelsPage({
               <Icon name="fa-upload" /> {t("อัปโหลดเข้าคลัง")}
             </button>
           </form>
-        </div>
-      </details>
-
-      {/* หมวด / แบรนด์ — ตั้งชื่อและรูปคู่กัน เพราะเป็นเจ้าของโมเดลรายเดียวกัน */}
-      <details className="card group">
-        <summary className="flex cursor-pointer select-none items-center justify-between px-5 py-4 [&::-webkit-details-marker]:hidden">
-          <span className="flex items-center gap-3 font-semibold text-fg">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500/15 text-brand-300">
-              <Icon name="fa-layer-group" />
-            </span>
-            {t("หมวด / แบรนด์ของโมเดล (ชื่อ + รูป)")}
-          </span>
-          <span className="flex items-center gap-3">
-            <span className="shrink-0 whitespace-nowrap rounded-lg bg-white/5 px-2.5 py-1 text-label text-fg-muted">
-              {t("{n} หมวด", { n: categories.length })}
-            </span>
-            <Icon name="fa-chevron-down" className="text-xs text-fg-subtle transition-transform group-open:rotate-180" />
-          </span>
-        </summary>
-
-        <div className="space-y-4 border-t border-white/[0.07] p-5">
-          {categories.length > 0 && (
-            <ul className="grid gap-2.5 lg:grid-cols-2">
-              {categories.map((cat) => {
-                const logoInAssets = cat.logoUrl
-                  ? assets.some((a) => a.publicUrl === cat.logoUrl)
-                  : false;
-                return (
-                  <li key={cat.id}>
-                    <details className="group/cat rounded-xl border border-white/[0.07] bg-white/[0.02]">
-                      <summary className="flex cursor-pointer select-none items-center gap-3 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
-                        <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/5 p-1 text-fg-subtle">
-                          {cat.logoUrl ? (
-                            <Image
-                              src={cat.logoUrl}
-                              alt=""
-                              width={36}
-                              height={36}
-                              className="h-full w-full object-contain"
-                            />
-                          ) : (
-                            <Icon name="fa-layer-group" />
-                          )}
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm font-medium text-fg">{cat.name}</span>
-                          <span className="block text-label text-fg-subtle">
-                            {t("{n} route ในหมวดนี้", { n: routeCount.get(cat.id) ?? 0 })}
-                          </span>
-                        </span>
-                        <Icon
-                          name="fa-chevron-down"
-                          className="text-xs text-fg-subtle transition-transform group-open/cat:rotate-180"
-                        />
-                      </summary>
-                      <div className="space-y-3 border-t border-white/[0.07] p-3">
-                        <form
-                          action={saveRouteCategoryAction}
-                          className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
-                        >
-                          <input type="hidden" name="id" value={cat.id} />
-                          <label className="text-xs text-fg-subtle">
-                            {t("ชื่อหมวด")}
-                            <input name="name" defaultValue={cat.name} className="input mt-1.5" required />
-                          </label>
-                          <label className="text-xs text-fg-subtle">
-                            {t("รูปของหมวด")}
-                            <select
-                              name="logoUrl"
-                              defaultValue={cat.logoUrl ?? ""}
-                              className="input mt-1.5"
-                              aria-label={t("รูปของหมวด {name}", { name: cat.name })}
-                            >
-                              <option value="">{t("— ไม่มีรูป —")}</option>
-                              {cat.logoUrl && !logoInAssets && (
-                                <option value={cat.logoUrl}>{t("รูปเดิม")}</option>
-                              )}
-                              {assets.map((a) => (
-                                <option key={a.id} value={a.publicUrl}>
-                                  {a.name}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                          <button type="submit" className="btn-ghost !py-2.5 whitespace-nowrap">
-                            <Icon name="fa-floppy-disk" /> {t("บันทึก")}
-                          </button>
-                        </form>
-                        <form action={deleteRouteCategoryAction} className="flex justify-end">
-                          <input type="hidden" name="id" value={cat.id} />
-                          <ConfirmButton
-                            message={t(
-                              "ลบหมวด {name}? route ในหมวดนี้จะกลายเป็นไม่ระบุหมวด (รูปเดิมยังอยู่)",
-                              { name: cat.name },
-                            )}
-                            className="rounded-lg border border-white/[0.07] bg-white/5 px-2.5 py-1.5 text-label text-fg-muted transition hover:text-rose-400"
-                          >
-                            <Icon name="fa-trash-can" /> {t("ลบหมวดนี้")}
-                          </ConfirmButton>
-                        </form>
-                      </div>
-                    </details>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-
-          {categories.length === 0 && (
-            <p className="rounded-xl border border-dashed border-white/[0.07] px-4 py-6 text-center text-xs text-fg-subtle">
-              {t("ยังไม่มีหมวด — สร้างหมวดแรกด้านล่าง (ใส่ชื่อและเลือกรูปจากคลัง)")}
-            </p>
-          )}
-
-          <form
-            action={saveRouteCategoryAction}
-            className="grid gap-3 rounded-xl border border-dashed border-white/[0.07] p-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
-          >
-            <label className="text-xs text-fg-subtle">
-              {t("เพิ่มหมวดใหม่")}
-              <input name="name" className="input mt-1.5" placeholder={t("เช่น Claude, DeepSeek")} required />
-            </label>
-            <label className="text-xs text-fg-subtle">
-              {t("รูปของหมวด")}
-              <select name="logoUrl" className="input mt-1.5" defaultValue="">
-                <option value="">{t("— ไม่มีรูป —")}</option>
-                {assets.map((a) => (
-                  <option key={a.id} value={a.publicUrl}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button type="submit" className="btn-primary !py-2.5 whitespace-nowrap">
-              <Icon name="fa-plus" /> {t("เพิ่มหมวด")}
-            </button>
-          </form>
-          {assets.length === 0 && (
-            <p className="text-label text-fg-subtle">
-              <Icon name="fa-circle-info" className="mr-1.5" />
-              {t("ยังไม่มีรูปในคลัง — สร้างหมวดได้เลยแล้วค่อยกลับมาใส่รูปทีหลัง")}
-            </p>
-          )}
+          <p className="text-label text-fg-subtle">
+            <Icon name="fa-circle-info" className="mr-1.5" />
+            {t("ชื่อรูปจะถูกใช้เป็นชื่อหมวดของโมเดลอัตโนมัติ — ไม่ต้องสร้างหมวดแยก")}
+          </p>
         </div>
       </details>
 
@@ -385,17 +241,17 @@ export default async function AdminModelsPage({
 
           <div className="grid gap-4 sm:grid-cols-3">
             <div>
-              <label className="label">{t("หมวด / แบรนด์")}</label>
-              <select name="categoryId" className="input" defaultValue="">
-                <option value="">{t("— ไม่ระบุหมวด —")}</option>
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
+              <label className="label">{t("รูป / หมวด")}</label>
+              <select name="logoUrl" className="input" defaultValue="">
+                <option value="">{t("— ไม่ใช้รูป —")}</option>
+                {assets.map((a) => (
+                  <option key={a.id} value={a.publicUrl}>
+                    {a.name}
                   </option>
                 ))}
               </select>
               <p className="mt-1.5 text-label text-fg-subtle">
-                {t("ชื่อและรูปของหมวดถูกใช้กับการ์ดนี้ด้วย")}
+                {t("ชื่อรูปจะกลายเป็นชื่อหมวดของโมเดลนี้")}
               </p>
             </div>
             <div>
@@ -459,37 +315,6 @@ export default async function AdminModelsPage({
             </div>
           </div>
 
-          <details className="rounded-xl border border-dashed border-white/[0.07] p-4">
-            <summary className="flex cursor-pointer select-none items-center gap-2 text-xs font-medium text-fg-muted [&::-webkit-details-marker]:hidden">
-              <Icon name="fa-plus" className="text-micro" />
-              {t("สร้างหมวดใหม่พร้อม route นี้")}
-            </summary>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <label className="text-xs text-fg-subtle">
-                {t("ชื่อหมวดใหม่")}
-                <input
-                  name="newCategoryName"
-                  className="input mt-1.5"
-                  placeholder={t("เช่น Claude")}
-                />
-              </label>
-              <label className="text-xs text-fg-subtle">
-                {t("รูปของหมวดใหม่")}
-                <select name="newCategoryLogoUrl" className="input mt-1.5" defaultValue="">
-                  <option value="">{t("— ไม่มีรูป —")}</option>
-                  {assets.map((a) => (
-                    <option key={a.id} value={a.publicUrl}>
-                      {a.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <p className="mt-2 text-label text-fg-subtle">
-              {t("ถ้ากรอกชื่อหมวดใหม่ ระบบจะใช้หมวดใหม่นี้แทนหมวดที่เลือกด้านบน")}
-            </p>
-          </details>
-
           <div className="flex justify-end">
             <button type="submit" className="btn-primary">
               <Icon name="fa-plus" /> {t("สร้าง Route")}
@@ -513,19 +338,21 @@ export default async function AdminModelsPage({
       {groups.map((group) => (
         <section key={group.key} className="space-y-2.5">
           <div className="flex items-center gap-2.5 px-1">
-            <span className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-lg bg-white/[0.05] p-1 text-fg-subtle">
-              {group.category?.logoUrl ? (
+            {group.category?.logoUrl ? (
+              <span className="h-7 w-7 shrink-0 overflow-hidden rounded-lg">
                 <Image
                   src={group.category.logoUrl}
                   alt=""
                   width={28}
                   height={28}
-                  className="h-full w-full object-contain"
+                  className="h-full w-full rounded-lg object-contain"
                 />
-              ) : (
+              </span>
+            ) : (
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/[0.05] text-fg-subtle">
                 <Icon name="fa-layer-group" className="text-micro" />
-              )}
-            </span>
+              </span>
+            )}
             <h2 className="text-sm font-semibold text-fg">
               {group.category?.name ?? t("ไม่ระบุหมวด")}
             </h2>
@@ -553,19 +380,21 @@ export default async function AdminModelsPage({
                 key={route.id}
                 header={
                   <>
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-aqua/15 p-1 text-aqua">
-                      {logoUrl ? (
+                    {logoUrl ? (
+                      <span className="h-10 w-10 shrink-0 overflow-hidden rounded-xl">
                         <Image
                           src={logoUrl}
                           alt=""
                           width={40}
                           height={40}
-                          className="h-full w-full object-contain"
+                          className="h-full w-full rounded-xl object-contain"
                         />
-                      ) : (
+                      </span>
+                    ) : (
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-aqua/15 text-aqua">
                         <Icon name="fa-route" />
-                      )}
-                    </span>
+                      </span>
+                    )}
                     <span className="min-w-0">
                       <span className="flex flex-wrap items-center gap-2 font-semibold text-fg">
                         {route.displayName || route.publicModel}
@@ -621,7 +450,7 @@ export default async function AdminModelsPage({
                   >
                     <input type="hidden" name="id" value={route.id} />
 
-                    <div className="lg:col-span-3">
+                    <div className="lg:col-span-4">
                       <label className="label">{t("ชื่อที่ผู้ใช้เห็น")}</label>
                       <input
                         name="displayName"
@@ -631,24 +460,40 @@ export default async function AdminModelsPage({
                       />
                     </div>
 
-                    <div className="lg:col-span-3">
-                      <label className="label">{t("หมวด / แบรนด์")}</label>
+                    <div className="lg:col-span-4">
+                      <label className="label">{t("id ที่ใช้เรียก")}</label>
+                      <input
+                        name="publicModel"
+                        defaultValue={route.publicModel}
+                        className="input font-mono"
+                        required
+                      />
+                      <p className="mt-1.5 text-label text-fg-subtle">
+                        {t("เปลี่ยนแล้วไคลเอนต์ที่เรียก id เดิมจะใช้ไม่ได้")}
+                      </p>
+                    </div>
+
+                    <div className="lg:col-span-4">
+                      <label className="label">{t("รูป / หมวด")}</label>
                       <select
-                        name="categoryId"
-                        defaultValue={route.categoryId ?? ""}
+                        name="logoUrl"
+                        defaultValue={route.logoUrl ?? ""}
                         className="input"
-                        aria-label={t("หมวดของ {name}", { name: route.publicModel })}
+                        aria-label={t("รูปของ {name}", { name: route.publicModel })}
                       >
-                        <option value="">{t("— ไม่ระบุหมวด —")}</option>
-                        {categories.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name}
+                        <option value="">{t("— ไม่ใช้รูป —")}</option>
+                        {route.logoUrl && !assets.some((a) => a.publicUrl === route.logoUrl) && (
+                          <option value={route.logoUrl}>{t("รูปเดิม")}</option>
+                        )}
+                        {assets.map((a) => (
+                          <option key={a.id} value={a.publicUrl}>
+                            {a.name}
                           </option>
                         ))}
                       </select>
                     </div>
 
-                    <div className="lg:col-span-2">
+                    <div className="lg:col-span-3">
                       <label className="label">{t("โหมดแสดงผล")}</label>
                       <select
                         name="displayMode"
@@ -661,7 +506,7 @@ export default async function AdminModelsPage({
                       </select>
                     </div>
 
-                    <div className="lg:col-span-2">
+                    <div className="lg:col-span-5">
                       <label className="label">{t("ราคา In / Out")}</label>
                       <div className="flex items-center gap-2">
                         <input
@@ -687,7 +532,7 @@ export default async function AdminModelsPage({
                       </div>
                     </div>
 
-                    <div className="lg:col-span-2">
+                    <div className="lg:col-span-4">
                       <button type="submit" className="btn-primary w-full !py-2.5 whitespace-nowrap">
                         <Icon name="fa-floppy-disk" /> {t("บันทึก")}
                       </button>

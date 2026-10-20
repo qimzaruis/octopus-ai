@@ -57,7 +57,7 @@ export default async function ModelDetailPage({
                 alt=""
                 width={56}
                 height={56}
-                className="h-full w-full object-contain"
+                className="h-full w-full rounded-xl object-contain"
               />
             ) : (
               <span className="flex h-full w-full items-center justify-center rounded-xl bg-brand-500/15 text-body font-bold text-brand-300">

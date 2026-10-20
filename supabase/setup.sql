@@ -284,6 +284,9 @@ WHERE r."category_id" IS NULL
   AND r."logo_url" IS NOT NULL
   AND c."logo_url" = r."logo_url";
 
+-- ---------- index สำหรับยอดรวม tokens ต่อโมเดล (migration 0008) ----------
+CREATE INDEX IF NOT EXISTS "requests_public_model_idx" ON "requests" USING btree ("public_model");
+
 -- ---------- ตรวจผล ----------
 SELECT table_name
 FROM information_schema.tables

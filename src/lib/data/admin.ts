@@ -14,7 +14,9 @@ import {
 } from "@/db/schema";
 import { isDbUnavailable } from "@/lib/db-circuit";
 import { invalidateCache } from "@/lib/catalog-cache";
+import { resolveCategoryForAsset } from "@/lib/data/categories";
 import { readThrough } from "@/lib/data/read-through";
+import { categoryRank } from "@/lib/categories";
 import {
   cooldownMinutesLeft,
   cooldownUntilFrom,
@@ -239,12 +241,19 @@ export async function listRouteCategories(): Promise<RouteCategoryDTO[]> {
       .select()
       .from(routeCategories)
       .orderBy(asc(routeCategories.sortOrder), asc(routeCategories.id));
-    return rows.map((c) => ({
-      id: c.id,
-      name: c.name,
-      logoUrl: c.logoUrl ?? null,
-      sortOrder: c.sortOrder,
-    }));
+    return rows
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        logoUrl: c.logoUrl ?? null,
+        sortOrder: c.sortOrder,
+      }))
+      .sort(
+        (a, b) =>
+          categoryRank(a.name) - categoryRank(b.name) ||
+          a.sortOrder - b.sortOrder ||
+          a.id - b.id,
+      );
   });
   return result ?? [];
 }
@@ -677,58 +686,6 @@ export async function setModelPricing(
 }
 
 // ---------------------------------------------------------------------
-// หมวด/แบรนด์ (route_categories)
-// ---------------------------------------------------------------------
-
-export async function upsertRouteCategory(input: {
-  id?: number;
-  name: string;
-  logoUrl: string | null;
-  sortOrder?: number;
-}): Promise<ActionResult> {
-  const name = input.name.trim();
-  if (!name) return { ok: false, error: "กรอกชื่อหมวดก่อนบันทึก" };
-  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
-
-  const db = getDb();
-  try {
-    if (input.id) {
-      await db
-        .update(routeCategories)
-        .set({
-          name,
-          logoUrl: input.logoUrl,
-          ...(input.sortOrder === undefined ? {} : { sortOrder: input.sortOrder }),
-        })
-        .where(eq(routeCategories.id, input.id));
-      // route ทุกตัวในหมวดนี้ใช้รูปเดียวกับหมวด — เปลี่ยนรูปที่หมวดแล้วต้องตามไปด้วย
-      await db
-        .update(routes)
-        .set({ logoUrl: input.logoUrl })
-        .where(eq(routes.categoryId, input.id));
-    } else {
-      const max = await db.select({ sortOrder: routeCategories.sortOrder }).from(routeCategories);
-      await db.insert(routeCategories).values({
-        name,
-        logoUrl: input.logoUrl,
-        sortOrder:
-          input.sortOrder ?? max.reduce((top, row) => Math.max(top, row.sortOrder), 0) + 1,
-      });
-    }
-  } catch (err) {
-    console.error("[admin] บันทึกหมวดไม่สำเร็จ:", err);
-    return { ok: false, error: "บันทึกหมวดไม่สำเร็จ" };
-  }
-  return { ok: true };
-}
-
-export async function deleteRouteCategory(id: number): Promise<ActionResult> {
-  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
-  await getDb().delete(routeCategories).where(eq(routeCategories.id, id));
-  return { ok: true };
-}
-
-// ---------------------------------------------------------------------
 // Route CRUD
 // ---------------------------------------------------------------------
 
@@ -741,10 +698,10 @@ function slugName(publicModel: string): string {
 }
 
 /**
- * สร้าง/แก้ route พร้อมทุกค่าที่ผู้ใช้เห็น — ชื่อ, id, หมวด+รูป, ราคา, โหมด,
+ * สร้าง/แก้ route พร้อมทุกค่าที่ผู้ใช้เห็น — ชื่อ, id, รูป/หมวด, ราคา, โหมด,
  * และโมเดลปลายทางตัวแรก (ตอนสร้างใหม่)
  *
- * หมวดกับรูปเป็นค่าเดียวกัน: logoUrl ของ route ถูกดึงจากหมวดที่เลือกเสมอ
+ * หมวดกับรูปเป็นค่าเดียวกัน: เลือกรูปจากคลัง แล้วชื่อรูปกลายเป็นชื่อหมวดให้เอง
  */
 export async function upsertRoute(input: {
   id?: number;
@@ -752,12 +709,10 @@ export async function upsertRoute(input: {
   description: string;
   displayName?: string;
   displayMode?: string;
-  categoryId?: number | null;
+  logoUrl?: string | null;
   inputPricePerM?: number;
   outputPricePerM?: number;
   firstTargetModelRefId?: number | null;
-  newCategoryName?: string;
-  newCategoryLogoUrl?: string | null;
 }): Promise<ActionResult> {
   const publicModel = input.publicModel.trim().toLowerCase().replace(/\s+/g, "-");
   if (!publicModel) return { ok: false, error: "กรอก id ของโมเดลก่อนบันทึก" };
@@ -775,29 +730,18 @@ export async function upsertRoute(input: {
 
   const db = getDb();
   try {
-    let categoryId =
-      Number.isFinite(input.categoryId) && input.categoryId ? input.categoryId : null;
     const firstTargetId =
       Number.isFinite(input.firstTargetModelRefId) && input.firstTargetModelRefId
         ? input.firstTargetModelRefId
         : null;
-    const newCategoryName = input.newCategoryName?.trim() ?? "";
-    if (!input.id && newCategoryName) {
-      const inserted = await db
-        .insert(routeCategories)
-        .values({ name: newCategoryName, logoUrl: input.newCategoryLogoUrl ?? null })
-        .returning();
-      categoryId = inserted[0]?.id ?? null;
+    const logoUrl = input.logoUrl?.trim() || null;
+    const category = await resolveCategoryForAsset(logoUrl);
+    // เลือกรูปที่มีอยู่ในคลังเท่านั้น — ไม่สร้างหมวดลอย ๆ จาก URL มั่ว
+    if (logoUrl && !category) {
+      return { ok: false, error: "ไม่พบรูปที่เลือก — อัปโหลดเข้าคลังก่อน" };
     }
-
-    let categoryLogo: string | null = null;
-    if (categoryId) {
-      const category = (
-        await db.select().from(routeCategories).where(eq(routeCategories.id, categoryId))
-      )[0];
-      if (!category) return { ok: false, error: "ไม่พบหมวดที่เลือก" };
-      categoryLogo = category.logoUrl ?? null;
-    }
+    const categoryId = category?.id ?? null;
+    const categoryLogo = category?.logoUrl ?? null;
 
     const displayName =
       input.displayName?.trim() || slugName(publicModel) || publicModel;
