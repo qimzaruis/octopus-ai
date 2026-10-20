@@ -2,6 +2,7 @@ import { asc, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { creditTransactions, users } from "@/db/schema";
 import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
+import { readThrough } from "@/lib/data/read-through";
 import { listPlans } from "@/lib/data/plans";
 import { getUserMetrics, type UserMetrics } from "@/lib/data/models";
 import { invalidateSessionUser } from "@/lib/auth";
@@ -40,9 +41,7 @@ function toRole(r: string): "user" | "admin" {
 
 /** รายชื่อผู้ใช้ทั้งหมดพร้อมเมตริกการใช้งาน (สําหรับหน้า admin) */
 export async function listUsersWithMetrics(): Promise<AdminUserDTO[]> {
-  if (isDbUnavailable()) return [];
-
-  try {
+  const result = await readThrough("admin:users", async () => {
     // ป้ายชื่อแผนอ่านจากตาราง plans จริง (แผนใหม่ที่แอดมินเพิ่มก็แสดงถูก)
     const planLabels = new Map((await listPlans()).map((p) => [p.key, p.label || p.key]));
     const labelOf = (key: string) => planLabels.get(key) ?? key;
@@ -68,15 +67,12 @@ export async function listUsersWithMetrics(): Promise<AdminUserDTO[]> {
       });
     }
     return out;
-  } catch (err) {
-    markDbUnavailable(err);
-    return [];
-  }
+  });
+  return result ?? [];
 }
 
 export async function listCreditTransactions(userId: string, limit = 12): Promise<CreditTxDTO[]> {
-  if (isDbUnavailable()) return [];
-  try {
+  const result = await readThrough(`credits:${userId}:${limit}`, async () => {
     const db = getDb();
     const rows = await db
       .select()
@@ -91,10 +87,8 @@ export async function listCreditTransactions(userId: string, limit = 12): Promis
       note: t.note,
       createdAt: t.createdAt.toISOString(),
     }));
-  } catch (err) {
-    markDbUnavailable(err);
-    return [];
-  }
+  });
+  return result ?? [];
 }
 
 export type ActionResult = { ok: boolean; error?: string };

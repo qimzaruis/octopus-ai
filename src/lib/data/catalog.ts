@@ -15,6 +15,7 @@ import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
 import { cached } from "@/lib/catalog-cache";
+import { withDbRetry } from "@/lib/db-retry";
 
 export const CATALOG_TTL_MS = 60_000;
 
@@ -41,12 +42,20 @@ export type CatalogModel = {
   logoUrl: string | null;
 };
 
+export type CatalogCategory = {
+  id: number;
+  name: string;
+  logoUrl: string | null;
+  sortOrder: number;
+};
+
 export type CatalogRoute = {
   id: number;
   publicModel: string;
   displayName: string;
   description: string;
   displayMode: string;
+  categoryId: number | null;
   logoUrl: string | null;
   inputPricePerM: number;
   outputPricePerM: number;
@@ -78,6 +87,7 @@ export type CatalogPlanModel = { planKey: string; modelRefId: number };
 export type Catalog = {
   providers: CatalogProvider[];
   models: CatalogModel[];
+  categories: CatalogCategory[];
   routes: CatalogRoute[];
   targets: CatalogTarget[];
   plans: CatalogPlan[];
@@ -87,6 +97,7 @@ export type Catalog = {
 const EMPTY: Catalog = {
   providers: [],
   models: [],
+  categories: [],
   routes: [],
   targets: [],
   plans: [],
@@ -131,6 +142,14 @@ function normalize(row: Record<string, unknown>): Catalog {
       outputPricePerM: n(m.output_price_per_m ?? m.outputPricePerM),
       logoUrl: m.logo_url == null && m.logoUrl == null ? null : s(m.logo_url ?? m.logoUrl),
     })),
+    categories: arr(row.route_categories ?? row.categories)
+      .map((c) => ({
+        id: n(c.id),
+        name: s(c.name),
+        logoUrl: c.logo_url == null && c.logoUrl == null ? null : s(c.logo_url ?? c.logoUrl),
+        sortOrder: n(c.sort_order ?? c.sortOrder),
+      }))
+      .sort((a, b2) => a.sortOrder - b2.sortOrder || a.id - b2.id),
     routes: arr(row.routes)
       .map((r) => ({
         id: n(r.id),
@@ -138,6 +157,7 @@ function normalize(row: Record<string, unknown>): Catalog {
         displayName: s(r.display_name ?? r.displayName),
         description: s(r.description),
         displayMode: s(r.display_mode ?? r.displayMode),
+        categoryId: r.category_id == null ? null : n(r.category_id),
         logoUrl: r.logo_url == null && r.logoUrl == null ? null : s(r.logo_url ?? r.logoUrl),
         inputPricePerM: n(r.input_price_per_m ?? r.inputPricePerM),
         outputPricePerM: n(r.output_price_per_m ?? r.outputPricePerM),
@@ -175,6 +195,7 @@ const QUERY = sql`
   select
     coalesce((select json_agg(p) from providers p), '[]'::json) as providers,
     coalesce((select json_agg(m) from models m), '[]'::json) as models,
+    coalesce((select json_agg(c order by c.sort_order, c.id) from route_categories c), '[]'::json) as route_categories,
     coalesce((select json_agg(r) from routes r), '[]'::json) as routes,
     coalesce((select json_agg(t) from route_targets t), '[]'::json) as route_targets,
     coalesce((select json_agg(pl order by pl.tier, pl.key) from plans pl), '[]'::json) as plans,
@@ -183,7 +204,7 @@ const QUERY = sql`
 
 async function loadCatalog(): Promise<Catalog> {
   try {
-    const res = (await getDb().execute(QUERY)) as unknown;
+    const res = (await withDbRetry(() => getDb().execute(QUERY))) as unknown;
     const rows = Array.isArray(res) ? res : (res as { rows?: unknown[] }).rows ?? [];
     const row = rows[0] as Record<string, unknown> | undefined;
     if (!row) throw new Error("catalog query returned no row");
@@ -191,8 +212,9 @@ async function loadCatalog(): Promise<Catalog> {
     lastGoodCatalog = out;
     return out;
   } catch (err) {
+    // ต้อง throw เพื่อไม่ให้ cached() เก็บผลล้มเหลวไว้ทั้ง TTL
     markDbUnavailable(err);
-    return lastGoodCatalog ?? EMPTY;
+    throw err;
   }
 }
 
@@ -204,9 +226,14 @@ let lastGoodCatalog: Catalog | null = null;
  * ตอน DB ถูกข้าม (circuit breaker เปิด) อย่าเก็บผลว่างลงแคช — จะทำให้ route หายไป
  * ทั้งที่ DB ฟื้นแล้ว คืน snapshot เก่าที่เพิ่งใช้ได้อยู่แล้วออกไปใช้ก่อน
  */
-export function getCatalog(): Promise<Catalog> {
-  if (isDbUnavailable()) return Promise.resolve(lastGoodCatalog ?? EMPTY);
-  return cached("catalog", CATALOG_TTL_MS, loadCatalog);
+export async function getCatalog(): Promise<Catalog> {
+  // ระหว่างวงจรเปิด ใช้ snapshot ล่าสุดได้เลย — แต่ถ้ายังไม่เคยอ่านสำเร็จให้ลองจริง
+  if (isDbUnavailable() && lastGoodCatalog) return lastGoodCatalog;
+  try {
+    return await cached("catalog", CATALOG_TTL_MS, loadCatalog);
+  } catch {
+    return lastGoodCatalog ?? EMPTY;
+  }
 }
 
 /** index ที่อ่านบ่อยของ snapshot — สร้างใหม่ทุกครั้งที่แคชหมดอายุ (ตารางเล็กมาก) */

@@ -24,12 +24,17 @@ export class SearchUnavailable extends Error {
   }
 }
 
-export async function webSearch(query: string, count = 6): Promise<SearchResult[]> {
+export async function webSearch(
+  query: string,
+  count = 6,
+  signal?: AbortSignal,
+): Promise<SearchResult[]> {
   const res = await fetch("/api/agent/search", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query, max_results: count }),
     cache: "no-store",
+    signal,
   }).catch(() => null);
 
   if (!res) throw new SearchUnavailable("ค้นเว็บตอนนี้ไม่สามารถใช้ได้", "unavailable");

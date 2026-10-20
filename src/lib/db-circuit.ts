@@ -5,7 +5,7 @@
  * ช่วง "เปิดวงจร" ตั้งสั้น ๆ เพราะระหว่างนี้หน้าเว็บจะเห็นข้อมูลว่าง
  * ถ้าตั้งนานเกินไป DB แค่กระตุกครั้งเดียวก็ทำให้ทั้งเว็บเงียบไปหนึ่งนาที
  */
-const OPEN_MS = 15_000;
+const OPEN_MS = 8_000;
 let dbUnavailableUntil = 0;
 
 export function isDbUnavailable(): boolean {

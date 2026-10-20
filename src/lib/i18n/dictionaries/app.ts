@@ -132,10 +132,49 @@ export const appPages = {
   "ยกเลิกการแก้": "Cancel editing",
   "แก้ข้อความแล้วกดส่ง": "Edit then press send",
   "ส่งใหม่": "Resend",
+  "สร้างคำตอบใหม่": "Regenerate answer",
   "เล็มประวัติไม่สำเร็จ แต่จะส่งข้อความที่แก้ใหม่ไปแทน":
     "Could not trim the history, but the edited message will still be sent",
   "ข้อความและไฟล์ในแชทนี้จะหายไปจากประวัติของคุณ":
     "This chat's messages and files will disappear from your history",
+  "ใช้เวลา {n} วิ": "Took {n}s",
+  "{n} วิ": "{n}s",
+  "{n} ขั้นตอน": "{n} steps",
+  "กำลังคิด...": "Thinking...",
+  "ปิดการแจ้งเตือน": "Dismiss notice",
+  "บทสนทนา": "Conversation",
+
+  // ---------- Agent empty state ----------
+  "มีอะไรให้ช่วย?": "What can I help with?",
+  "ถาม ตัดโค้ด ค้นเว็บ หรือให้เอเจนต์ช่วยแก้ไฟล์ในเครื่อง — แนบไฟล์และรูปได้เลย":
+    "Ask, write code, search the web, or let the agent edit files on your computer — attach files and images",
+  "สร้างหน้าเว็บ": "Build a web page",
+  "HTML/CSS หน้าเดียวที่เปิดดูได้ทันที":
+    "A single HTML/CSS page you can open right away",
+  "ช่วยสร้างหน้าเว็บ portfolio เรียบ ๆ สวย ๆ หนึ่งหน้าให้หน่อย":
+    "Build me a clean and attractive one-page portfolio website",
+  "ค้นเว็บและสรุป": "Search & summarize",
+  "ข้อมูลล่าสุดพร้อมลิงก์อ้างอิง": "Fresh information with source links",
+  "ช่วยค้นเว็บแล้วสรุปข่าว AI ล่าสุดให้ฟังหน่อย พร้อมลิงก์อ้างอิง":
+    "Search the web and summarize the latest AI news with source links",
+  "ช่วยเขียนโค้ด": "Write code",
+  "อธิบายแนวคิดและเขียนให้พร้อมใช้": "Explained and ready to use",
+  "ช่วยเขียนฟังก์ชัน TypeScript สำหรับเรียก API พร้อมจัดการ error ให้หน่อย":
+    "Write a TypeScript function that calls an API and handles errors",
+  "ร่างข้อความ": "Draft a message",
+  "อีเมล ประกาศ หรือโพสต์โทนมืออาชีพ":
+    "Emails, announcements, or professional posts",
+  "ช่วยร่างอีเมลตอบลูกค้าที่แจ้งปัญหาการใช้งาน ให้สุภาพและกระชับ":
+    "Draft a polite and concise reply to a customer reporting a problem",
+
+  // ---------- Agent history ----------
+  "วันนี้": "Today",
+  "เมื่อวาน": "Yesterday",
+  "7 วันล่าสุด": "Previous 7 days",
+  "เก่ากว่า": "Older",
+  "ค้นหาแชท": "Search chats",
+  "ล้างคำค้น": "Clear search",
+  "ไม่พบแชทที่ตรงกัน": "No matching chats",
 
   // ---------- Sidebar ----------
   "ผู้ดูแลระบบ": "Administrator",
@@ -329,6 +368,63 @@ export const appPages = {
   "ไม่พบผู้ใช้": "User not found",
   "ไม่พบคีย์นี้": "Key not found",
 
+  // ---------- หมวด / แอดมินโมเดล ----------
+  "หมวด / แบรนด์ของโมเดล (ชื่อ + รูป)": "Model categories / brands (name + image)",
+  "ชื่อและรูปของหมวดถูกใช้กับการ์ดนี้ด้วย":
+    "The category name and image are used for this route too",
+  "หมวด / แบรนด์": "Category / brand",
+  "— ไม่ระบุหมวด —": "— No category —",
+  "ไม่ระบุหมวด": "Uncategorized",
+  "อื่น ๆ": "Other",
+  "ชื่อหมวด": "Category name",
+  "รูปของหมวด": "Category image",
+  "รูปของหมวด {name}": "Image for {name}",
+  "รูปของหมวดใหม่": "New category image",
+  "ชื่อหมวดใหม่": "New category name",
+  "— ไม่มีรูป —": "— No image —",
+  "รูปเดิม": "Current image",
+  "เพิ่มหมวดใหม่": "Add a new category",
+  "เพิ่มหมวด": "Add category",
+  "ลบหมวดนี้": "Delete this category",
+  "ลบหมวด {name}? route ในหมวดนี้จะกลายเป็นไม่ระบุหมวด (รูปเดิมยังอยู่)":
+    "Delete the {name} category? Its routes become uncategorized (their current image stays)",
+  "ยังไม่มีหมวด — สร้างหมวดแรกด้านล่าง (ใส่ชื่อและเลือกรูปจากคลัง)":
+    "No categories yet — create the first one below (name + an image from the library)",
+  "ยังไม่มีรูปในคลัง — สร้างหมวดได้เลยแล้วค่อยกลับมาใส่รูปทีหลัง":
+    "No images in the library yet — you can create a category now and add its image later",
+  "คลังรูป — อัปโหลดครั้งเดียว ใช้ซ้ำได้ทุกหมวด":
+    "Image library — upload once, reuse in every category",
+  "เช่น Claude": "e.g. Claude",
+  "เช่น Claude, DeepSeek": "e.g. Claude, DeepSeek",
+  "{n} หมวด": "{n} categories",
+  "{n} route ในหมวดนี้": "{n} routes in this category",
+  "{n} ปลายทาง": "{n} targets",
+  "{n} route": "{n} routes",
+  "สร้างโมเดล / Route ใหม่": "Create a model / route",
+  "สร้างหมวดใหม่พร้อม route นี้": "Create a new category with this route",
+  "ถ้ากรอกชื่อหมวดใหม่ ระบบจะใช้หมวดใหม่นี้แทนหมวดที่เลือกด้านบน":
+    "If you enter a new category name, it is used instead of the category selected above",
+  "ชื่อที่ผู้ใช้เห็น": "Display name",
+  "id ที่ใช้เรียก *": "Callable id *",
+  "ว่าง = ตั้งชื่อจาก id ให้อัตโนมัติ": "Leave empty to derive it from the id",
+  "โมเดลปลายทางตัวแรก": "First target model",
+  "— ยังไม่เพิ่มโมเดล —": "— No target yet —",
+  "เพิ่ม fallback ลำดับถัดไปได้หลังสร้างเสร็จ":
+    "You can add more fallbacks after creating it",
+  "router — แสดงรายการเดียว": "router — one model entry",
+  "model — กางโมเดลปลายทาง": "model — list target models",
+  "โหมด router": "Router mode",
+  "โหมด model": "Model mode",
+  "ราคา In / Out (USD / 1M)": "Price In / Out (USD / 1M)",
+  "ราคา In / Out": "Price In / Out",
+  "ราคา input": "Input price",
+  "ราคา output": "Output price",
+  "หมวดของ {name}": "Category for {name}",
+  "เช่น Claude Haiku 5.5": "e.g. Claude Haiku 5.5",
+  "เช่น claude-haiku-5-5": "e.g. claude-haiku-5-5",
+  "แต่ละรายการคือโมเดลที่ผู้ใช้เรียกได้ — ตั้งชื่อ id หมวด/แบรนด์ ราคา และลําดับ fallback ได้จากที่นี่":
+    "Each entry is a model users can call — set its name, id, category/brand, price and fallback order here",
+
   // ---------- โมเดลที่ใช้ได้ (หน้า /models) ----------
   "คัดลอก": "Copy",
   "คัดลอกแล้ว": "Copied",
@@ -377,6 +473,7 @@ export const appPages = {
   "เริ่มบทสนทนากับ OctopusAI ได้เลย": "Start a conversation with the OctopusAI",
   "แนบไฟล์ได้สูงสุด {n} ไฟล์": "You can attach up to {n} files",
   "ไฟล์ใหญ่เกิน 10MB: {name}": "File is larger than 10MB: {name}",
+  "อ่านไฟล์ไม่สำเร็จ: {name}": "Could not read the file: {name}",
   "เริ่มแชทไม่สำเร็จ ลองอีกครั้ง": "Could not start the chat — please try again",
   "โหลดประวัติแชทไม่สำเร็จ": "Could not load the chat history",
   "{n}/{max} ไฟล์": "{n}/{max} files",
@@ -389,8 +486,6 @@ export const appPages = {
   "เลือกโมเดล": "Select model",
   "แอดมินต้องเปิดโมเดลให้ผู้ใช้เห็นก่อน จึงจะเริ่มแชทได้":
     "An admin must make at least one model visible to users before chatting",
-  "พิมพ์ข้อความ... (Enter เพื่อส่ง, Shift+Enter ขึ้นบรรทัดใหม่)":
-    "Type a message... (Enter to send, Shift+Enter for a new line)",
   "แนบไฟล์": "Attach file",
   "ลบไฟล์": "Remove file",
   "ส่ง": "Send",

@@ -254,6 +254,36 @@ SELECT p."id", true, '{402}', '{insufficient_quota}',
 FROM "providers" p
 ON CONFLICT ("provider_id") DO NOTHING;
 
+-- ---------- หมวด/แบรนด์ของโมเดล (migration 0007) ----------
+CREATE TABLE IF NOT EXISTS "route_categories" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"name" text NOT NULL,
+	"logo_url" text,
+	"sort_order" integer DEFAULT 0 NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE "routes" ADD COLUMN IF NOT EXISTS "category_id" integer;
+
+DO $$ BEGIN
+ ALTER TABLE "routes" ADD CONSTRAINT "routes_category_id_route_categories_id_fk" FOREIGN KEY ("category_id") REFERENCES "public"."route_categories"("id") ON DELETE set null ON UPDATE no action;
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+
+INSERT INTO "route_categories" ("name", "logo_url")
+SELECT DISTINCT a."name", a."public_url"
+FROM "routes" r
+JOIN "assets" a ON a."public_url" = r."logo_url"
+WHERE NOT EXISTS (
+  SELECT 1 FROM "route_categories" c WHERE c."name" = a."name"
+);
+
+UPDATE "routes" r
+SET "category_id" = c."id"
+FROM "route_categories" c
+WHERE r."category_id" IS NULL
+  AND r."logo_url" IS NOT NULL
+  AND c."logo_url" = r."logo_url";
+
 -- ---------- ตรวจผล ----------
 SELECT table_name
 FROM information_schema.tables

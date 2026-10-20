@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
+import { withDbRetry } from "@/lib/db-retry";
 import { bangkokDay, ensureUptimeColumns } from "@/lib/gateway";
 import { internalIdentities, maskInternals } from "@/lib/public-text";
 
@@ -84,7 +85,7 @@ export type Scope = string | "all";
 
 async function rawRows(query: ReturnType<typeof sql>): Promise<Record<string, unknown>[]> {
   const db = getDb();
-  const res = (await db.execute(query)) as unknown;
+  const res = (await withDbRetry(() => db.execute(query))) as unknown;
   if (Array.isArray(res)) return res as Record<string, unknown>[];
   return (res as { rows: Record<string, unknown>[] }).rows ?? [];
 }
@@ -315,9 +316,9 @@ export async function getSpendInWindows(
   scope: Scope,
   windows: { cycleSince: Date; daySince: Date },
 ): Promise<{ cycleSpendUsd: number; dailySpendUsd: number }> {
-  // ยอดใช้จ่ายเป็น 0 ชั่วคราวตอนที่อ่าน DB ไม่ได้ — ไม่ใช่ตัวเลขจริง
-  // request ยังยิงไม่ออกเพราะ catalog ของ route ว่างอยู่ดี (gateway ตอบ no_route)
-  if (isDbUnavailable()) return { cycleSpendUsd: 0, dailySpendUsd: 0 };
+  // DB สะดุด: ใช้ยอดล่าสุดที่อ่านได้ (ยังอยู่ในรอบ/วันเดียวกัน) แทนการรีเซ็ตเป็น 0
+  const cached = lastGoodSpend.get(scope);
+  if (isDbUnavailable() && cached) return cached;
 
   try {
     const userCond = scope === "all" ? sql`1=1` : sql`user_id = ${scope}`;
@@ -329,10 +330,12 @@ export async function getSpendInWindows(
       where ${userCond}
     `);
     const r = rows[0] ?? {};
-    return { cycleSpendUsd: num(r.cycle_cost), dailySpendUsd: num(r.day_cost) };
+    const out = { cycleSpendUsd: num(r.cycle_cost), dailySpendUsd: num(r.day_cost) };
+    lastGoodSpend.set(scope, out);
+    return out;
   } catch (err) {
     markDbUnavailable(err);
-    return { cycleSpendUsd: 0, dailySpendUsd: 0 };
+    return cached ?? { cycleSpendUsd: 0, dailySpendUsd: 0 };
   }
 }
 
@@ -353,6 +356,11 @@ export type DashboardFacts = {
   ranking: ModelRank[];
   spend: { cycleSpendUsd: number; dailySpendUsd: number };
 };
+
+/** แดชบอร์ดชุดล่าสุดต่อ scope — DB สะดุดสั้น ๆ ไม่ควรทำให้ทั้งหน้าเป็นศูนย์ */
+const lastGoodFacts = new Map<string, DashboardFacts>();
+const lastGoodRequests = new Map<string, { items: RequestDTO[]; total: number }>();
+const lastGoodSpend = new Map<string, { cycleSpendUsd: number; dailySpendUsd: number }>();
 
 const EMPTY_FACTS: DashboardFacts = {
   overview: { ...EMPTY_OVERVIEW },
@@ -407,7 +415,9 @@ export async function getDashboardFacts(
   daySince: Date,
   rankLimit = 6,
 ): Promise<DashboardFacts> {
-  if (isDbUnavailable()) return EMPTY_FACTS;
+  const cacheKey = `${scope}:${rankLimit}`;
+  const cached = lastGoodFacts.get(cacheKey);
+  if (isDbUnavailable() && cached) return cached;
 
   const scopeFilter = scope === "all" ? sql`` : sql`where user_id = ${scope}`;
 
@@ -499,7 +509,7 @@ export async function getDashboardFacts(
     }
 
     const daily = jsonArr(row.daily);
-    return {
+    const facts: DashboardFacts = {
       overview: {
         requests,
         inputTokens,
@@ -525,9 +535,11 @@ export async function getDashboardFacts(
       })),
       spend: { cycleSpendUsd: num(sp.cycle_cost), dailySpendUsd: num(sp.day_cost) },
     };
+    lastGoodFacts.set(cacheKey, facts);
+    return facts;
   } catch (err) {
     markDbUnavailable(err);
-    return EMPTY_FACTS;
+    return cached ?? EMPTY_FACTS;
   }
 }
 
@@ -598,12 +610,18 @@ export async function listRequests(
   scope: Scope,
   filter: RequestFilter = {},
 ): Promise<{ items: RequestDTO[]; total: number }> {
-  if (isDbUnavailable()) return { items: [], total: 0 };
+  const cacheKey = `${scope}:${filter.page ?? 1}:${filter.perPage ?? 20}:${filter.q ?? ""}:${filter.status ?? "all"}`;
+  const cached = lastGoodRequests.get(cacheKey);
+  if (isDbUnavailable() && cached) return cached;
+
   try {
-    return await listRequestsReal(scope, filter);
+    const out = await listRequestsReal(scope, filter);
+    if (lastGoodRequests.size >= 100) lastGoodRequests.clear();
+    lastGoodRequests.set(cacheKey, out);
+    return out;
   } catch (err) {
     markDbUnavailable(err);
-    return { items: [], total: 0 };
+    return cached ?? { items: [], total: 0 };
   }
 }
 

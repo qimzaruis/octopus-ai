@@ -116,7 +116,11 @@ function decodeEntities(text: string): string {
     .replace(/<[^>]*>/g, "");
 }
 
-async function attemptSerp(rawQuery: string, rawCount: number): Promise<SerpOutcome> {
+async function attemptSerp(
+  rawQuery: string,
+  rawCount: number,
+  signal?: AbortSignal,
+): Promise<SerpOutcome> {
   const query = rawQuery.trim();
   if (!query) return { ok: false, code: "empty", message: "ไม่มีคำค้น" };
   const key = apiKey();
@@ -143,10 +147,16 @@ async function attemptSerp(rawQuery: string, rawCount: number): Promise<SerpOutc
         format: "json",
         data_format: "parsed",
       }),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: signal
+        ? AbortSignal.any([AbortSignal.timeout(TIMEOUT_MS), signal])
+        : AbortSignal.timeout(TIMEOUT_MS),
       cache: "no-store",
     });
   } catch (err) {
+    // ผู้ใช้กดหยุดจากหน้าแชท — ไม่ใช่ความล้มเหลวของ Bright Data
+    if (signal?.aborted) {
+      return { ok: false, code: "unavailable", message: "ยกเลิกการค้นหาแล้ว" };
+    }
     // หมดเวลา/เน็ตหลุด — โควตาหมดก็มักมาในรูปแบบนี้บ้าง จึงใช้ข้อความรวม
     console.error("[serp] brightdata request failed:", err);
     return { ok: false, code: "unavailable", message: "ค้นเว็บตอนนี้ไม่สามารถใช้ได้" };
@@ -204,9 +214,14 @@ async function attemptSerp(rawQuery: string, rawCount: number): Promise<SerpOutc
  * "waiting for selector #main failed") ซึ่งลองซ้ำแล้วมักได้ผล จึง retry เฉพาะ
  * กรณี "unavailable" ส่วนคีย์ผิด/ยังไม่ได้ตั้งค่า ลองซ้ำก็เสียเวลา
  */
-export async function brightDataSearch(rawQuery: string, rawCount = 8): Promise<SerpOutcome> {
-  const first = await attemptSerp(rawQuery, rawCount);
-  if (first.ok || first.code !== "unavailable") return first;
+export async function brightDataSearch(
+  rawQuery: string,
+  rawCount = 8,
+  signal?: AbortSignal,
+): Promise<SerpOutcome> {
+  const first = await attemptSerp(rawQuery, rawCount, signal);
+  if (first.ok || first.code !== "unavailable" || signal?.aborted) return first;
   await new Promise((resolve) => setTimeout(resolve, 1200));
-  return attemptSerp(rawQuery, rawCount);
+  if (signal?.aborted) return first;
+  return attemptSerp(rawQuery, rawCount, signal);
 }

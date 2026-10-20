@@ -18,6 +18,10 @@ export async function POST(req: NextRequest) {
   if (user.banned) return Response.json({ error: "banned" }, { status: 403 });
 
   const body = (await req.json().catch(() => ({}))) as { query?: string; max_results?: number };
-  const outcome = await brightDataSearch(String(body.query ?? ""), Number(body.max_results) || 8);
+  const outcome = await brightDataSearch(
+    String(body.query ?? ""),
+    Number(body.max_results) || 8,
+    req.signal,
+  );
   return Response.json(outcome);
 }

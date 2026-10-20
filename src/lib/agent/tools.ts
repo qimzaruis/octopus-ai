@@ -64,6 +64,8 @@ export type ToolContext = {
   approve: (action: PendingAction) => Promise<boolean>;
   /** อนุญาตให้เขียนไฟล์ได้ทันทีโดยไม่ต้องถาม (ยังถามก่อนลบเสมอ) */
   autoWrite: boolean;
+  /** ผู้ใช้กดหยุด — ตัด request ที่ยังวิ่งอยู่ (เช่นค้นเว็บ) */
+  signal?: AbortSignal;
 };
 
 const str = (extra: Record<string, unknown> = {}) => ({ type: "string", ...extra });
@@ -248,7 +250,7 @@ export async function runTool(name: string, argsJson: string, ctx: ToolContext):
       if (!query) return fail("ไม่มีคำค้น (query)");
       const count = Math.min(10, Math.max(1, Number(args.max_results) || 6));
       try {
-        const results: SearchResult[] = await webSearch(query, count);
+        const results: SearchResult[] = await webSearch(query, count, ctx.signal);
         if (results.length === 0) {
           return JSON.stringify({
             ok: true,

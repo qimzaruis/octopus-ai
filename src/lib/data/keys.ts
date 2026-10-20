@@ -2,7 +2,8 @@ import { randomBytes } from "crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { apiKeys } from "@/db/schema";
-import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
+import { isDbUnavailable } from "@/lib/db-circuit";
+import { readThrough } from "@/lib/data/read-through";
 
 export const MAX_KEYS_PER_USER = 3;
 
@@ -27,9 +28,7 @@ function generateSecret(): { secret: string; prefix: string } {
 // ---------------- รายการ key ของ user ----------------
 
 export async function listApiKeys(userId: string): Promise<ApiKeyDTO[]> {
-  if (isDbUnavailable()) return [];
-
-  try {
+  const result = await readThrough(`keys:${userId}`, async () => {
     const db = getDb();
     const rows = await db
       .select()
@@ -45,10 +44,8 @@ export async function listApiKeys(userId: string): Promise<ApiKeyDTO[]> {
       lastUsedAt: k.lastUsedAt ? k.lastUsedAt.toISOString() : null,
       createdAt: k.createdAt.toISOString(),
     }));
-  } catch (err) {
-    markDbUnavailable(err);
-    return [];
-  }
+  });
+  return result ?? [];
 }
 
 // ---------------- สร้าง key (จำกัด 3 คีย์) ----------------

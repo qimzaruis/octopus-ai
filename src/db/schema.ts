@@ -183,12 +183,31 @@ export const models = pgTable(
   }),
 );
 
+/**
+ * หมวด/แบรนด์ของโมเดล — ชื่อและรูปอยู่ด้วยกันเพราะเป็น "เจ้าของโมเดล" ตัวเดียวกัน
+ * ใช้จัดกลุ่มในตัวเลือกโมเดลและหน้า /models (แอดมินสร้าง/แก้ได้ที่ /admin/models)
+ */
+export const routeCategories = pgTable("route_categories", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  /** โลโก้ของหมวด (URL จากคลังรูป) — route ในหมวดนี้ใช้รูปเดียวกัน */
+  logoUrl: text("logo_url"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 /** Route: ชื่อโมเดลสาธารณะที่ลูกข่ายเรียก เช่น octopus-pro */
 export const routes = pgTable(
   "routes",
   {
     id: serial("id").primaryKey(),
     publicModel: text("public_model").notNull(),
+    /** หมวด/แบรนด์ของโมเดล (null = ยังไม่จัดหมวด) */
+    categoryId: integer("category_id").references(() => routeCategories.id, {
+      onDelete: "set null",
+    }),
     description: text("description").notNull().default(""),
     /**
      * วิธีแสดงผลต่อผู้ใช้ในหน้า /models
@@ -363,6 +382,7 @@ export type ProviderKey = typeof providerKeys.$inferSelect;
 export type ProviderKeyLimit = typeof providerKeyLimits.$inferSelect;
 export type Asset = typeof assets.$inferSelect;
 export type Model = typeof models.$inferSelect;
+export type RouteCategory = typeof routeCategories.$inferSelect;
 export type Route = typeof routes.$inferSelect;
 export type RouteTarget = typeof routeTargets.$inferSelect;
 export type PlanRow = typeof plans.$inferSelect;

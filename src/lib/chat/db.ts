@@ -404,15 +404,23 @@ export async function addMessage(input: {
   role: ChatMessage["role"];
   content: string;
   attachments?: ChatAttachment[];
+  /**
+   * เวลาที่ข้อความนี้เริ่มเกิด (ค่าเริ่มต้น = ตอนบันทึก)
+   *
+   * ใช้กับคำตอบบางส่วนที่บันทึกหลังผู้ใช้กดหยุด: ผู้ใช้อาจส่งคำถามใหม่ไปแล้ว
+   * ถ้าประทับเวลาตอนบันทึก คำตอบเก่าจะไปต่อท้ายคำถามใหม่และเรียงผิดในประวัติ
+   */
+  createdAt?: string;
 }): Promise<ChatMessage> {
   await ensureChatSchema();
   const now = new Date().toISOString();
+  const createdAt = input.createdAt ?? now;
   const msg: ChatMessage = {
     id: crypto.randomUUID(),
     role: input.role,
     content: input.content,
     attachments: input.attachments ?? [],
-    createdAt: now,
+    createdAt,
   };
   // ข้อความ + ไฟล์แนบ + เลื่อน updated_at ของห้อง = request เดียว
   // (เดิมไล่ส่งทีละคำสั่ง ห้องที่มีรูปแนบจึงจ่ายค่ารอบละ ~107ms ฟรี ๆ ก่อนโมเดลจะเริ่มตอบ)
@@ -420,7 +428,7 @@ export async function addMessage(input: {
     {
       sql: `insert into chat_messages (id, conversation_id, role, content, created_at)
             values (?, ?, ?, ?, ?)`,
-      args: [msg.id, input.conversationId, msg.role, msg.content, now],
+      args: [msg.id, input.conversationId, msg.role, msg.content, createdAt],
     },
   ];
   for (const a of msg.attachments) {

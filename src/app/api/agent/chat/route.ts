@@ -191,12 +191,14 @@ async function saveAssistantMessage(
   conversationId: string,
   content: string,
   roomTitle: string,
+  /** เวลาเริ่มรอบ — ใช้เมื่อบันทึกช้ากว่าคำถามถัดไป (ดู addMessage) */
+  createdAt?: string,
 ): Promise<{ id: string; name: string; kind: string; sizeBytes: number }[]> {
   try {
     // ข้อความกับ artifact ไม่ผูกกันด้วย FK → ส่งสอง request พร้อมกันแทนที่จะไล่รอ
     const artifacts = extractHtmlArtifacts(content, roomTitle);
     const [, files] = await Promise.all([
-      addMessage({ conversationId, role: "assistant", content }),
+      addMessage({ conversationId, role: "assistant", content, createdAt }),
       addFiles(
         artifacts.map((a) => ({
           userId,
@@ -361,9 +363,18 @@ export async function POST(req: NextRequest) {
     return error(`โมเดลนี้ต้องใช้แผน ${route.requiredPlanLabel} ขึ้นไป`, 403);
   }
 
+  /**
+   * ชื่อห้องที่ใช้ทั้งใน header ของรอบนี้และชื่อไฟล์ artifact
+   *
+   * เดิม header ส่ง conversation.title ที่โหลดมาก่อนบันทึกข้อความแรก (ค่าว่าง)
+   * ทำให้ sidebar ไม่เปลี่ยนชื่อจนกว่าจะรีเฟรช ทั้งที่ DB ตั้งชื่อแล้ว
+   */
+  const roomTitle =
+    conversation.title.trim() || (isFirstRound ? titleFrom(content, attachments[0]?.name ?? "") : "");
+
   if (isFirstRound) {
     const patch: { title?: string; model?: string } = { model };
-    if (!conversation.title) patch.title = titleFrom(content, attachments[0]?.name ?? "");
+    if (!conversation.title.trim()) patch.title = roomTitle;
     try {
       // คนละตาราง เขียนพร้อมกันได้เลย — เดิมรอต่อกัน 2 รอบ (~230ms) ก่อนที่โมเดลจะเริ่มตอบ
       await Promise.all([
@@ -407,7 +418,6 @@ export async function POST(req: NextRequest) {
 
   const system = buildAgentSystemPrompt({
     routeName: route.displayName || route.publicModel,
-    routeId: route.publicModel,
     tools: body.toolNames ?? [],
     workspaceReady: Boolean(body.workspaceReady),
   });
@@ -452,10 +462,31 @@ export async function POST(req: NextRequest) {
   const attempts: { full: boolean; input: InvokeInput }[] = [
     {
       full: true,
-      input: { publicModel: model, messages, stream: true, tools, maxTokens: AGENT_MAX_TOKENS, filter },
+      input: {
+        publicModel: model,
+        messages,
+        stream: true,
+        tools,
+        maxTokens: AGENT_MAX_TOKENS,
+        filter,
+        signal: req.signal,
+      },
     },
-    { full: false, input: { publicModel: model, messages, stream: true, maxTokens: AGENT_MAX_TOKENS, filter } },
-    { full: false, input: { publicModel: model, messages, stream: true, filter } },
+    {
+      full: false,
+      input: {
+        publicModel: model,
+        messages,
+        stream: true,
+        maxTokens: AGENT_MAX_TOKENS,
+        filter,
+        signal: req.signal,
+      },
+    },
+    {
+      full: false,
+      input: { publicModel: model, messages, stream: true, filter, signal: req.signal },
+    },
   ];
 
   let result: InvokeResult | null = null;
@@ -469,10 +500,14 @@ export async function POST(req: NextRequest) {
       break;
     } catch (err) {
       lastError = err;
+      // ผู้ใช้กดหยุดระหว่างรอค่ายต้นทาง — ไม่ต้องลองรูปแบบอื่นต่อ
+      if (req.signal.aborted) break;
       // ไม่มี route / ไม่มีคีย์ / ไม่มีสิทธิ์ — ลองซ้ำรูปแบบอื่นก็เสียเวลาเปล่า
       if (!(err instanceof GatewayError) || err.code !== "upstream_error") break;
     }
   }
+
+  if (req.signal.aborted) return error("client_aborted", 499);
 
   if (!result) {
     const gw = lastError instanceof GatewayError ? lastError : null;
@@ -496,35 +531,76 @@ export async function POST(req: NextRequest) {
   const upstreamBody = result.body;
 
   let upstreamReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  let cancelled = false;
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
+      /* ผู้ใช้กดหยุด/ปิดหน้า → abort fetch ต้นทางและหยุดอ่านทันที
+         (signal ถูกส่งเข้า invokeUpstream แล้ว จึงตัดการเชื่อมต่อค่ายด้วย) */
+      const stopUpstream = () => {
+        cancelled = true;
+        void upstreamReader?.cancel("client closed").catch(() => {});
+      };
+      if (req.signal.aborted) stopUpstream();
+      req.signal.addEventListener("abort", stopUpstream, { once: true });
+
+      const safeEnqueue = (chunk: Uint8Array) => {
+        if (cancelled || req.signal.aborted) return false;
+        try {
+          controller.enqueue(chunk);
+          return true;
+        } catch {
+          cancelled = true;
+          return false;
+        }
+      };
+
       if (tools.length > 0 && usedTools.length === 0) {
-        controller.enqueue(
+        safeEnqueue(
           event({ t: "notice", v: "โมเดลนี้ยังไม่รองรับเครื่องมือ — รอบนี้จึงตอบจากข้อมูลที่มี" }),
         );
       }
+
       const reader = (upstreamReader = upstreamBody.getReader());
       let failed = "";
       try {
-        while (true) {
+        while (!cancelled) {
           const { done, value } = await reader.read();
           if (done) break;
           const delta = acc.push(decoder.decode(value, { stream: true }));
-          if (delta) controller.enqueue(event({ t: "d", v: delta }));
+          if (delta && !safeEnqueue(event({ t: "d", v: delta }))) break;
         }
       } catch (err) {
-        failed = (err as Error).message;
-        console.error(`[agent-chat] อ่าน stream ไม่สำเร็จ (${target.providerName}):`, err);
+        // abort จากผู้ใช้ไม่ใช่ความล้มเหลวของค่าย — อย่าเอาไปบันทึกเป็น error
+        if (!cancelled && !req.signal.aborted) {
+          failed = (err as Error).message;
+          console.error(`[agent-chat] อ่าน stream ไม่สำเร็จ (${target.providerName}):`, err);
+        }
       }
 
       const answer = acc.text();
       const calls = acc.toolCalls();
       const reason = acc.finishReason();
 
-      // โมเดลขอใช้เครื่องมือ → ส่งรายการกลับไปให้ client รันบนเครื่องผู้ใช้
-      // (ยังไม่บันทึกอะไรลงประวัติ เพราะยังไม่ใช่คำตอบสุดท้าย)
-      if (calls.length > 0 && !failed) {
-        controller.enqueue(event({ t: "tool", v: calls, text: answer, fr: reason }));
+      if (cancelled || req.signal.aborted) {
+        /* กดหยุดแล้ว: เก็บเฉพาะคำตอบบางส่วนที่ผู้ใช้เห็นไปแล้ว (ถ้ามี)
+           ห้ามเขียน GENERIC_STREAM_ERROR ลงประวัติ เพราะผู้ใช้ไม่ได้เห็นข้อความนั้น
+           และอย่า enqueue/close อะไรอีก — ฝั่ง client ตัด connection ไปแล้ว */
+        // ถ้ามี tool_calls ข้อความนั้นคือ "ความคิดก่อนเรียกเครื่องมือ" ไม่ใช่คำตอบ
+        if (answer.trim() && calls.length === 0) {
+          try {
+            // ประทับเวลาเริ่มรอบ: คำถามใหม่ของผู้ใช้อาจถูกบันทึกไปแล้วระหว่างที่เราบันทึกช้ากว่า
+            await saveAssistantMessage(
+              user.id,
+              conversationId,
+              answer,
+              roomTitle,
+              new Date(startedAt).toISOString(),
+            );
+          } catch (err) {
+            console.error("[agent] save partial answer after stop failed:", err);
+          }
+        }
         void logRequest({
           userId: user.id,
           target,
@@ -535,25 +611,55 @@ export async function POST(req: NextRequest) {
           usage: acc.usage(),
           latencyMs: Date.now() - startedAt,
         });
-        controller.close();
+        // cancel อาจเกิดก่อนที่ start() จะสร้าง reader — ปล่อย body ค้างไม่ได้
+        void reader.cancel("client closed").catch(() => {});
+        req.signal.removeEventListener("abort", stopUpstream);
         return;
       }
 
+      // โมเดลขอใช้เครื่องมือ → ส่งรายการกลับไปให้ client รันบนเครื่องผู้ใช้
+      // (ยังไม่บันทึกอะไรลงประวัติ เพราะยังไม่ใช่คำตอบสุดท้าย)
+      if (calls.length > 0 && !failed) {
+        safeEnqueue(event({ t: "tool", v: calls, text: answer, fr: reason }));
+        void logRequest({
+          userId: user.id,
+          target,
+          publicModel: model,
+          agent: WEB_AGENT,
+          status: "success",
+          httpStatus: 200,
+          usage: acc.usage(),
+          latencyMs: Date.now() - startedAt,
+        });
+        try {
+          controller.close();
+        } catch {
+          /* client ปิดไปแล้ว */
+        }
+        req.signal.removeEventListener("abort", stopUpstream);
+        return;
+      }
+
+      // ข้อความ error ดิบของค่าย/ของ bundler ห้ามถูกบันทึกค้างในประวัติแชทของผู้ใช้
+      // เก็บไว้แค่ข้อความกลาง ๆ ส่วนรายละเอียดเต็มไปอยู่ใน log เซิร์ฟเวอร์กับตาราง requests
+      const toStore = answer || (failed ? GENERIC_STREAM_ERROR : "");
       let saved: Awaited<ReturnType<typeof saveAssistantMessage>> = [];
       try {
-        saved = await saveAssistantMessage(
-          user.id,
-          conversationId,
-          // ข้อความ error ดิบของค่าย/ของ bundler ห้ามถูกบันทึกค้างในประวัติแชทของผู้ใช้
-          // เก็บไว้แค่ข้อความกลาง ๆ ส่วนรายละเอียดเต็มไปอยู่ใน log เซิร์ฟเวอร์กับตาราง requests
-          answer || (failed ? GENERIC_STREAM_ERROR : ""),
-          conversation.title,
-        );
+        if (toStore) {
+          saved = await saveAssistantMessage(user.id, conversationId, toStore, roomTitle);
+        }
+      } catch (err) {
+        console.error("[agent] save assistant message failed:", err);
       } finally {
         // บอกรายชื่อไฟล์ที่บันทึกเสร็จแล้ว → ปุ่ม "แชร์" บน artifact ใช้ได้ทันทีโดยไม่ต้องโหลดห้องใหม่
-        if (saved.length > 0) controller.enqueue(event({ t: "files", v: saved }));
-        controller.enqueue(event({ t: "done", fr: reason }));
-        controller.close();
+        if (saved.length > 0) safeEnqueue(event({ t: "files", v: saved }));
+        safeEnqueue(event({ t: "done", fr: reason }));
+        try {
+          controller.close();
+        } catch {
+          /* client ปิดไปแล้วระหว่างบันทึก — ไม่มีอะไรต้องปิด */
+        }
+        req.signal.removeEventListener("abort", stopUpstream);
       }
 
       void logRequest({
@@ -570,6 +676,7 @@ export async function POST(req: NextRequest) {
     },
     // ผู้ใช้กดหยุด → ปล่อย stream ของต้นทางทันที จะได้ไม่จ่ายค่า token ต่อหลังหวด
     cancel() {
+      cancelled = true;
       void upstreamReader?.cancel("client closed").catch(() => {});
     },
   });
@@ -578,7 +685,7 @@ export async function POST(req: NextRequest) {
     headers: {
       "Content-Type": "application/x-ndjson; charset=utf-8",
       "x-conversation-id": conversationId,
-      "x-conversation-title": encodeURIComponent(conversation.title),
+      "x-conversation-title": encodeURIComponent(roomTitle),
     },
   });
 }

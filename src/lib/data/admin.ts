@@ -6,13 +6,15 @@ import {
   providerKeyLimits,
   providerKeys,
   providers,
+  routeCategories,
   routeTargets,
   routes,
   type ProviderKey,
   type ProviderKeyLimit,
 } from "@/db/schema";
-import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
+import { isDbUnavailable } from "@/lib/db-circuit";
 import { invalidateCache } from "@/lib/catalog-cache";
+import { readThrough } from "@/lib/data/read-through";
 import {
   cooldownMinutesLeft,
   cooldownUntilFrom,
@@ -89,11 +91,20 @@ export type RouteDTO = {
   /** router = แสดงเป็นรายการเดียว · model = กางโมเดลปลายทางใต้ route */
   displayMode: string;
   displayName: string;
+  categoryId: number | null;
   logoUrl: string | null;
   inputPricePerM: number;
   outputPricePerM: number;
   enabled: boolean;
   targets: RouteTargetDTO[];
+};
+
+/** หมวด/แบรนด์ของโมเดล — ชื่อและรูปเป็นค่าเดียวกัน */
+export type RouteCategoryDTO = {
+  id: number;
+  name: string;
+  logoUrl: string | null;
+  sortOrder: number;
 };
 
 function maskKey(key: string): string {
@@ -123,11 +134,9 @@ function keyDTO(k: ProviderKey): ProviderKeyDTO {
 // อ่านข้อมูล
 // ---------------------------------------------------------------------
 
-/** DB อ่านไม่ได้ → คืนรายการว่าง ห้ามส่งข้อมูลสมมติให้หน้า admin */
+/** DB อ่านไม่ได้ → คืน snapshot ล่าสุด (หรือรายการว่าง) ห้ามส่งข้อมูลสมมติให้หน้า admin */
 export async function listProvidersWithModels(): Promise<ProviderDTO[]> {
-  if (isDbUnavailable()) return [];
-
-  try {
+  const result = await readThrough("admin:providers", async () => {
     const db = getDb();
     const [providerRows, modelRows, keyRows] = await Promise.all([
       db.select().from(providers).orderBy(asc(providers.id)),
@@ -160,10 +169,8 @@ export async function listProvidersWithModels(): Promise<ProviderDTO[]> {
           logoUrl: m.logoUrl ?? null,
         })),
     }));
-  } catch (err) {
-    markDbUnavailable(err);
-    return [];
-  }
+  });
+  return result ?? [];
 }
 
 export async function listRoutesWithTargets(): Promise<RouteDTO[]> {
@@ -174,6 +181,7 @@ export async function listRoutesWithTargets(): Promise<RouteDTO[]> {
       description: string;
       displayMode: string;
       displayName: string;
+      categoryId: number | null;
       logoUrl: string | null;
       inputPricePerM: number;
       outputPricePerM: number;
@@ -188,6 +196,7 @@ export async function listRoutesWithTargets(): Promise<RouteDTO[]> {
       description: r.description,
       displayMode: r.displayMode,
       displayName: r.displayName,
+      categoryId: r.categoryId ?? null,
       logoUrl: r.logoUrl ?? null,
       inputPricePerM: Number(r.inputPricePerM),
       outputPricePerM: Number(r.outputPricePerM),
@@ -204,9 +213,7 @@ export async function listRoutesWithTargets(): Promise<RouteDTO[]> {
         })),
     }));
 
-  if (isDbUnavailable()) return [];
-
-  try {
+  const result = await readThrough("admin:routes", async () => {
     const db = getDb();
     const [routeRows, targetRows, providerRows, modelRows] = await Promise.all([
       db.select().from(routes).orderBy(asc(routes.id)),
@@ -222,10 +229,24 @@ export async function listRoutesWithTargets(): Promise<RouteDTO[]> {
       return `${p?.name ?? "?"} / ${m.modelId}`;
     };
     return buildFrom(routeRows, targetRows, lookup);
-  } catch (err) {
-    markDbUnavailable(err);
-    return [];
-  }
+  });
+  return result ?? [];
+}
+
+export async function listRouteCategories(): Promise<RouteCategoryDTO[]> {
+  const result = await readThrough("admin:categories", async () => {
+    const rows = await getDb()
+      .select()
+      .from(routeCategories)
+      .orderBy(asc(routeCategories.sortOrder), asc(routeCategories.id));
+    return rows.map((c) => ({
+      id: c.id,
+      name: c.name,
+      logoUrl: c.logoUrl ?? null,
+      sortOrder: c.sortOrder,
+    }));
+  });
+  return result ?? [];
 }
 
 // ---------------------------------------------------------------------
@@ -419,9 +440,7 @@ export type KeyLimitDTO = {
 
 /** ทุก provider เรียงตาม id (แถวไหนยังไม่มีกติกา = rule null) */
 export async function listKeyLimits(): Promise<KeyLimitDTO[]> {
-  if (isDbUnavailable()) return [];
-
-  try {
+  const result = await readThrough("admin:key-limits", async () => {
     const db = getDb();
     const [providerRows, keyRows, ruleRows] = await Promise.all([
       db.select().from(providers).orderBy(asc(providers.id)),
@@ -438,10 +457,8 @@ export async function listKeyLimits(): Promise<KeyLimitDTO[]> {
         .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary) || a.id - b.id)
         .map(keyDTO),
     }));
-  } catch (err) {
-    markDbUnavailable(err);
-    return [];
-  }
+  });
+  return result ?? [];
 }
 
 /** ตั้ง/แก้กติกาของ provider หนึ่งราย — ต้องมีเงื่อนไขจับอย่างน้อยหนึ่งช่อง */
@@ -492,8 +509,7 @@ export async function upsertKeyLimit(input: {
 // ---------------------------------------------------------------------
 
 export async function listAssets(): Promise<AssetDTO[]> {
-  if (isDbUnavailable()) return [];
-  try {
+  const result = await readThrough("admin:assets", async () => {
     const rows = await getDb().select().from(assets).orderBy(asc(assets.id));
     return rows.map((a) => ({
       id: a.id,
@@ -501,10 +517,8 @@ export async function listAssets(): Promise<AssetDTO[]> {
       publicUrl: a.publicUrl,
       storagePath: a.storagePath,
     }));
-  } catch (err) {
-    markDbUnavailable(err);
-    return [];
-  }
+  });
+  return result ?? [];
 }
 
 export async function createAsset(input: {
@@ -544,6 +558,11 @@ export async function deleteAsset(id: number): Promise<ActionResult> {
   await db.delete(assets).where(eq(assets.id, id));
   if (a) {
     await db.update(models).set({ logoUrl: null }).where(eq(models.logoUrl, a.publicUrl));
+    await db
+      .update(routeCategories)
+      .set({ logoUrl: null })
+      .where(eq(routeCategories.logoUrl, a.publicUrl));
+    await db.update(routes).set({ logoUrl: null }).where(eq(routes.logoUrl, a.publicUrl));
   }
   return { ok: true };
 }
@@ -658,38 +677,178 @@ export async function setModelPricing(
 }
 
 // ---------------------------------------------------------------------
-// Route CRUD
+// หมวด/แบรนด์ (route_categories)
 // ---------------------------------------------------------------------
 
-export async function upsertRoute(input: {
+export async function upsertRouteCategory(input: {
   id?: number;
-  publicModel: string;
-  description: string;
+  name: string;
+  logoUrl: string | null;
+  sortOrder?: number;
 }): Promise<ActionResult> {
-  const publicModel = input.publicModel.trim().toLowerCase().replace(/\s+/g, "-");
-  if (!publicModel) return { ok: false, error: "กรอกชื่อโมเดลสาธารณะ" };
-
+  const name = input.name.trim();
+  if (!name) return { ok: false, error: "กรอกชื่อหมวดก่อนบันทึก" };
   if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
 
   const db = getDb();
   try {
     if (input.id) {
       await db
+        .update(routeCategories)
+        .set({
+          name,
+          logoUrl: input.logoUrl,
+          ...(input.sortOrder === undefined ? {} : { sortOrder: input.sortOrder }),
+        })
+        .where(eq(routeCategories.id, input.id));
+      // route ทุกตัวในหมวดนี้ใช้รูปเดียวกับหมวด — เปลี่ยนรูปที่หมวดแล้วต้องตามไปด้วย
+      await db
         .update(routes)
-        .set({ publicModel, description: input.description.trim() })
-        .where(eq(routes.id, input.id));
+        .set({ logoUrl: input.logoUrl })
+        .where(eq(routes.categoryId, input.id));
     } else {
-      await db.insert(routes).values({
-        publicModel,
-        description: input.description.trim(),
-        displayName: publicModel
-          .split("-")
-          .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
-          .join(" "),
+      const max = await db.select({ sortOrder: routeCategories.sortOrder }).from(routeCategories);
+      await db.insert(routeCategories).values({
+        name,
+        logoUrl: input.logoUrl,
+        sortOrder:
+          input.sortOrder ?? max.reduce((top, row) => Math.max(top, row.sortOrder), 0) + 1,
       });
     }
-  } catch {
-    return { ok: false, error: "มีชื่อ route นี้แล้ว" };
+  } catch (err) {
+    console.error("[admin] บันทึกหมวดไม่สำเร็จ:", err);
+    return { ok: false, error: "บันทึกหมวดไม่สำเร็จ" };
+  }
+  return { ok: true };
+}
+
+export async function deleteRouteCategory(id: number): Promise<ActionResult> {
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
+  await getDb().delete(routeCategories).where(eq(routeCategories.id, id));
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------
+// Route CRUD
+// ---------------------------------------------------------------------
+
+function slugName(publicModel: string): string {
+  return publicModel
+    .split("-")
+    .filter(Boolean)
+    .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+    .join(" ");
+}
+
+/**
+ * สร้าง/แก้ route พร้อมทุกค่าที่ผู้ใช้เห็น — ชื่อ, id, หมวด+รูป, ราคา, โหมด,
+ * และโมเดลปลายทางตัวแรก (ตอนสร้างใหม่)
+ *
+ * หมวดกับรูปเป็นค่าเดียวกัน: logoUrl ของ route ถูกดึงจากหมวดที่เลือกเสมอ
+ */
+export async function upsertRoute(input: {
+  id?: number;
+  publicModel: string;
+  description: string;
+  displayName?: string;
+  displayMode?: string;
+  categoryId?: number | null;
+  inputPricePerM?: number;
+  outputPricePerM?: number;
+  firstTargetModelRefId?: number | null;
+  newCategoryName?: string;
+  newCategoryLogoUrl?: string | null;
+}): Promise<ActionResult> {
+  const publicModel = input.publicModel.trim().toLowerCase().replace(/\s+/g, "-");
+  if (!publicModel) return { ok: false, error: "กรอก id ของโมเดลก่อนบันทึก" };
+
+  const inputPrice = Number(input.inputPricePerM ?? 0);
+  const outputPrice = Number(input.outputPricePerM ?? 0);
+  if (!Number.isFinite(inputPrice) || inputPrice < 0) {
+    return { ok: false, error: "ราคา input ต้องไม่ติดลบ" };
+  }
+  if (!Number.isFinite(outputPrice) || outputPrice < 0) {
+    return { ok: false, error: "ราคา output ต้องไม่ติดลบ" };
+  }
+
+  if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
+
+  const db = getDb();
+  try {
+    let categoryId =
+      Number.isFinite(input.categoryId) && input.categoryId ? input.categoryId : null;
+    const firstTargetId =
+      Number.isFinite(input.firstTargetModelRefId) && input.firstTargetModelRefId
+        ? input.firstTargetModelRefId
+        : null;
+    const newCategoryName = input.newCategoryName?.trim() ?? "";
+    if (!input.id && newCategoryName) {
+      const inserted = await db
+        .insert(routeCategories)
+        .values({ name: newCategoryName, logoUrl: input.newCategoryLogoUrl ?? null })
+        .returning();
+      categoryId = inserted[0]?.id ?? null;
+    }
+
+    let categoryLogo: string | null = null;
+    if (categoryId) {
+      const category = (
+        await db.select().from(routeCategories).where(eq(routeCategories.id, categoryId))
+      )[0];
+      if (!category) return { ok: false, error: "ไม่พบหมวดที่เลือก" };
+      categoryLogo = category.logoUrl ?? null;
+    }
+
+    const displayName =
+      input.displayName?.trim() || slugName(publicModel) || publicModel;
+    const displayMode = input.displayMode === "model" ? "model" : "router";
+
+    if (input.id) {
+      await db
+        .update(routes)
+        .set({
+          publicModel,
+          description: input.description.trim(),
+          displayName,
+          displayMode,
+          categoryId,
+          logoUrl: categoryLogo,
+          inputPricePerM: inputPrice,
+          outputPricePerM: outputPrice,
+        })
+        .where(eq(routes.id, input.id));
+    } else {
+      await db.transaction(async (tx) => {
+        const inserted = await tx
+          .insert(routes)
+          .values({
+            publicModel,
+            description: input.description.trim(),
+            displayName,
+            displayMode,
+            categoryId,
+            logoUrl: categoryLogo,
+            inputPricePerM: inputPrice,
+            outputPricePerM: outputPrice,
+          })
+          .returning();
+
+        if (firstTargetId && inserted[0]) {
+          await tx.insert(routeTargets).values({
+            routeId: inserted[0].id,
+            modelRefId: firstTargetId,
+            priority: 1,
+          });
+        }
+      });
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    if (/duplicate|unique|23505/i.test(msg)) {
+      return { ok: false, error: "มี id ของโมเดลนี้แล้ว" };
+    }
+    console.error("[admin] บันทึก route ไม่สำเร็จ:", err);
+    return { ok: false, error: "บันทึก route ไม่สำเร็จ" };
   }
   return { ok: true };
 }

@@ -22,6 +22,7 @@ import { isKeyLimited, orderedKeys, type RotatableKey } from "@/lib/rotation";
 import { keyLimitRule, matchKeyLimit, nextResetAt } from "@/lib/key-limit";
 import { internalIdentities, maskInternals, type InternalIdentities } from "@/lib/public-text";
 import { markKeyLimited, recordKeyResult } from "@/lib/data/admin";
+import { withDbRetry } from "@/lib/db-retry";
 
 /** การเรียกเครื่องมือที่โมเดลขอ (OpenAI function calling) */
 export type UpstreamToolCall = {
@@ -94,9 +95,8 @@ const CATALOG_TTL_MS = 60_000;
 export function resolveTargets(publicModel: string): Promise<GatewayTarget[]> {
   const name = publicModel.trim();
   if (!name) return Promise.resolve([]);
-  // ตอน DB ถูกข้าม อย่าแคชผลว่างไว้ ไม่งั้น route จะหายไปจนครบอายุแคชทั้งที่ DB ฟื้นแล้ว
-  if (isDbUnavailable()) return Promise.resolve([]);
-  return cached(`targets:${name}`, CATALOG_TTL_MS, () => loadTargets(name));
+  // ถ้าอ่านไม่สำเร็จ cached() จะลบ promise ทิ้งเอง — อย่าเก็บ [] ไว้ให้ AI ใช้ไม่ได้ทั้งนาที
+  return cached(`targets:${name}`, CATALOG_TTL_MS, () => loadTargets(name)).catch(() => []);
 }
 
 async function loadTargets(publicModel: string): Promise<GatewayTarget[]> {
@@ -105,7 +105,13 @@ async function loadTargets(publicModel: string): Promise<GatewayTarget[]> {
 
   const catalog = await getCatalog();
   const route = catalog.routes.find((r) => r.enabled && r.publicModel === name);
-  if (!route) return [];
+  if (!route) {
+    // แคตตาล็อกว่างเพราะเพิ่งอ่าน DB ไม่ได้ → ห้ามแคชผล "ไม่พบ route"
+    if (catalog.routes.length === 0 && isDbUnavailable()) {
+      throw new Error("catalog unavailable");
+    }
+    return [];
+  }
 
   const modelById = new Map(catalog.models.map((m) => [m.id, m]));
   const providerById = new Map(catalog.providers.map((p) => [p.id, p]));
@@ -142,18 +148,26 @@ type UsableKey = RotatableKey & { apiKey: string; label: string };
  */
 const KEYS_TTL_MS = 30_000;
 
+const lastGoodKeys = new Map<number, UsableKey[]>();
+
 function keysOf(providerId: number): Promise<UsableKey[]> {
-  // ตอน DB ถูกข้าม อย่าเก็บผลว่างลงแคช 30 วินาที จะทำให้คีย์จริงหายไปทั้งชุด
-  if (isDbUnavailable()) return Promise.resolve([]);
-  return cached(`keys:${providerId}`, KEYS_TTL_MS, () => loadKeys(providerId));
+  // ระหว่าง DB สะดุด ใช้ชุดคีย์ที่เพิ่งอ่านสำเร็จแทนการตอบว่า "ยังไม่ได้ตั้งค่าคีย์"
+  if (isDbUnavailable() && lastGoodKeys.has(providerId)) {
+    return Promise.resolve(lastGoodKeys.get(providerId) ?? []);
+  }
+  return cached(`keys:${providerId}`, KEYS_TTL_MS, () => loadKeys(providerId))
+    .then((keys) => {
+      lastGoodKeys.set(providerId, keys);
+      return keys;
+    })
+    .catch(() => lastGoodKeys.get(providerId) ?? []);
 }
 
 async function loadKeys(providerId: number): Promise<UsableKey[]> {
   try {
-    const rows = await getDb()
-      .select()
-      .from(providerKeys)
-      .where(eq(providerKeys.providerId, providerId));
+    const rows = await withDbRetry(() =>
+      getDb().select().from(providerKeys).where(eq(providerKeys.providerId, providerId)),
+    );
     return rows.map((k) => ({
       id: k.id,
       label: k.label,
@@ -167,7 +181,7 @@ async function loadKeys(providerId: number): Promise<UsableKey[]> {
     }));
   } catch (err) {
     markDbUnavailable(err);
-    return [];
+    throw err;
   }
 }
 
@@ -186,6 +200,11 @@ export type InvokeInput = {
   tools?: unknown[];
   /** จำกัดเฉพาะปลายทางที่ผู้ใช้มีสิทธิ์ใช้ (เช่น โมเดลที่รับรูปได้) */
   filter?: (t: GatewayTarget) => boolean;
+  /**
+   * ผู้ใช้ปิด connection (กดหยุด) — abort fetch ต้นทางทันที
+   * ต้องไม่นับเป็นความล้มเหลวของคีย์/ปลายทาง เพราะคีย์ยังดีอยู่
+   */
+  signal?: AbortSignal;
 };
 
 export type InvokeResult = {
@@ -294,6 +313,7 @@ export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> 
 
     for (const picked of candidates) {
       attempted = true;
+      if (input.signal?.aborted) throw new GatewayError("upstream_error", "client_aborted", 499);
 
       let res: Response;
       try {
@@ -304,8 +324,13 @@ export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> 
             Authorization: `Bearer ${picked.apiKey}`,
           },
           body: JSON.stringify(payload),
+          signal: input.signal,
         });
       } catch (err) {
+        // ผู้ใช้กดหยุด — อย่าไปพักคีย์หรือลดสถานะคีย์เพราะ abort
+        if (input.signal?.aborted) {
+          throw new GatewayError("upstream_error", "client_aborted", 499);
+        }
         sawOtherFailure = true;
         console.error(`[gateway] ${target.providerName} (${picked.label}) เรียกไม่สําเร็จ:`, err);
         lastError = "โมเดลปลายทางเชื่อมต่อไม่ได้";

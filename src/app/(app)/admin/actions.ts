@@ -244,12 +244,42 @@ export async function deleteModelAction(formData: FormData) {
 export async function saveRouteAction(formData: FormData) {
   await requireAdmin();
   const idRaw = str(formData, "id");
+  const categoryRaw = str(formData, "categoryId");
+  const firstTargetRaw = str(formData, "firstTargetModelRefId");
+  const logoRaw = str(formData, "newCategoryLogoUrl");
   const result = await admin.upsertRoute({
     id: idRaw ? Number(idRaw) : undefined,
     publicModel: str(formData, "publicModel"),
     description: str(formData, "description"),
+    displayName: str(formData, "displayName"),
+    displayMode: str(formData, "displayMode"),
+    categoryId: categoryRaw ? Number(categoryRaw) : null,
+    inputPricePerM: Number(str(formData, "inputPricePerM")) || 0,
+    outputPricePerM: Number(str(formData, "outputPricePerM")) || 0,
+    firstTargetModelRefId: firstTargetRaw ? Number(firstTargetRaw) : null,
+    newCategoryName: str(formData, "newCategoryName"),
+    newCategoryLogoUrl: logoRaw.trim() || null,
   });
   if (!result.ok) redirect(`/admin/models?error=${encodeURIComponent(result.error!)}`);
+  revalidateAdmin();
+}
+
+export async function saveRouteCategoryAction(formData: FormData) {
+  await requireAdmin();
+  const idRaw = str(formData, "id");
+  const logoRaw = str(formData, "logoUrl");
+  const result = await admin.upsertRouteCategory({
+    id: idRaw ? Number(idRaw) : undefined,
+    name: str(formData, "name"),
+    logoUrl: logoRaw.trim() || null,
+  });
+  if (!result.ok) redirect(`/admin/models?error=${encodeURIComponent(result.error!)}`);
+  revalidateAdmin();
+}
+
+export async function deleteRouteCategoryAction(formData: FormData) {
+  await requireAdmin();
+  await admin.deleteRouteCategory(Number(str(formData, "id")));
   revalidateAdmin();
 }
 
@@ -358,12 +388,12 @@ export async function setModelPricingAction(formData: FormData) {
 
 export async function updateRouteSettingsAction(formData: FormData) {
   await requireAdmin();
-  const logoRaw = str(formData, "logoUrl");
+  const categoryRaw = str(formData, "categoryId");
   const result = await plansData.updateRouteSettings({
     id: Number(str(formData, "id")),
     displayMode: str(formData, "displayMode"),
     displayName: str(formData, "displayName"),
-    logoUrl: logoRaw.trim() === "" ? null : logoRaw.trim(),
+    categoryId: categoryRaw ? Number(categoryRaw) : null,
     inputPricePerM: Number(str(formData, "inputPricePerM")),
     outputPricePerM: Number(str(formData, "outputPricePerM")),
   });

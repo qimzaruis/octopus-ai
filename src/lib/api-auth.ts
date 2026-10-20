@@ -9,7 +9,8 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { apiKeys, users } from "@/db/schema";
-import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
+import { markDbUnavailable } from "@/lib/db-circuit";
+import { withDbRetry } from "@/lib/db-retry";
 import type { SessionUser } from "@/lib/auth";
 
 export type ApiPrincipal = {
@@ -32,17 +33,16 @@ export async function authenticateApiKey(
   const secret = bearerKey(req);
   if (!secret) return null;
 
-
-  if (isDbUnavailable()) return null;
-
   try {
     const db = getDb();
-    const rows = await db
-      .select({ key: apiKeys, user: users })
-      .from(apiKeys)
-      .innerJoin(users, eq(users.id, apiKeys.userId))
-      .where(and(eq(apiKeys.secret, secret), eq(apiKeys.revoked, false)))
-      .limit(1);
+    const rows = await withDbRetry(() =>
+      db
+        .select({ key: apiKeys, user: users })
+        .from(apiKeys)
+        .innerJoin(users, eq(users.id, apiKeys.userId))
+        .where(and(eq(apiKeys.secret, secret), eq(apiKeys.revoked, false)))
+        .limit(1),
+    );
     const row = rows[0];
     if (!row) return null;
 

@@ -39,6 +39,7 @@ export async function loadAgentModels(planKey: string): Promise<AgentModel[]> {
         id: r.publicModel,
         label: r.displayName || r.publicModel,
         logoUrl: r.logoUrl,
+        category: r.category,
         description: r.description,
         inputPricePerM: r.inputPricePerM,
         outputPricePerM: r.outputPricePerM,

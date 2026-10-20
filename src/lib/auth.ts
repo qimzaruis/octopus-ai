@@ -26,6 +26,12 @@ const PROFILE_TTL_MS = 15_000;
 type SessionMemo = { at: number; token: string; uid?: string; value: Promise<SessionUser | null> };
 const sessionMemo = new Map<string, SessionMemo>();
 
+/**
+ * โปรไฟล์จริงล่าสุดต่อ uid — ใช้เมื่อ DB สะดุดแทนการเดาว่าเป็น free/user
+ * (เดาแล้วแอดมินหลุดสิทธิ์และโมเดลที่ต้องใช้แผนจะหายไปชั่วคราว)
+ */
+const lastGoodProfiles = new Map<string, SessionUser>();
+
 function tokenKey(token: string): string {
   return createHash("sha256").update(token).digest("hex").slice(0, 32);
 }
@@ -129,8 +135,13 @@ async function resolveSessionUser(
 
   const meta = (user.user_metadata ?? {}) as Record<string, string | undefined>;
 
-  // circuit breaker: ถ้า DB เพิ่งล้ม ให้ใช้ fallback profile ทันที
+  // circuit breaker: ถ้า DB เพิ่งล้ม ให้ใช้โปรไฟล์จริงล่าสุดก่อน แล้วค่อย fallback จาก session
   if (isDbUnavailable()) {
+    const known = lastGoodProfiles.get(user.id);
+    if (known) {
+      console.warn("[auth] DB ถูกข้ามชั่วคราว (circuit breaker) → ใช้โปรไฟล์ล่าสุด");
+      return { ...known };
+    }
     console.warn("[auth] DB ถูกข้ามชั่วคราว (circuit breaker) → ใช้ profile จาก session");
     return {
       id: user.id,
@@ -174,7 +185,7 @@ async function resolveSessionUser(
         row = inserted[0];
       }
 
-      return {
+      const profile: SessionUser = {
         id: row.id,
         email: row.email,
         name: row.name,
@@ -185,6 +196,9 @@ async function resolveSessionUser(
         banned: row.banned,
         bannedReason: row.bannedReason,
       };
+      if (lastGoodProfiles.size > 1000) lastGoodProfiles.clear();
+      lastGoodProfiles.set(profile.id, profile);
+      return profile;
     };
     /**
      * อ่าน profile จากแคชก่อน — query หนึ่งรอบไป Supabase จากเครื่องผู้ใช้คิดเป็น ~350ms
@@ -224,6 +238,8 @@ async function resolveSessionUser(
     // ใช้โปรไฟล์จาก session ของ Supabase ไปพลาง ๆ
     markDbUnavailable(err);
     console.error("[auth] อ่าน/สร้าง profile จาก DB ไม่สําเร็จ:", err);
+    const known = lastGoodProfiles.get(user.id);
+    if (known) return { ...known };
     return {
       id: user.id,
       email: user.email ?? "",

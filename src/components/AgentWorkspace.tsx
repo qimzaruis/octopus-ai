@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useT } from "@/lib/i18n/client";
 import type { ChatAttachment, ChatConversation } from "@/lib/chat/db";
@@ -36,7 +36,7 @@ export type { AgentModel } from "@/components/ModelPicker";
 type ToolStep = {
   id: string;
   label: string;
-  state: "running" | "done" | "error";
+  state: "running" | "done" | "error" | "stopped";
 };
 
 type UiMessage = {
@@ -47,6 +47,12 @@ type UiMessage = {
   steps?: ToolStep[];
   /** สิ่งที่โมเดลบอกก่อนเรียกเครื่องมือแต่ละรอบ (แสดงในกล่อง "กำลังคิด") */
   notes?: string[];
+  /** เวลาที่ใช้ทั้งรอบ (คิด + เรียกเครื่องมือ) — แสดงในกล่องขั้นตอนหลังจบ */
+  thinkingMs?: number;
+  /** ผู้ใช้กดหยุดเอง — ข้อความอาจมีคำตอบบางส่วน */
+  stopped?: boolean;
+  /** ข้อความ error ที่อ่านรู้เรื่อง (เก็บแยกจากเนื้อคำตอบ เพื่อแสดงกล่องแจ้งเตือน) */
+  error?: string;
 };
 
 export type AgentUiMessage = UiMessage;
@@ -147,56 +153,128 @@ function ThinkingPanel({
   running,
   notes,
   steps,
+  startedAt,
+  durationMs,
+  /** มีข้อความคำตอบไหลอยู่แล้ว — พับกล่องให้อัตโนมัติ จะได้ไม่บังคำตอบ */
+  hasText = false,
 }: {
   running: boolean;
   notes: string[];
   steps: ToolStep[];
+  startedAt?: number;
+  durationMs?: number;
+  hasText?: boolean;
 }) {
   const t = useT();
+  const regionId = useId();
   const [manual, setManual] = useState<boolean | null>(null);
-  const open = manual ?? running;
-  if (notes.length === 0 && steps.length === 0) return null;
-  return (
-    <div className="mt-2 overflow-hidden rounded-lg bg-ink-950/40 ring-1 ring-white/[0.06]">
-      <button
-        type="button"
-        onClick={() => setManual(!open)}
-        aria-expanded={open}
-        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-micro text-fg-subtle transition hover:text-fg"
-      >
-        <Icon
-          name={running ? "fa-circle-notch" : "fa-lightbulb"}
-          className={running ? "animate-spin" : "text-amber-glow"}
-        />
-        <span>{running ? t("กำลังคิด...") : t("ขั้นตอนการทำงาน")}</span>
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!running) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [running]);
+
+  const elapsed = running
+    ? startedAt
+      ? Math.max(0, Math.floor((now - startedAt) / 1000))
+      : null
+    : durationMs != null
+      ? Math.max(1, Math.round(durationMs / 1000))
+      : null;
+
+  const activeStep = running ? [...steps].reverse().find((s) => s.state === "running") : undefined;
+  const expandable = notes.length > 0 || steps.length > 0;
+  // ไม่มีอะไรให้กาง และคำตอบเริ่มไหลแล้ว → ซ่อนแถว "กำลังคิด" ไม่ให้เกะกะเหนือคำตอบ
+  if (!expandable && (!running || hasText)) return null;
+
+  // ระหว่างที่ยังไม่มีคำตอบให้กางไว้ก่อน (เห็นว่ากำลังทำอะไร) พอคำตอบเริ่มไหลค่อยพับ
+  const open = expandable && (manual ?? (running && !hasText));
+
+  const title = running
+    ? (activeStep?.label ?? (hasText ? t("ขั้นตอนการทำงาน") : t("กำลังคิด...")))
+    : elapsed !== null
+      ? t("ใช้เวลา {n} วิ", { n: elapsed })
+      : t("ขั้นตอนการทำงาน");
+  const meta = running
+    ? elapsed != null && elapsed > 0
+      ? t("{n} วิ", { n: elapsed })
+      : null
+    : steps.length > 0
+      ? t("{n} ขั้นตอน", { n: steps.length })
+      : null;
+
+  const head = (
+    <>
+      <Icon
+        name={running ? "fa-circle-notch" : "fa-lightbulb"}
+        className={`shrink-0 ${running ? "animate-spin text-brand-300" : "text-amber-glow"}`}
+      />
+      <span className="min-w-0 flex-1 truncate">{title}</span>
+      {meta && <span className="shrink-0 text-micro tabular-nums text-fg-subtle">{meta}</span>}
+      {expandable && (
         <Icon
           name={open ? "fa-chevron-up" : "fa-chevron-down"}
-          className="ml-auto shrink-0"
+          className="shrink-0 text-micro text-fg-subtle"
         />
-      </button>
+      )}
+    </>
+  );
+  const headClass =
+    "touch-min flex w-full items-center gap-2 px-3 py-2 text-left text-caption text-fg-subtle transition";
+
+  return (
+    <div className="mb-2 mt-2 overflow-hidden rounded-xl bg-white/[0.025] ring-1 ring-white/[0.06]">
+      {expandable ? (
+        <button
+          type="button"
+          onClick={() => setManual(!open)}
+          aria-expanded={open}
+          aria-controls={regionId}
+          className={`${headClass} hover:bg-white/[0.02] hover:text-fg`}
+        >
+          {head}
+        </button>
+      ) : (
+        <div className={headClass} aria-live="polite">
+          {head}
+        </div>
+      )}
       {open && (
-        <div className="space-y-1.5 border-t border-white/[0.06] px-2.5 py-2">
+        <div
+          id={regionId}
+          className="space-y-2.5 border-t border-white/[0.06] px-3 py-2.5"
+        >
           {notes.map((note, i) => (
-            <p key={`note-${i}`} className="whitespace-pre-wrap text-micro leading-relaxed text-fg-subtle">
+            <p
+              key={`note-${i}`}
+              className="whitespace-pre-wrap border-l-2 border-white/[0.10] pl-2.5 text-caption leading-relaxed text-fg-subtle"
+            >
               {note}
             </p>
           ))}
           {steps.map((s) => (
-            <p key={s.id} className="flex items-center gap-2 text-micro text-fg-subtle">
+            <p key={s.id} className="flex items-center gap-2 text-caption text-fg-muted">
               <Icon
                 name={
                   s.state === "running"
                     ? "fa-circle-notch"
-                    : s.state === "error"
-                      ? "fa-circle-xmark"
-                      : "fa-circle-check"
+                    : s.state === "stopped"
+                      ? "fa-stop"
+                      : s.state === "error"
+                        ? "fa-circle-xmark"
+                        : "fa-circle-check"
                 }
                 className={`shrink-0 ${
                   s.state === "running"
-                    ? "animate-spin"
-                    : s.state === "error"
-                      ? "text-rose-300"
-                      : "text-leaf"
+                    ? "animate-spin text-brand-300"
+                    : s.state === "stopped"
+                      ? "text-fg-subtle"
+                      : s.state === "error"
+                        ? "text-rose-300"
+                        : "text-leaf"
                 }`}
               />
               <span className="min-w-0 truncate">{s.label}</span>
@@ -267,6 +345,23 @@ export default function AgentWorkspace({
   const switchSeqRef = useRef(0);
   /** ตั้งชื่อไฟล์จากที่วาง (pasted-1.txt, pasted-2.txt) */
   const pasteSeqRef = useRef(0);
+  /** คำค้นในประวัติแชท (กรองฝั่ง client — รายการถูกโหลดมาครบแล้ว) */
+  const [historyQuery, setHistoryQuery] = useState("");
+  /**
+   * ลำดับของ run ที่กำลังทำงาน — ทุก async ต้องตรวจว่าตัวเองยังเป็น run ปัจจุบันก่อนเขียน state
+   *
+   * บั๊กเดิม: กดหยุดระหว่าง "กำลังคิด" แล้วพิมพ์คำถามใหม่ รอบเก่ายังทำงานต่อ
+   * (await tool/approval) แล้วเขียน notes/steps/loading ของรอบเก่าทับรอบใหม่
+   * ตัวเลขนี้ทำให้รอบเก่าเห็นว่าตัวเอง stale แล้วเลิกแตะ UI ทั้งหมด
+   */
+  const runSeqRef = useRef(0);
+  const stepsRef = useRef<ToolStep[]>([]);
+  const notesRef = useRef<string[]>([]);
+  /** กันการกดส่งซ้ำก่อน React จะ re-render ด้วย loading = true */
+  const busyRef = useRef(false);
+  /** ข้อความที่ stream ล่าสุด — ใช้กู้คำตอบบางส่วนตอน error/กดหยุด */
+  const answerRef = useRef("");
+  const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
 
   // ---- เครื่องมือเอเจนต์ — การอ่าน/เขียนไฟล์เกิดในเครื่องผู้ใช้ ----
   const [workspace, setWorkspace] = useState<FileSystemDirectoryHandle | null>(null);
@@ -309,6 +404,11 @@ export default function AgentWorkspace({
 
   // เปลี่ยนห้องจากลิงก์ /c/<id> — React ใช้ component เดิมต่อ จึงต้อง sync state กับ props
   useEffect(() => {
+    // ถ้ามี run ค้างอยู่ (เช่นกดลิงก์ระหว่างรอคำตอบ) ต้องทำให้เป็น run เก่าก่อนสลับห้อง
+    runSeqRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setLoading(false);
     setActiveId(conversationId);
     setMessages(initialMessages ?? []);
     setArtifacts(initialArtifacts ?? []);
@@ -317,8 +417,23 @@ export default function AgentWorkspace({
     setAttachments([]);
     setEditingIndex(null);
     setNotice(null);
+    setSteps([]);
+    setNotes([]);
+    stepsRef.current = [];
+    notesRef.current = [];
+    setRunStartedAt(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
+
+  // ออกจากหน้าแชทระหว่างที่ยัง stream อยู่ — ตัด fetch ทิ้ง ไม่ให้กิน token ต่อ
+  useEffect(
+    () => () => {
+      runSeqRef.current += 1;
+      abortRef.current?.abort();
+      approveRef.current?.(false);
+    },
+    [],
+  );
 
   /* สถานะ "ย่อแถบข้าง" เป็นของจอใหญ่เท่านั้น ( sidebar ถาวร ) — บนมือถือมันคือ drawer
      ที่ลากออกมา ถ้ายอมให้ค่าจาก localStorage มาบังคับด้วย ผู้ใช้ที่เคยย่อบนเดสก์ท็อป
@@ -364,12 +479,23 @@ export default function AgentWorkspace({
     (force = false) => {
       if (!force && !isNearBottom()) return;
       setAtBottom(true);
-      requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-      });
+      const apply = () => {
+        const el = scrollRef.current;
+        if (!el) return;
+        // ระหว่าง stream ต้องกระโดดแบบ instant: smooth ที่ถูกรีสตาร์ททุก chunk จะสั่น
+        el.scrollTop = el.scrollHeight;
+      };
+      // force = ข้อความใหม่เพิ่งถูกเพิ่มใน state; รอให้ React commit ก่อนแล้วค่อยวัดความสูง
+      requestAnimationFrame(force ? () => requestAnimationFrame(apply) : apply);
     },
     [isNearBottom],
   );
+
+  /** ปุ่มลูกศรลง — ผู้ใช้ตั้งใจกด จึงค่อยเลื่อนแบบ smooth */
+  const jumpToBottom = useCallback(() => {
+    setAtBottom(true);
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, []);
 
   /** ผู้ใช้เลื่อนขึ้นมาอ่านเอง → หยุดเลื่อนตาม แล้วโชว์ปุ่มลงข้างล่าง */
   function handleScroll() {
@@ -438,12 +564,42 @@ export default function AgentWorkspace({
 
   const remaining = Math.max(0, maxAttachments - attachments.length);
 
+  /**
+   * ยกเลิก run ที่กำลังทำงานทันที
+   *
+   * เพิ่มเลข run ก่อน abort เพื่อให้ทุก await ที่ยังค้างอยู่ของรอบเก่ารู้ตัวว่า stale
+   * แล้วไม่เขียนทับ UI ของรอบใหม่ (ต้นเหตุของ "think อันเก่าโผล่มาอีก")
+   */
+  function cancelActiveRun() {
+    runSeqRef.current += 1;
+    busyRef.current = false;
+    const controller = abortRef.current;
+    abortRef.current = null;
+    controller?.abort();
+    // ถ้ากล่องขออนุญาตไฟล์เปิดอยู่ ต้องปิดและคืน false ให้ runTool ไปต่อได้ ไม่ค้างตลอดกาล
+    approveRef.current?.(false);
+    approveRef.current = null;
+    setPending(null);
+    setLoading(false);
+    setSteps([]);
+    setNotes([]);
+    stepsRef.current = [];
+    notesRef.current = [];
+    answerRef.current = "";
+    setRunStartedAt(null);
+  }
+
   function startNewChat() {
+    cancelActiveRun();
+    // ยกเลิก fetch ห้องเก่าที่ค้างอยู่ด้วย (ผู้ใช้อาจกดห้องแล้วเปลี่ยนใจมาแชทใหม่)
+    switchSeqRef.current += 1;
+    setSwitchingId(null);
     setActiveId(null);
     setMessages([]);
     setArtifacts([]);
     setInput("");
     setAttachments([]);
+    setEditingIndex(null);
     setNotice(null);
     setDrawerOpen(false);
     // replaceState ไม่ทำให้ page component รีเมานต์ → ข้อความที่พิมพ์ไว้ไม่หาย
@@ -466,7 +622,7 @@ export default function AgentWorkspace({
       return;
     }
     const seq = ++switchSeqRef.current;
-    abortRef.current?.abort(); // ห้องก่อนหน้ายังตอบไม่จบ — หยุดก่อน ไม่งั้นข้อความจะข้ามห้อง
+    cancelActiveRun(); // ห้องก่อนหน้ายังตอบไม่จบ — หยุดก่อน ไม่งั้นข้อความจะข้ามห้อง
     setDrawerOpen(false);
     setActiveId(id);
     setSwitchingId(id);
@@ -474,8 +630,6 @@ export default function AgentWorkspace({
     setAttachments([]);
     setEditingIndex(null);
     setNotice(null);
-    setSteps([]);
-    setNotes([]);
     setMessages([]);
     if (pathname !== `/c/${id}`) window.history.replaceState(null, "", `/c/${id}`);
     try {
@@ -523,6 +677,7 @@ export default function AgentWorkspace({
   async function confirmDelete() {
     const id = pendingDelete;
     if (!id) return;
+    const removed = conversations.find((c) => c.id === id);
     setDeleting(true);
     setConversations((prev) => prev.filter((c) => c.id !== id));
     if (activeId === id) startNewChat();
@@ -531,6 +686,14 @@ export default function AgentWorkspace({
       if (!res.ok) throw new Error(String(res.status));
       setPendingDelete(null);
     } catch {
+      // ลบไม่สำเร็จ = ยังมีห้องอยู่ใน DB → คืนรายการกลับ ไม่ให้หายจาก sidebar จนกว่าจะรีเฟรช
+      if (removed) {
+        setConversations((prev) =>
+          [removed, ...prev.filter((c) => c.id !== id)].sort((a, b) =>
+            (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt),
+          ),
+        );
+      }
       setNotice(t("ลบแชทไม่สำเร็จ"));
     } finally {
       setDeleting(false);
@@ -549,6 +712,7 @@ export default function AgentWorkspace({
     if (!title) return;
     setRenameBusy(true);
     const id = renaming.id;
+    const previous = conversations.find((c) => c.id === id)?.title ?? "";
     setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, title } : c)));
     try {
       const res = await fetch(`/api/agent/conversations/${id}`, {
@@ -559,6 +723,9 @@ export default function AgentWorkspace({
       if (!res.ok) throw new Error(String(res.status));
       setRenaming(null);
     } catch {
+      setConversations((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, title: previous } : c)),
+      );
       setNotice(t("แก้ชื่อแชทไม่สำเร็จ"));
     } finally {
       setRenameBusy(false);
@@ -590,7 +757,8 @@ export default function AgentWorkspace({
       a.href = url;
       a.download = f.name || "artifact.html";
       a.click();
-      URL.revokeObjectURL(url);
+      // เพิ่ง revoke หลัง click ทันทีทำให้บางเบราว์เซอร์ยกเลิกดาวน์โหลดก่อนเริ่ม
+      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
     } catch {
       setFilesNotice(t("ดาวน์โหลดไม่สำเร็จ ลองอีกครั้ง"));
     }
@@ -743,28 +911,38 @@ export default function AgentWorkspace({
         setNotice(t("ไฟล์ใหญ่เกิน 10MB: {name}", { name: f.name }));
         continue;
       }
-      slots.push(await fileToAttachment(f));
+      try {
+        slots.push(await fileToAttachment(f));
+      } catch {
+        setNotice(t("อ่านไฟล์ไม่สำเร็จ: {name}", { name: f.name }));
+      }
     }
     setAttachments((prev) => [...prev, ...slots].slice(0, maxAttachments));
     if (fileRef.current) fileRef.current.value = "";
   }
 
-  async function ensureConversation(): Promise<string | null> {
+  async function ensureConversation(
+    signal: AbortSignal,
+    isCurrent: () => boolean,
+  ): Promise<string | null> {
     try {
       const res = await fetch("/api/agent/conversations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model }),
+        signal,
       });
       if (!res.ok) throw new Error(String(res.status));
       const data = (await res.json()) as { conversation: ChatConversation };
+      // กดหยุด/สลับห้องระหว่างรอสร้างห้อง → ห้ามยัดห้องใหม่ทับหน้าจอที่เปลี่ยนไปแล้ว
+      if (!isCurrent() || signal.aborted) return null;
       setConversations((prev) => [data.conversation, ...prev]);
       setActiveId(data.conversation.id);
       // ให้ URL เป็น /c/<uuid> ทันทีที่ห้องถูกสร้าง (รีเฟรชแล้วยังกลับเข้ามาเจอ)
       window.history.replaceState(null, "", `/c/${data.conversation.id}`);
       return data.conversation.id;
     } catch {
-      setNotice(t("เริ่มแชทไม่สำเร็จ ลองอีกครั้ง"));
+      // ปล่อยให้ผู้เรียกแสดง error พร้อมปุ่มลองใหม่ในข้อความของผู้ช่วย
       return null;
     }
   }
@@ -837,7 +1015,10 @@ export default function AgentWorkspace({
   }
 
   function setStreamingText(text: string) {
+    answerRef.current = text;
     setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (!last || last.id !== "streaming") return prev;
       const copy = [...prev];
       copy[copy.length - 1] = { id: "streaming", role: "assistant", content: text, attachments: [] };
       return copy;
@@ -855,8 +1036,10 @@ export default function AgentWorkspace({
       toolNames: string[];
       workspaceReady: boolean;
     },
-    signal?: AbortSignal,
+    signal: AbortSignal,
+    runId: number,
   ): Promise<{ text: string; calls: AgentToolCall[] }> {
+    const current = () => runSeqRef.current === runId && !signal.aborted;
     const res = await fetch("/api/agent/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -867,6 +1050,7 @@ export default function AgentWorkspace({
       const data = (await res.json().catch(() => null)) as { error?: string } | null;
       throw new Error(data?.error || `HTTP ${res.status}`);
     }
+    if (!current()) return { text: "", calls: [] };
 
     const newTitle = res.headers.get("x-conversation-title");
     if (newTitle) {
@@ -881,94 +1065,176 @@ export default function AgentWorkspace({
     let text = "";
     let calls: AgentToolCall[] = [];
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let cut = buffer.indexOf("\n");
-      while (cut >= 0) {
-        const line = buffer.slice(0, cut).trim();
-        buffer = buffer.slice(cut + 1);
-        cut = buffer.indexOf("\n");
-        if (!line) continue;
-        let event: { t?: string; v?: unknown; text?: string; fr?: string };
-        try {
-          event = JSON.parse(line) as typeof event;
-        } catch {
-          continue;
-        }
-        if (event.fr === "length") {
-          setNotice(t("คำตอบถูกตัดเพราะยาวเกินจำกัด — ให้เอเจนต์เขียนต่อเป็นท่อน ๆ ได้"));
-        }
-        if (event.t === "d") {
-          text += String(event.v ?? "");
+    /* วาดข้อความรวมเป็นเฟรมเดียว: upstream ส่ง chunk ถี่มาก ถ้าอัปเดต state
+       ทุก chunk จะ re-render ข้อความทั้งแชทหลายสิบครั้งต่อวินาที */
+    let frame = 0;
+    const paint = () => {
+      frame = 0;
+      if (!current()) return;
+      setStreamingText(text);
+      scrollToBottom();
+    };
+    const schedulePaint = () => {
+      if (frame || !current()) return;
+      frame = requestAnimationFrame(paint);
+    };
+    const cancelPaint = () => {
+      if (frame) {
+        cancelAnimationFrame(frame);
+        frame = 0;
+      }
+    };
+
+    const handleLine = (line: string) => {
+      if (!line) return;
+      let event: { t?: string; v?: unknown; text?: string; fr?: string };
+      try {
+        event = JSON.parse(line) as typeof event;
+      } catch {
+        return;
+      }
+      if (event.fr === "length" && current()) {
+        setNotice(t("คำตอบถูกตัดเพราะยาวเกินจำกัด — ให้เอเจนต์เขียนต่อเป็นท่อน ๆ ได้"));
+      }
+      if (event.t === "d") {
+        text += String(event.v ?? "");
+        // เก็บล่าสุดไว้ใน ref ทุก chunk ไม่รอ frame — กดหยุดแล้วได้คำตอบครบถึงตัวอักษรสุดท้าย
+        if (current()) answerRef.current = text;
+        schedulePaint();
+      } else if (event.t === "tool") {
+        cancelPaint();
+        calls = (event.v as AgentToolCall[]) ?? [];
+        if (typeof event.text === "string") text = event.text;
+        if (current()) {
+          answerRef.current = text;
           setStreamingText(text);
-          scrollToBottom();
-        } else if (event.t === "tool") {
-          calls = (event.v as AgentToolCall[]) ?? [];
-          if (typeof event.text === "string") text = event.text;
-        } else if (event.t === "notice") {
-          setNotice(String(event.v ?? ""));
-        } else if (event.t === "files") {
-          // เซิร์ฟเวอร์เพิ่งบันทึก artifact ลงคลังไฟล์ → จับชื่อไว้ให้ปุ่มแชร์ในกล่องโค้ด
-          const created =
-            (event.v as { id: string; name: string; kind: string; sizeBytes: number }[]) ?? [];
-          if (created.length > 0) {
-            setArtifacts((prev) => {
-              const byName = new Map(prev.map((a) => [a.name.toLowerCase(), a]));
-              for (const f of created) {
-                byName.set(f.name.toLowerCase(), {
-                  id: f.id,
-                  name: f.name,
-                  kind: f.kind,
-                  sizeBytes: f.sizeBytes,
-                  shareUrl: null,
-                  shareExpiresAt: null,
-                });
-              }
-              return [...byName.values()];
-            });
-          }
+        }
+      } else if (event.t === "notice" && current()) {
+        setNotice(String(event.v ?? ""));
+      } else if (event.t === "files" && current()) {
+        // เซิร์ฟเวอร์เพิ่งบันทึก artifact ลงคลังไฟล์ → จับชื่อไว้ให้ปุ่มแชร์ในกล่องโค้ด
+        const created =
+          (event.v as { id: string; name: string; kind: string; sizeBytes: number }[]) ?? [];
+        if (created.length > 0) {
+          setArtifacts((prev) => {
+            const byName = new Map(prev.map((a) => [a.name.toLowerCase(), a]));
+            for (const f of created) {
+              byName.set(f.name.toLowerCase(), {
+                id: f.id,
+                name: f.name,
+                kind: f.kind,
+                sizeBytes: f.sizeBytes,
+                shareUrl: null,
+                shareExpiresAt: null,
+              });
+            }
+            return [...byName.values()];
+          });
         }
       }
+    };
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!current()) {
+          await reader.cancel().catch(() => {});
+          break;
+        }
+        buffer += decoder.decode(value, { stream: true });
+        let cut = buffer.indexOf("\n");
+        while (cut >= 0) {
+          const line = buffer.slice(0, cut).trim();
+          buffer = buffer.slice(cut + 1);
+          cut = buffer.indexOf("\n");
+          handleLine(line);
+        }
+      }
+      buffer += decoder.decode();
+      if (buffer.trim()) handleLine(buffer.trim());
+      cancelPaint();
+      if (current()) setStreamingText(text);
+      return { text, calls };
+    } finally {
+      cancelPaint();
     }
-    return { text, calls };
   }
 
   /**
-   * วนลูปแบบเอเจนต์: โมเดลขอเครื่องมือ → เบราว์เซอร์ของผู้ใช้รัน → ส่งผลกลับ → โมเดลทำต่อ
+   * หนึ่งรอบสนทนา: บันทึกคำถาม → stream → รันเครื่องมือ → stream ต่อ จนจบ
    *
-   * ข้อความผู้ใช้ถูกบันทึกครั้งเดียวในรอบแรก และบันทึกคำตอบตอนรอบสุดท้ายที่ไม่มี
-   * tool_calls — รอบกลางทาง (ข้อความเครื่องมือ) เป็นของชั่วคราวในเครื่องผู้ใช้เท่านั้น
+   * ทุก await ตรวจ runId ก่อนเขียน state เสมอ — รอบที่ถูกกดหยุด/สลับห้องแล้ว
+   * ต้องไม่ไปยุ่งกับข้อความของรอบใหม่
    */
-  async function send() {
-    const question = input.trim();
-    const files = attachments;
-    if (loading) return;
+  async function startTurn(
+    question: string,
+    files: ChatAttachment[],
+    editFrom: number | null,
+  ) {
+    if (busyRef.current) return;
     if (!question && files.length === 0) return;
     if (models.length === 0) return;
+    busyRef.current = true;
+
+    const runId = ++runSeqRef.current;
+    const isCurrent = () => runSeqRef.current === runId;
+    const startedAt = Date.now();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    answerRef.current = "";
 
     setInput("");
     setAttachments([]);
-    setNotice(null);
-
-    /**
-     * กำลังแก้ข้อความเดิมอยู่ → เล็มประวัติตั้งแต่ข้อความเป็นต้นไป ทั้งบนจอและใน DB
-     * มิฉะนั้นโมเดลจะยังเห็นคำถามเก่าที่ผู้ใช้แก้ทิ้งไปแล้ว
-     */
-    const editFrom = editingIndex;
     setEditingIndex(null);
-    if (editFrom !== null && activeId) {
+    setNotice(null);
+    setLoading(true);
+    setRunStartedAt(startedAt);
+    // ส่งข้อความ = ห้องนี้ถูกอัปเดตล่าสุด → ย้ายขึ้นบนสุดและจัดกลุ่ม "วันนี้" ทันที
+    if (activeId) {
+      const nowIso = new Date(startedAt).toISOString();
+      setConversations((prev) => {
+        const hit = prev.find((c) => c.id === activeId);
+        if (!hit) return prev;
+        return [{ ...hit, updatedAt: nowIso }, ...prev.filter((c) => c.id !== activeId)];
+      });
+    }
+    const collected: ToolStep[] = [];
+    const notesLog: string[] = [];
+    stepsRef.current = collected;
+    notesRef.current = notesLog;
+    setSteps(collected);
+    setNotes(notesLog);
+
+    type FinishPatch = {
+      content: string;
+      steps?: ToolStep[];
+      notes?: string[];
+      thinkingMs?: number;
+      stopped?: boolean;
+      error?: string;
+    };
+    const finish = (patch: FinishPatch) => {
+      if (!isCurrent()) return;
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (!last || last.id !== "streaming") return prev;
+        const copy = [...prev];
+        copy[copy.length - 1] = {
+          id: `a-${Date.now()}`,
+          role: "assistant",
+          attachments: [],
+          ...patch,
+          steps: patch.steps && patch.steps.length > 0 ? patch.steps : undefined,
+          notes: patch.notes && patch.notes.length > 0 ? [...patch.notes] : undefined,
+        };
+        return copy;
+      });
+    };
+
+    // กำลังแก้ข้อความเดิม → เล็มประวัติตั้งแต่ข้อความนั้นไป ทั้งบนจอและใน DB
+    if (editFrom !== null) {
       setMessages((prev) => prev.slice(0, editFrom));
-      try {
-        await fetch(`/api/agent/conversations/${activeId}/trim`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ from: editFrom }),
-        });
-      } catch {
-        setNotice(t("เล็มประวัติไม่สำเร็จ แต่จะส่งข้อความที่แก้ใหม่ไปแทน"));
-      }
     }
 
     const userMsg: UiMessage = {
@@ -977,73 +1243,107 @@ export default function AgentWorkspace({
       content: question,
       attachments: files,
     };
-    const sentAttachments = files;
     setMessages((prev) => [
       ...prev,
       userMsg,
       { id: "streaming", role: "assistant", content: "", attachments: [] },
     ]);
-    setLoading(true);
-    const collected: ToolStep[] = [];
-    const notesLog: string[] = [];
-    setSteps(collected);
-    setNotes(notesLog);
-    const controller = new AbortController();
-    abortRef.current = controller;
     /* ผู้ใช้กดส่งเอง = ต้องเห็นข้อความของตัวเองเสมอ แม้จะเลื่อนขึ้นไปอ่านของเก่าอยู่
        (จุดอื่นตอน stream ปล่อยให้ isNearBottom เป็นผู้ตัดสิน) */
     scrollToBottom(true);
 
+    if (editFrom !== null && activeId) {
+      try {
+        await fetch(`/api/agent/conversations/${activeId}/trim`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ from: editFrom }),
+          signal: controller.signal,
+        });
+      } catch {
+        if (!isCurrent() || controller.signal.aborted) return;
+        setNotice(t("เล็มประวัติไม่สำเร็จ แต่จะส่งข้อความที่แก้ใหม่ไปแทน"));
+      }
+      if (!isCurrent() || controller.signal.aborted) return;
+    }
+
     let convId = activeId;
     if (!convId) {
-      convId = await ensureConversation();
+      convId = await ensureConversation(controller.signal, isCurrent);
+      if (!isCurrent() || controller.signal.aborted) return;
       if (!convId) {
-        setLoading(false);
-        setMessages((prev) => prev.filter((m) => m.id !== "streaming"));
+        finish({
+          content: "",
+          error: t("เริ่มแชทไม่สำเร็จ ลองอีกครั้ง"),
+          thinkingMs: Date.now() - startedAt,
+        });
         return;
       }
     }
 
     // หลังรีเฟรชเบราว์เซอร์จะลดสิทธิ์โฟลเดอร์ลง ต้องขอใหม่ก่อนแตะไฟล์จริง
     if (workspace && !(await grantWorkspaceAccess(workspace, "readwrite"))) {
+      if (!isCurrent() || controller.signal.aborted) return;
       setNotice(t("ยังไม่มีสิทธิ์เข้าถึงโฟลเดอร์งาน — เอเจนต์จะอ่านและแก้ไฟล์ไม่ได้"));
     }
+    if (!isCurrent() || controller.signal.aborted) return;
 
+    const sentAttachments = files;
     const runMessages: AgentChatMessage[] = [];
     let answer = "";
     try {
       for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
+        if (!isCurrent() || controller.signal.aborted) return;
         const ctx: ToolContext = {
           workspace,
           autoWrite,
           approve,
-          notify: (message) => setNotice(message),
+          signal: controller.signal,
+          notify: (message) => {
+            if (isCurrent()) setNotice(message);
+          },
         };
         const tools = toolDefinitions(ctx);
-        const { text, calls } = await streamRound(convId, {
-          content: round === 0 ? question : "",
-          attachments: round === 0 ? sentAttachments : [],
-          messages: runMessages,
-          tools,
-          toolNames: tools.map((tool) => tool.function.name),
-          workspaceReady: Boolean(workspace),
-        }, controller.signal);
+        const { text, calls } = await streamRound(
+          convId,
+          {
+            content: round === 0 ? question : "",
+            attachments: round === 0 ? sentAttachments : [],
+            messages: runMessages,
+            tools,
+            toolNames: tools.map((tool) => tool.function.name),
+            workspaceReady: Boolean(workspace),
+          },
+          controller.signal,
+          runId,
+        );
+        if (!isCurrent() || controller.signal.aborted) return;
         answer = text;
         if (calls.length === 0) break;
 
         // สิ่งที่โมเดลพิมพ์ก่อนเรียกเครื่องมือ คือ "ความคิด" ที่ผู้ใช้อยากเห็น
         if (text.trim()) {
           notesLog.push(text.trim());
+          notesRef.current = [...notesLog];
           setNotes([...notesLog]);
         }
         runMessages.push({ role: "assistant", content: text, tool_calls: calls });
         for (const call of calls) {
-          const step: ToolStep = { id: `${round}-${call.id}`, label: stepLabel(call), state: "running" };
+          if (!isCurrent() || controller.signal.aborted) return;
+          const step: ToolStep = {
+            id: `${round}-${call.id}`,
+            label: stepLabel(call),
+            state: "running",
+          };
           collected.push(step);
+          stepsRef.current = [...collected];
           setSteps([...collected]);
           scrollToBottom();
           const result = await runTool(call.function.name, call.function.arguments, ctx);
+          // กดหยุดระหว่างรอเครื่องมือ/กล่องอนุญาต → ไม่ต้องเอาผลไปทำต่อหรือวาดอะไรทั้งนั้น
+          if (!isCurrent() || controller.signal.aborted) return;
           step.state = /"ok"\s*:\s*false/.test(result) ? "error" : "done";
+          stepsRef.current = [...collected];
           setSteps([...collected]);
           runMessages.push({
             role: "tool",
@@ -1055,45 +1355,89 @@ export default function AgentWorkspace({
         setStreamingText("");
       }
 
-      setMessages((prev) => {
-        const copy = [...prev];
-        copy[copy.length - 1] = {
-          id: `a-${Date.now()}`,
-          role: "assistant",
-          content: answer || t("เอเจนต์ไม่ได้ตอบกลับมา"),
-          attachments: [],
-          steps: collected.length ? collected : undefined,
-          notes: notesLog.length ? [...notesLog] : undefined,
-        };
-        return copy;
+      finish({
+        content: answer || t("เอเจนต์ไม่ได้ตอบกลับมา"),
+        steps: collected,
+        notes: notesLog,
+        thinkingMs: Date.now() - startedAt,
       });
     } catch (err) {
-      const stopped = err instanceof DOMException && err.name === "AbortError";
-      const msg = stopped ? "" : err instanceof Error ? err.message : String(err);
-      setMessages((prev) => {
-        const copy = [...prev];
-        copy[copy.length - 1] = {
-          id: stopped ? `a-${Date.now()}` : "streaming",
-          role: "assistant",
-          content: stopped
-            ? answer || t("หยุดแล้ว")
-            : `${t("เกิดข้อผิดพลาด")}: ${msg}`,
-          attachments: [],
-          steps: collected.length ? collected : undefined,
-          notes: notesLog.length ? [...notesLog] : undefined,
-        };
-        return copy;
+      if (!isCurrent()) return;
+      const stopped = controller.signal.aborted;
+      const msg = err instanceof Error ? err.message : String(err);
+      finish({
+        content: answerRef.current,
+        error: stopped ? undefined : msg,
+        stopped,
+        // เครื่องมือที่ค้างอยู่ตอน error/ถูกตัดconnection ต้องไม่โชว์ spinner หมุนค้าง
+        steps: collected.map((s) => (s.state === "running" ? { ...s, state: "error" } : s)),
+        notes: notesLog,
+        thinkingMs: Date.now() - startedAt,
       });
     } finally {
-      abortRef.current = null;
-      setLoading(false);
-      setSteps([]);
-      setNotes([]);
+      if (isCurrent()) {
+        abortRef.current = null;
+        busyRef.current = false;
+        setLoading(false);
+        setSteps([]);
+        setNotes([]);
+        stepsRef.current = [];
+        notesRef.current = [];
+        setRunStartedAt(null);
+      }
     }
   }
 
+  function send() {
+    if (busyRef.current) return;
+    const question = input.trim();
+    if (!question && attachments.length === 0) return;
+    if (models.length === 0) return;
+    const files = attachments;
+    const editFrom = editingIndex;
+    void startTurn(question, files, editFrom);
+  }
+
+  /** สร้างคำตอบของคำถามล่าสุดใหม่ — เล็มคำตอบเดิมแล้วถามซ้ำด้วยข้อความเดิม */
+  function retryLast() {
+    if (busyRef.current) return;
+    let lastUser = -1;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i].role === "user") {
+        lastUser = i;
+        break;
+      }
+    }
+    if (lastUser < 0) return;
+    const m = messages[lastUser];
+    void startTurn(m.content, m.attachments, lastUser);
+  }
+
   function stopRun() {
-    abortRef.current?.abort();
+    if (!busyRef.current) return;
+    const partial = answerRef.current;
+    const stoppedSteps = stepsRef.current;
+    const stoppedNotes = notesRef.current;
+    const started = runStartedAt;
+    cancelActiveRun();
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (!last || last.id !== "streaming") return prev;
+      const copy = [...prev];
+      copy[copy.length - 1] = {
+        id: `a-${Date.now()}`,
+        role: "assistant",
+        content: partial,
+        attachments: [],
+        steps: stoppedSteps.length
+          ? stoppedSteps.map((s) => (s.state === "running" ? { ...s, state: "stopped" } : s))
+          : undefined,
+        notes: stoppedNotes.length ? [...stoppedNotes] : undefined,
+        thinkingMs: started ? Date.now() - started : undefined,
+        stopped: true,
+      };
+      return copy;
+    });
   }
 
   async function copyMessage(m: UiMessage) {
@@ -1108,7 +1452,7 @@ export default function AgentWorkspace({
 
   /** ดึงข้อความกลับมาพิมพ์ต่อในกล่องพิมพ์ — ส่งแล้วถึงเล็มประวัติ (ดู send) */
   function startEdit(m: UiMessage, index: number) {
-    if (loading) return;
+    if (busyRef.current || loading) return;
     setEditingIndex(index);
     setInput(m.content);
     setAttachments(m.attachments);
@@ -1134,66 +1478,95 @@ export default function AgentWorkspace({
       cancelEdit();
       return;
     }
-    if (e.key === "Enter" && !e.shiftKey) {
+    // อย่าส่งระหว่าง composing (IME ภาษาจีน/ญี่ปุ่น) — Enter ตอนเลือกตัวอักษรไม่ใช่การส่ง
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (!loading) send();
     }
   }
 
-  const historyList = useMemo(
-    () =>
-      conversations.map((c) => (
-        <li key={c.id} className="group/item relative">
-          <Link
-            href={`/c/${c.id}`}
-            title={titleOf(c)}
-            onClick={(e) => {
-              // คลิกซ้ายธรรมดา = สลับห้องฝั่ง client ไม่ต้อง render ทั้งหน้าที่เซิร์ฟเวอร์
-              // ส่วน ctrl/shift/คลิกกลาง ยังให้เบราว์เซอร์เปิดลิงก์แบบเดิม
-              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-              e.preventDefault();
-              void switchConversation(c.id);
-            }}
-            className={`flex min-h-11 items-center gap-1.5 rounded-md py-2 pl-3 pr-11 text-left text-caption transition-colors ${
-              activeId === c.id
-                ? "bg-white/[0.10] text-fg"
-                : "text-fg-muted hover:bg-white/[0.06] hover:text-fg"
-            }`}
-          >
-            {switchingId === c.id && (
-              <Icon name="fa-circle-notch" className="h-3 w-3 shrink-0 animate-spin text-brand-300" />
-            )}
-            <span className="truncate">{titleOf(c)}</span>
-          </Link>
-          {/* row-actions: จอสัมผัสต้องเห็นเสมอ (ดู globals.css) — เดิม opacity-0 + group-hover
-              อย่างเดียว ทำให้บนมือถือเมนู ⋮ มองไม่เห็นแต่ยังกดถูก (ช่อง pr-11 เว้นไว้)
-              ไม่มีพื้นหลังทึบ: เดิม bg-ink-950/40 + ปุ่มสูง 44px ล้นแถว 36px
-              แถวจึงกลายเป็นคอลัมน์บล็อกดำทับชื่อแชทอ่านไม่ออก */}
-          <span className="row-actions absolute right-0 top-1/2 -translate-y-1/2">
-            <Menu
-              label={t("ตัวเลือกแชท")}
-              widthPx={176}
-              placement="right"
-              triggerClassName="h-7 w-7"
-              items={[
-                {
-                  icon: "fa-pen",
-                  label: t("แก้ชื่อแชท"),
-                  onClick: () => startRename(c.id, titleOf(c)),
-                },
-                {
-                  icon: "fa-trash",
-                  label: t("ลบแชท"),
-                  tone: "danger",
-                  onClick: () => deleteConversation(c.id),
-                },
-              ]}
-            />
-          </span>
-        </li>
-      )),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [conversations, activeId, switchingId],
+  const filteredConversations = useMemo(() => {
+    const q = historyQuery.trim().toLowerCase();
+    if (!q) return conversations;
+    return conversations.filter((c) => titleOf(c).toLowerCase().includes(q));
+  }, [conversations, historyQuery]);
+
+  /** จัดประวัติเป็นกลุ่มวันที่แบบ Claude — หาแชทเก่าเร็วขึ้นเมื่อรายการยาว */
+  const historyGroups = useMemo(() => {
+    const groups: { key: string; label: string; items: ChatConversation[] }[] = [
+      { key: "today", label: t("วันนี้"), items: [] },
+      { key: "yesterday", label: t("เมื่อวาน"), items: [] },
+      { key: "week", label: t("7 วันล่าสุด"), items: [] },
+      { key: "older", label: t("เก่ากว่า"), items: [] },
+    ];
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const DAY = 86_400_000;
+    for (const c of filteredConversations) {
+      const raw = c.updatedAt || c.createdAt;
+      const d = new Date(raw);
+      if (Number.isNaN(d.getTime())) {
+        groups[3].items.push(c);
+        continue;
+      }
+      const start = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+      const diff = Math.round((todayStart - start) / DAY);
+      const idx = diff <= 0 ? 0 : diff === 1 ? 1 : diff <= 7 ? 2 : 3;
+      groups[idx].items.push(c);
+    }
+    return groups.filter((g) => g.items.length > 0);
+  }, [filteredConversations, t]);
+
+  const renderHistoryItem = (c: ChatConversation) => (
+    <li key={c.id} className="group/item relative">
+      <Link
+        href={`/c/${c.id}`}
+        title={titleOf(c)}
+        onClick={(e) => {
+          // คลิกซ้ายธรรมดา = สลับห้องฝั่ง client ไม่ต้อง render ทั้งหน้าที่เซิร์ฟเวอร์
+          // ส่วน ctrl/shift/คลิกกลาง ยังให้เบราว์เซอร์เปิดลิงก์แบบเดิม
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+          e.preventDefault();
+          void switchConversation(c.id);
+        }}
+        aria-current={activeId === c.id ? "page" : undefined}
+        className={`flex min-h-11 items-center gap-1.5 rounded-md py-2 pl-3 pr-11 text-left text-caption transition-colors ${
+          activeId === c.id
+            ? "bg-white/[0.10] text-fg"
+            : "text-fg-muted hover:bg-white/[0.06] hover:text-fg"
+        }`}
+      >
+        {switchingId === c.id && (
+          <Icon name="fa-circle-notch" className="h-3 w-3 shrink-0 animate-spin text-brand-300" />
+        )}
+        <span className="truncate">{titleOf(c)}</span>
+      </Link>
+      {/* row-actions: จอสัมผัสต้องเห็นเสมอ (ดู globals.css) — เดิม opacity-0 + group-hover
+          อย่างเดียว ทำให้บนมือถือเมนู ⋮ มองไม่เห็นแต่ยังกดถูก (ช่อง pr-11 เว้นไว้)
+          ไม่มีพื้นหลังทึบ: เดิม bg-ink-950/40 + ปุ่มสูง 44px ล้นแถว 36px
+          แถวจึงกลายเป็นคอลัมน์บล็อกดำทับชื่อแชทอ่านไม่ออก */}
+      <span className="row-actions absolute right-0 top-1/2 -translate-y-1/2">
+        <Menu
+          label={t("ตัวเลือกแชท")}
+          widthPx={176}
+          placement="right"
+          triggerClassName="h-7 w-7"
+          items={[
+            {
+              icon: "fa-pen",
+              label: t("แก้ชื่อแชท"),
+              onClick: () => startRename(c.id, titleOf(c)),
+            },
+            {
+              icon: "fa-trash",
+              label: t("ลบแชท"),
+              tone: "danger",
+              onClick: () => deleteConversation(c.id),
+            },
+          ]}
+        />
+      </span>
+    </li>
   );
 
   /** แถบเครื่องมือเอเจนต์ — เวอร์ชันไอคอนสำหรับมือถือกับเวอร์ชันเต็มสำหรับจอใหญ่ */
@@ -1295,11 +1668,46 @@ export default function AgentWorkspace({
           <p className="px-4 pb-2 text-micro font-semibold uppercase tracking-[0.16em] text-fg-subtle">
             {t("ประวัติแชท")}
           </p>
+          {conversations.length > 0 && (
+            <div className="relative mb-1.5 px-2">
+              <Icon
+                name="fa-magnifying-glass"
+                className="pointer-events-none absolute left-[1.3rem] top-1/2 -translate-y-1/2 text-micro text-fg-subtle"
+              />
+              <input
+                value={historyQuery}
+                onChange={(e) => setHistoryQuery(e.target.value)}
+                placeholder={t("ค้นหาแชท")}
+                aria-label={t("ค้นหาแชท")}
+                type="search"
+                className="h-10 w-full rounded-md bg-white/[0.04] pl-8 pr-11 text-caption text-fg outline-none transition placeholder:text-fg-subtle hover:bg-white/[0.06] focus:bg-white/[0.06] focus-visible:ring-1 focus-visible:ring-white/[0.14] focus-visible:ring-offset-0 [&::-webkit-search-cancel-button]:hidden"
+              />
+              {historyQuery && (
+                <button
+                  type="button"
+                  onClick={() => setHistoryQuery("")}
+                  aria-label={t("ล้างคำค้น")}
+                  className="touch-min-icon absolute right-0.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded text-micro text-fg-subtle transition hover:bg-white/[0.08] hover:text-fg"
+                >
+                  <Icon name="fa-xmark" />
+                </button>
+              )}
+            </div>
+          )}
           <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
             {conversations.length === 0 ? (
               <p className="px-3 py-2 text-label text-fg-subtle">{t("ยังไม่มีประวัติแชท")}</p>
+            ) : historyGroups.length === 0 ? (
+              <p className="px-3 py-2 text-label text-fg-subtle">{t("ไม่พบแชทที่ตรงกัน")}</p>
             ) : (
-              <ul className="space-y-0.5">{historyList}</ul>
+              historyGroups.map((g) => (
+                <div key={g.key} className="mb-2">
+                  <p className="px-3 pb-1 pt-1.5 text-micro font-semibold uppercase tracking-[0.14em] text-fg-subtle/80">
+                    {g.label}
+                  </p>
+                  <ul className="space-y-0.5">{g.items.map(renderHistoryItem)}</ul>
+                </div>
+              ))
             )}
           </nav>
         </div>
@@ -1326,6 +1734,34 @@ export default function AgentWorkspace({
 
   /** คำถามล่าสุดของผู้ใช้เท่านั้นที่แก้ได้ (ปุ่มแก้ไขไปโผล่ที่ข้อความท้ายสุด) */
   const lastUserIndex = messages.map((m) => m.role).lastIndexOf("user");
+
+  /** ตัวอย่างงานที่กดแล้วเติมคำถามลงช่องพิมพ์ทันที — ไม่ส่งเอง ผู้ใช้ยังแก้ถ้อยคำได้ */
+  const quickStarts = [
+    {
+      icon: "fa-code",
+      title: t("สร้างหน้าเว็บ"),
+      desc: t("HTML/CSS หน้าเดียวที่เปิดดูได้ทันที"),
+      prompt: t("ช่วยสร้างหน้าเว็บ portfolio เรียบ ๆ สวย ๆ หนึ่งหน้าให้หน่อย"),
+    },
+    {
+      icon: "fa-magnifying-glass",
+      title: t("ค้นเว็บและสรุป"),
+      desc: t("ข้อมูลล่าสุดพร้อมลิงก์อ้างอิง"),
+      prompt: t("ช่วยค้นเว็บแล้วสรุปข่าว AI ล่าสุดให้ฟังหน่อย พร้อมลิงก์อ้างอิง"),
+    },
+    {
+      icon: "fa-terminal",
+      title: t("ช่วยเขียนโค้ด"),
+      desc: t("อธิบายแนวคิดและเขียนให้พร้อมใช้"),
+      prompt: t("ช่วยเขียนฟังก์ชัน TypeScript สำหรับเรียก API พร้อมจัดการ error ให้หน่อย"),
+    },
+    {
+      icon: "fa-pen",
+      title: t("ร่างข้อความ"),
+      desc: t("อีเมล ประกาศ หรือโพสต์โทนมืออาชีพ"),
+      prompt: t("ช่วยร่างอีเมลตอบลูกค้าที่แจ้งปัญหาการใช้งาน ให้สุภาพและกระชับ"),
+    },
+  ];
 
   return (
     <div ref={shellRef} className="flex h-dvh w-full overflow-hidden bg-ink-950">
@@ -1395,121 +1831,202 @@ export default function AgentWorkspace({
           />
         </header>
 
-        {/* Messages — เนื้อความอยู่ในกรอบเดียวกับกล่องพิมพ์: กันแถบเลื่อนกินพื้นที่ข้างเดียว (both-edges) */}
+        {/* Messages — เนื้อความอยู่ในกรอบเดียวกับกล่องพิมพ์: กันแถบเลื่อนกินพื้นที่ข้างเดียว (both-edges)
+            ปุ่ม "ลงล่าง" อยู่ในกรอบนี้ ไม่ใช่ในกรอบแชท → composer สูงแค่ไหนก็ไม่ทับกัน */}
+        <div className="relative min-h-0 flex-1">
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className={`min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-clip px-3 py-6 sm:px-6 sm:[scrollbar-gutter:stable_both-edges] ${
+          role="log"
+          aria-label={t("บทสนทนา")}
+          aria-busy={loading}
+          className={`h-full space-y-4 overflow-y-auto overflow-x-clip px-3 py-6 sm:px-6 sm:[scrollbar-gutter:stable_both-edges] ${
             messages.length === 0 ? "flex items-center" : ""
           }`}
         >
-          {messages.length === 0 && (
-            // ห้องว่าง: ให้โลโก้+ข้อความอยู่กึ่งกลางพื้นที่ที่เหลือ ไม่ใช่เกาะขอบบน
-            // แล้วปล่อยที่ว่างทั้งดุ้นไว้ข้างล่าง (จอตall ดูเหมือนหน้าพัง)
-            <div className="mx-auto w-full max-w-md text-center">
-              <Logo size={46} className="mx-auto mb-4" />
-              <p className="text-body-sm text-fg-muted">
-                {models.length === 0
-                  ? t("ยังไม่มีโมเดลที่เปิดให้ใช้")
-                  : t("เริ่มบทสนทนากับ OctopusAI ได้เลย")}
-              </p>
-              {models.length === 0 && (
-                <p className="mt-1.5 text-caption text-fg-subtle">
-                  {t("แอดมินต้องเปิดโมเดลให้ผู้ใช้เห็นก่อน จึงจะเริ่มแชทได้")}
-                </p>
+          {messages.length === 0 && switchingId && (
+            <div className="mx-auto flex items-center gap-2 text-caption text-fg-subtle" role="status">
+              <Icon name="fa-circle-notch" className="animate-spin" />
+              {t("กำลังโหลด...")}
+            </div>
+          )}
+          {messages.length === 0 && !switchingId && (
+            // ห้องว่าง: โลโก้ + คำทัก + ตัวอย่างงานที่กดเติมในช่องพิมพ์ได้ทันที
+            // (อยู่กึ่งกลางพื้นที่ที่เหลือ ไม่เกาะขอบบนจนดูเหมือนหน้าพัง)
+            <div className="mx-auto flex w-full max-w-2xl flex-col items-center text-center">
+              <Logo size={48} className="mb-4" />
+              {models.length === 0 ? (
+                <>
+                  <p className="text-body-sm text-fg-muted">{t("ยังไม่มีโมเดลที่เปิดให้ใช้")}</p>
+                  <p className="mt-1.5 text-caption text-fg-subtle">
+                    {t("แอดมินต้องเปิดโมเดลให้ผู้ใช้เห็นก่อน จึงจะเริ่มแชทได้")}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h1 className="text-h3 font-semibold tracking-tight text-fg">
+                    {t("มีอะไรให้ช่วย?")}
+                  </h1>
+                  <p className="mt-1.5 max-w-md text-body-sm leading-relaxed text-fg-muted">
+                    {t("ถาม ตัดโค้ด ค้นเว็บ หรือให้เอเจนต์ช่วยแก้ไฟล์ในเครื่อง — แนบไฟล์และรูปได้เลย")}
+                  </p>
+                  <div className="mt-6 grid w-full grid-cols-2 gap-2">
+                    {quickStarts.map((s) => (
+                      <button
+                        key={s.title}
+                        type="button"
+                        onClick={() => {
+                          setInput(s.prompt);
+                          requestAnimationFrame(() => inputRef.current?.focus());
+                        }}
+                        className="group flex flex-col gap-1 rounded-xl bg-white/[0.03] p-3 text-left ring-1 ring-white/[0.06] transition hover:bg-white/[0.06] hover:ring-white/[0.12] active:scale-[0.99]"
+                      >
+                        <span className="flex items-center gap-2 text-caption font-medium text-fg">
+                          <Icon name={s.icon} className="text-brand-300" />
+                          <span className="min-w-0 truncate">{s.title}</span>
+                        </span>
+                        <span className="text-label leading-relaxed text-fg-subtle">{s.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
               )}
             </div>
           )}
           {messages.map((m, mi) => {
             const streaming = m.id === "streaming";
             const isLastUser = m.role === "user" && mi === lastUserIndex;
+            const isLastAssistant =
+              m.role === "assistant" && mi === messages.length - 1 && !streaming;
+            const showActions =
+              Boolean(m.content) || Boolean(m.error) || (isLastAssistant && lastUserIndex >= 0);
             return (
-            <div
-              key={m.id}
-              className={`mx-auto flex w-full max-w-4xl ${
-                m.role === "user" ? "justify-end" : "justify-start"
-              }`}
-            >
-              {/* chat-row = กรอบที่ปุ่มคัดลอก/แก้ไขจะโผล่เมื่อชี้ (ดู .msg-actions ใน globals.css)
-                  ฝั่ง assistant กระจายเต็มคอลัมน์ เพื่อให้กล่องโค้ด/กล่องกำลังคิดไม่หดเหลือเท่าความยาวบรรทัดสั้นสุด */}
               <div
-                className={`chat-row flex min-w-0 max-w-full flex-col ${
-                  m.role === "user" ? "items-end" : "w-full items-start"
+                key={m.id}
+                className={`mx-auto flex w-full max-w-4xl ${
+                  m.role === "user" ? "justify-end" : "justify-start"
                 }`}
               >
-                {/* ฝั่ง assistant ไม่มีพื้นหลังข้อความ (อ่านบนพื้นเว็บตรง ๆ) — ฝั่ง user ยังเป็นฟอง */}
+                {/* chat-row = กรอบที่ปุ่มคัดลอก/แก้ไขจะโผล่เมื่อชี้ (ดู .msg-actions ใน globals.css)
+                    ฝั่ง assistant กระจายเต็มคอลัมน์ เพื่อให้กล่องโค้ด/กล่องกำลังคิดไม่หดเหลือเท่าความยาวบรรทัดสั้นสุด */}
                 <div
-                  className={`max-w-full break-words text-body-sm [overflow-wrap:anywhere] ${
-                    m.role === "user"
-                      ? "rounded-2xl bg-brand-500/20 px-4 py-3 text-fg"
-                      : "w-full px-0.5 py-1 leading-relaxed text-fg"
+                  className={`chat-row flex min-w-0 max-w-full flex-col ${
+                    m.role === "user" ? "items-end" : "w-full items-start"
                   }`}
                 >
-                  {m.attachments.length > 0 && (
-                    <div className="mb-2 flex flex-wrap gap-2">
-                      {m.attachments.map((a, j) => (
-                        <div key={j} className="overflow-hidden rounded-md border border-white/[0.07]">
-                          {a.mime.startsWith("image/") ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={a.dataUrl} alt={a.name} className="max-h-40 max-w-full object-cover" />
-                          ) : (
-                            <div className="flex items-center gap-2 px-3 py-2 text-caption">
-                              <Icon name="fa-file" />
-                              <span className="max-w-[12rem] truncate">{a.name}</span>
-                            </div>
-                          )}
-                        </div>
-                      ))}
+                  {m.role === "assistant" && (
+                    <div className="mb-1.5 flex items-center gap-1.5 text-label text-fg-subtle">
+                      <span aria-hidden>
+                        <Logo size={16} />
+                      </span>
+                      <span className="font-medium text-fg-muted">OctopusAI</span>
+                      {m.stopped && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-white/[0.05] px-1.5 py-0.5 text-micro">
+                          <Icon name="fa-stop" size={9} />
+                          {t("หยุดแล้ว")}
+                        </span>
+                      )}
                     </div>
                   )}
-                  {m.content && (
-                    <MessageBody
-                      text={m.content}
-                      live={streaming}
-                      onShare={m.role === "assistant" ? shareArtifact : undefined}
-                    />
-                  )}
-                  {streaming && loading && m.content === "" && notes.length === 0 && steps.length === 0 && (
-                    <span className="inline-flex items-center gap-2 text-fg-subtle">
-                      <Icon name="fa-circle-notch" className="animate-spin" />
-                      {t("กำลังคิด...")}
-                    </span>
-                  )}
-                  {streaming && <ThinkingPanel running notes={notes} steps={steps} />}
-                  {!streaming && m.role === "assistant" && ((m.steps?.length ?? 0) > 0 || (m.notes?.length ?? 0) > 0) && (
-                    <ThinkingPanel running={false} notes={m.notes ?? []} steps={m.steps ?? []} />
-                  )}
-                </div>
-                {/* ปุ่มอยู่ใต้ฟอง นอกข้อความ — เล็กและโผล่เฉพาะตอนชี้ */}
-                {m.content && (
-                  <div className="msg-actions mt-1 flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => copyMessage(m)}
-                      title={copiedId === m.id ? t("คัดลอกแล้ว") : t("คัดลอกข้อความ")}
-                      aria-label={t("คัดลอกข้อความ")}
-                      className="touch-min-icon inline-flex h-7 w-7 items-center justify-center rounded-md text-label text-fg-subtle transition hover:bg-white/[0.07] hover:text-fg"
-                    >
-                      <Icon
-                        name={copiedId === m.id ? "fa-check" : "fa-copy"}
-                        className={copiedId === m.id ? "text-leaf" : ""}
+                  {/* ฝั่ง assistant ไม่มีพื้นหลังข้อความ (อ่านบนพื้นเว็บตรง ๆ) — ฝั่ง user ยังเป็นฟอง */}
+                  <div
+                    className={`max-w-full break-words text-body-sm [overflow-wrap:anywhere] ${
+                      m.role === "user"
+                        ? "rounded-2xl bg-brand-500/20 px-4 py-3 text-fg"
+                        : "w-full px-0.5 py-1 leading-relaxed text-fg"
+                    }`}
+                  >
+                    {m.attachments.length > 0 && (
+                      <div className="mb-2 flex flex-wrap gap-2">
+                        {m.attachments.map((a, j) => (
+                          <div key={j} className="overflow-hidden rounded-md border border-white/[0.07]">
+                            {a.mime.startsWith("image/") ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={a.dataUrl} alt={a.name} className="max-h-40 max-w-full object-cover" />
+                            ) : (
+                              <div className="flex items-center gap-2 px-3 py-2 text-caption">
+                                <Icon name="fa-file" />
+                                <span className="max-w-[12rem] truncate">{a.name}</span>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {/* กล่องความคิดอยู่เหนือคำตอบ (แบบ Claude) — ระหว่างทำงานกางไว้ พอคำตอบไหลค่อยพับ */}
+                    {m.role === "assistant" && (
+                      <ThinkingPanel
+                        running={streaming && loading}
+                        notes={streaming ? notes : (m.notes ?? [])}
+                        steps={streaming ? steps : (m.steps ?? [])}
+                        startedAt={streaming ? (runStartedAt ?? undefined) : undefined}
+                        durationMs={streaming ? undefined : m.thinkingMs}
+                        hasText={m.content.length > 0}
                       />
-                    </button>
-                    {isLastUser && !loading && (
-                      <button
-                        type="button"
-                        onClick={() => startEdit(m, mi)}
-                        title={t("แก้ข้อความนี้แล้วส่งใหม่")}
-                        aria-label={t("แก้ข้อความนี้แล้วส่งใหม่")}
-                        className="touch-min-icon inline-flex h-7 w-7 items-center justify-center rounded-md text-label text-fg-subtle transition hover:bg-white/[0.07] hover:text-fg"
+                    )}
+                    {m.content && (
+                      <MessageBody
+                        text={m.content}
+                        live={streaming}
+                        onShare={m.role === "assistant" ? shareArtifact : undefined}
+                      />
+                    )}
+                    {m.error && (
+                      <div
+                        role="alert"
+                        className="mt-2 flex items-start gap-2 rounded-xl bg-rose-500/10 px-3 py-2.5 text-caption leading-relaxed text-rose-200 ring-1 ring-rose-500/20"
                       >
-                        <Icon name="fa-pen" />
-                      </button>
+                        <Icon name="fa-circle-exclamation" className="mt-0.5 shrink-0" />
+                        <span className="min-w-0 break-words [overflow-wrap:anywhere]">
+                          <span className="font-medium">{t("เกิดข้อผิดพลาด")}: </span>
+                          {m.error}
+                        </span>
+                      </div>
                     )}
                   </div>
-                )}
+                  {/* ปุ่มอยู่ใต้ฟอง นอกข้อความ — เล็กและโผล่เฉพาะตอนชี้ */}
+                  {showActions && (
+                    <div className="msg-actions mt-1 flex items-center gap-1.5">
+                      {m.content && (
+                        <button
+                          type="button"
+                          onClick={() => copyMessage(m)}
+                          title={copiedId === m.id ? t("คัดลอกแล้ว") : t("คัดลอกข้อความ")}
+                          aria-label={t("คัดลอกข้อความ")}
+                          className="touch-min-icon inline-flex h-7 w-7 items-center justify-center rounded-md text-label text-fg-subtle transition hover:bg-white/[0.07] hover:text-fg"
+                        >
+                          <Icon
+                            name={copiedId === m.id ? "fa-check" : "fa-copy"}
+                            className={copiedId === m.id ? "text-leaf" : ""}
+                          />
+                        </button>
+                      )}
+                      {isLastUser && !loading && (
+                        <button
+                          type="button"
+                          onClick={() => startEdit(m, mi)}
+                          title={t("แก้ข้อความนี้แล้วส่งใหม่")}
+                          aria-label={t("แก้ข้อความนี้แล้วส่งใหม่")}
+                          className="touch-min-icon inline-flex h-7 w-7 items-center justify-center rounded-md text-label text-fg-subtle transition hover:bg-white/[0.07] hover:text-fg"
+                        >
+                          <Icon name="fa-pen" />
+                        </button>
+                      )}
+                      {isLastAssistant && !loading && lastUserIndex >= 0 && (
+                        <button
+                          type="button"
+                          onClick={retryLast}
+                          title={t("สร้างคำตอบใหม่")}
+                          aria-label={t("สร้างคำตอบใหม่")}
+                          className="touch-min-icon inline-flex h-7 w-7 items-center justify-center rounded-md text-label text-fg-subtle transition hover:bg-white/[0.07] hover:text-fg"
+                        >
+                          <Icon name="fa-rotate" />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
             );
           })}
         </div>
@@ -1518,13 +2035,14 @@ export default function AgentWorkspace({
         {!atBottom && messages.length > 0 && (
           <button
             type="button"
-            onClick={() => scrollToBottom(true)}
+            onClick={jumpToBottom}
             aria-label={t("เลื่อนลงข้อความล่าสุด")}
-            className="touch-min-icon absolute bottom-[calc(9rem_+_env(safe-area-inset-bottom))] left-1/2 z-10 -translate-x-1/2 rounded-full bg-ink-850 text-fg shadow-floating ring-1 ring-white/[0.10] transition hover:bg-ink-800 active:scale-95"
+            className="touch-min-icon absolute bottom-4 left-1/2 z-10 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full bg-ink-850 text-fg shadow-floating ring-1 ring-white/[0.10] transition hover:bg-ink-800 active:scale-95"
           >
             <Icon name="fa-chevron-down" className="text-label" />
           </button>
         )}
+        </div>
 
         {/* Composer — การ์ดลอยไม่ติดขอบ มีไฟล์แนบ ปุ่มแนบไฟล์ ตัวเลือกโมเดล และปุ่มส่งอยู่ในกรอบเดียว
             safe-bottom = 1rem + env(safe-area-inset-bottom): ปลายนิ้วกดส่งต้องไม่ชน gesture bar
@@ -1536,10 +2054,21 @@ export default function AgentWorkspace({
             aria-hidden
           />
           {notice && (
-            <p className="mx-auto mb-2 max-w-4xl rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-caption text-amber-300">
-              <Icon name="fa-triangle-exclamation" className="mr-1.5" />
-              {notice}
-            </p>
+            <div
+              role="status"
+              className="mx-auto mb-2 flex max-w-4xl items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-caption text-amber-300"
+            >
+              <Icon name="fa-triangle-exclamation" className="mt-0.5 shrink-0" />
+              <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">{notice}</span>
+              <button
+                type="button"
+                onClick={() => setNotice(null)}
+                aria-label={t("ปิดการแจ้งเตือน")}
+                className="touch-min-icon -mr-1 -mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-amber-300/80 transition hover:bg-white/[0.08] hover:text-amber-200"
+              >
+                <Icon name="fa-xmark" className="text-micro" />
+              </button>
+            </div>
           )}
 
           {/* กรอบเดียวเท่านั้น: ring ของการ์ด — textarea ห้ามใส่ ring ของตัวเอง
@@ -1560,10 +2089,12 @@ export default function AgentWorkspace({
                     <button
                       type="button"
                       onClick={() => setAttachments((p) => p.filter((_, j) => j !== i))}
-                      className="absolute right-0 top-0 flex h-5 w-5 items-center justify-center rounded-bl-md bg-black/60 text-micro text-fg hover:bg-black/80"
+                      className="touch-min-icon group/remove absolute right-0 top-0 flex h-6 w-6 items-start justify-end rounded-bl-md text-micro text-fg"
                       aria-label={t("ลบไฟล์")}
                     >
-                      <Icon name="fa-xmark" />
+                      <span className="flex h-5 w-5 items-center justify-center rounded-bl-md bg-black/60 transition group-hover/remove:bg-black/80">
+                        <Icon name="fa-xmark" />
+                      </span>
                     </button>
                   </div>
                 ))}
@@ -1583,7 +2114,7 @@ export default function AgentWorkspace({
                   onClick={cancelEdit}
                   title={t("ยกเลิกการแก้")}
                   aria-label={t("ยกเลิกการแก้")}
-                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-brand-200 transition hover:bg-white/[0.10] hover:text-fg"
+                  className="touch-min-icon flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-brand-200 transition hover:bg-white/[0.10] hover:text-fg"
                 >
                   <Icon name="fa-xmark" className="text-micro" />
                 </button>
@@ -1650,15 +2181,15 @@ export default function AgentWorkspace({
                 {loading ? (
                   <Icon name="fa-stop" />
                 ) : (
-                  <Icon name="fa-paper-plane" />
+                  <Icon name="fa-arrow-up" />
                 )}
               </button>
             </div>
           </div>
 
-          <p className="mx-auto mt-2 max-w-4xl text-center text-micro text-fg-subtle">
-            {t("OctopusAI อาจทําผิดพลาดได้ โปรดตรวจสอบข้อมูลสําคัญอีกครั้ง")}
-          </p>
+          <div className="mx-auto mt-2 flex max-w-4xl items-center justify-center text-center text-micro text-fg-subtle">
+            <span>{t("OctopusAI อาจทําผิดพลาดได้ โปรดตรวจสอบข้อมูลสําคัญอีกครั้ง")}</span>
+          </div>
           {!chatReady && (
             <p className="mt-1 text-center text-micro text-fg-subtle">
               {t("ยังเชื่อม CHAT_DATABASE_URL ไม่ได้ — ประวัติแชทจะไม่ถูกบันทึก")}
@@ -1688,7 +2219,7 @@ export default function AgentWorkspace({
                 type="button"
                 onClick={() => setFilesOpen(false)}
                 aria-label={t("ปิดเมนู")}
-                className="rounded-md p-1.5 text-fg-subtle transition hover:bg-white/[0.08] hover:text-fg"
+                className="touch-min-icon rounded-md p-1.5 text-fg-subtle transition hover:bg-white/[0.08] hover:text-fg"
               >
                 <Icon name="fa-xmark" />
               </button>

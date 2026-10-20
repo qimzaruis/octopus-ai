@@ -1,6 +1,6 @@
 import { asc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { models, planModels, plans as plansTable, routes } from "@/db/schema";
+import { models, planModels, plans as plansTable, routeCategories, routes } from "@/db/schema";
 import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
 import { DEFAULT_PLANS, CYCLE_DAY_OPTIONS, type Plan } from "@/lib/plans";
 import { getCatalog, type Catalog } from "@/lib/data/catalog";
@@ -84,12 +84,12 @@ export async function updatePlan(input: {
   return { ok: true };
 }
 
-/** บันทึกข้อมูลของ route (โหมดแสดงผล ชื่อ ราคา โลโก้) */
+/** บันทึกข้อมูลของ route (โหมดแสดงผล ชื่อ ราคา หมวด/โลโก้) */
 export async function updateRouteSettings(input: {
   id: number;
   displayMode: string;
   displayName: string;
-  logoUrl: string | null;
+  categoryId: number | null;
   inputPricePerM: number;
   outputPricePerM: number;
 }): Promise<ActionResult> {
@@ -103,12 +103,22 @@ export async function updateRouteSettings(input: {
 
   if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
 
-  await getDb()
+  const db = getDb();
+  const categoryId =
+    Number.isFinite(input.categoryId) && input.categoryId ? input.categoryId : null;
+  const category = categoryId
+    ? (await db.select().from(routeCategories).where(eq(routeCategories.id, categoryId)))[0]
+    : null;
+  if (categoryId && !category) return { ok: false, error: "ไม่พบหมวดที่เลือก" };
+
+  await db
     .update(routes)
     .set({
       displayMode: mode,
       displayName: input.displayName.trim(),
-      logoUrl: input.logoUrl,
+      categoryId: category?.id ?? null,
+      // รูปของ route มาจากหมวดเสมอ — ไม่มีหมวดก็ไม่มีรูป
+      logoUrl: category?.logoUrl ?? null,
       inputPricePerM: input.inputPricePerM,
       outputPricePerM: input.outputPricePerM,
     })

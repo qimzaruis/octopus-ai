@@ -1,12 +1,13 @@
 import { asc, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { models, providers } from "@/db/schema";
-import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
+import { isDbUnavailable } from "@/lib/db-circuit";
 import { getPlan, cycleStart, dayStart, computeQuota, type QuotaUsage } from "@/lib/plans";
 import { getUsage, type UsageBucket } from "@/lib/data/usage";
 import { planRequirementsOf } from "@/lib/data/plans";
 import { getCatalog, type CatalogTarget } from "@/lib/data/catalog";
 import { cached } from "@/lib/catalog-cache";
+import { readThrough } from "@/lib/data/read-through";
 import { brandNames } from "@/lib/public-text";
 
 /** อายุแคชของข้อมูล catalog (route/ปลายทาง/แผน) — ล้างทันทีที่แอดมินบันทึก */
@@ -47,12 +48,20 @@ export type AdminModelDTO = {
  * displayMode = "router" → แสดงเป็นรายการเดียว (ผู้ใช้ไม่เห็นว่าข้างในใช้โมเดลอะไร)
  * displayMode = "model"  → แสดงกลุ่ม แล้วกางรายชื่อโมเดลปลายทางใต้ลงไป
  */
+export type PublicRouteCategory = {
+  id: number;
+  name: string;
+  logoUrl: string | null;
+};
+
 export type PublicRouteDTO = {
   id: number;
   publicModel: string;
   displayName: string;
   description: string;
   displayMode: string;
+  /** หมวด/แบรนด์ของโมเดล (ชื่อ + รูป) — ใช้จัดกลุ่มในตัวเลือกโมเดล */
+  category: PublicRouteCategory | null;
   logoUrl: string | null;
   inputPricePerM: number;
   outputPricePerM: number;
@@ -128,8 +137,12 @@ export async function listPublicRoutes(): Promise<PublicRouteDTO[]> {
   // DB อ่านไม่ออก (เช่น pooler เต็ม): คืน catalog ชุดจริงที่อ่านสำเร็จล่าสุด
   // ของเก่าที่แคชไว้ยังดีกว่า "ไม่มีโมเดลเลย" ซึ่งทำให้หน้า /models กับห้องแชทสรุปว่า
   // route ที่ผู้ใช้เรียกหาไม่เจอ ทั้งที่ในฐานข้อมูลมีอยู่จริง
-  if (isDbUnavailable()) return lastGoodRoutes ?? [];
-  return cached("public-routes", CATALOG_TTL_MS, loadPublicRoutes);
+  if (isDbUnavailable() && lastGoodRoutes) return lastGoodRoutes;
+  try {
+    return await cached("public-routes", CATALOG_TTL_MS, loadPublicRoutes);
+  } catch {
+    return lastGoodRoutes ?? [];
+  }
 }
 
 /** catalog ชุดสุดท้ายที่อ่านจาก DB สำเร็จ — ของจริง ไม่ใช่ข้อมูลตัวอย่าง */
@@ -177,6 +190,8 @@ async function loadPublicRoutes(): Promise<PublicRouteDTO[]> {
   const reqs = planRequirementsOf(catalog);
   const names = brandNames(catalog.providers);
   const modelById = new Map(catalog.models.map((m) => [m.id, m]));
+  const categoryById = new Map(catalog.categories.map((c) => [c.id, c]));
+  const categoryOrder = new Map(catalog.categories.map((c, i) => [c.id, i]));
   const targetsByRoute = new Map<number, CatalogTarget[]>();
   for (const t of catalog.targets) {
     if (!t.enabled) continue;
@@ -189,13 +204,17 @@ async function loadPublicRoutes(): Promise<PublicRouteDTO[]> {
     .filter((r) => r.enabled)
     .map((r) => {
       const targets = targetsByRoute.get(r.id) ?? [];
+      const category = r.categoryId ? categoryById.get(r.categoryId) ?? null : null;
       return {
         id: r.id,
         publicModel: r.publicModel,
         displayName: r.displayName || r.publicModel,
         description: r.description,
         displayMode: r.displayMode,
-        logoUrl: r.logoUrl,
+        category: category
+          ? { id: category.id, name: category.name, logoUrl: category.logoUrl }
+          : null,
+        logoUrl: category?.logoUrl ?? r.logoUrl,
         inputPricePerM: r.inputPricePerM,
         outputPricePerM: r.outputPricePerM,
         targets: targets.map((t) => {
@@ -208,22 +227,30 @@ async function loadPublicRoutes(): Promise<PublicRouteDTO[]> {
         }),
         ...routeRequirement(targets.map((t) => t.modelRefId), reqs),
       };
-    });
+    })
+    .sort(
+      (a, b) =>
+        (categoryOrder.get(a.category?.id ?? -1) ?? Number.MAX_SAFE_INTEGER) -
+          (categoryOrder.get(b.category?.id ?? -1) ?? Number.MAX_SAFE_INTEGER) ||
+        a.id - b.id,
+    );
+  // แคตตาล็อกว่างเพราะเพิ่งอ่าน DB ไม่ได้ → อย่าแคช [] ทับ snapshot ที่ดีอยู่
+  if (out.length === 0 && catalog.routes.length === 0 && isDbUnavailable()) {
+    throw new Error("catalog unavailable");
+  }
   lastGoodRoutes = out;
   return out;
 }
 
 /** โมเดลทั้งหมดสําหรับหน้า admin */
 export async function listAllModelsForAdmin(): Promise<AdminModelDTO[]> {
-  if (isDbUnavailable()) return [];
-
   const reqs = planRequirementsOf(await getCatalog());
   const reqOf = (id: number) => {
     const r = reqs.get(id);
     return r ? { requiredPlanTier: r.tier, requiredPlanLabel: r.label } : NO_REQ;
   };
 
-  try {
+  const rows = await readThrough("admin:all-models", async () => {
     const db = getDb();
     const [modelRows, providerRows] = await Promise.all([
       db.select().from(models).orderBy(asc(models.providerId), asc(models.modelId)),
@@ -234,10 +261,8 @@ export async function listAllModelsForAdmin(): Promise<AdminModelDTO[]> {
       enabled: m.enabled,
       visibleToUsers: m.visibleToUsers,
     }));
-  } catch (err) {
-    markDbUnavailable(err);
-    return [];
-  }
+  });
+  return rows ?? [];
 }
 
 // ---------------------------------------------------------------------------
@@ -305,13 +330,8 @@ function emptyUserMetrics(userId: string): UserMetrics {
 }
 
 export async function getUserMetrics(userId: string): Promise<UserMetrics> {
-  if (isDbUnavailable()) return emptyUserMetrics(userId);
-  try {
-    return await userMetricsReal(userId);
-  } catch (err) {
-    markDbUnavailable(err);
-    return emptyUserMetrics(userId);
-  }
+  const metrics = await readThrough(`admin:metrics:${userId}`, () => userMetricsReal(userId));
+  return metrics ?? emptyUserMetrics(userId);
 }
 
 /**
