@@ -495,6 +495,7 @@ export const appPages = {
   "แอดมินต้องเปิดโมเดลให้ผู้ใช้เห็นก่อน จึงจะเริ่มแชทได้":
     "An admin must make at least one model visible to users before chatting",
   "แนบไฟล์": "Attach file",
+  "แนบไฟล์จากคลิปบอร์ดแล้ว": "File attached from the clipboard",
   "ลบไฟล์": "Remove file",
   "ส่ง": "Send",
   "เกิดข้อผิดพลาด": "Something went wrong",

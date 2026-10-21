@@ -874,13 +874,26 @@ export default function AgentWorkspace({
   }
 
   /**
-   * วางโค้ดยาว ๆ ในช่องพิมพ์ → แปลงเป็นไฟล์ .txt แนบให้เอง
-   *
-   * เดิมวางไฟล์ทั้งก้อนแล้วข้อความ 500 บรรทัดไปกองอยู่ในกล่องพิมพ์ ทั้งเลื่อนทั้งกดผิด
-   * จึงย้ายไปเป็นไฟล์แนบ (เซิร์ฟเวอร์ถอดเนื้อหาจากไฟล์ส่งให้โมเดลอ่านเต็ม ๆ)
-   * ข้อความสั้นยังวางเป็นข้อความตามปกติไม่แตะเลย
+   * วางในช่องพิมพ์:
+   * - ไฟล์/รูปจากคลิปบอร์ด → แนบเป็นไฟล์ทันที (เดิมวางรูปแล้วไม่มีอะไรเกิดขึ้น)
+   * - โค้ดยาว ๆ → แปลงเป็นไฟล์ .txt แนบให้เอง
+   * - ข้อความสั้น → ปล่อยให้วางตามปกติ
    */
-  function onPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+  async function onPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const files = Array.from(e.clipboardData.items)
+      .filter((item) => item.kind === "file")
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file));
+    if (files.length === 0 && e.clipboardData.files.length > 0) {
+      files.push(...Array.from(e.clipboardData.files));
+    }
+    if (files.length > 0) {
+      e.preventDefault();
+      const added = await handleFiles(files);
+      if (added > 0 && added === files.length) setNotice(t("แนบไฟล์จากคลิปบอร์ดแล้ว"));
+      return;
+    }
+
     const text = e.clipboardData.getData("text/plain");
     if (!text || attachments.length >= maxAttachments) return;
     const lines = text.split("\n").length;
@@ -899,8 +912,8 @@ export default function AgentWorkspace({
     inputRef.current?.focus();
   }
 
-  async function handleFiles(files: FileList | null) {
-    if (!files || files.length === 0) return;
+  async function handleFiles(files: FileList | File[] | null): Promise<number> {
+    if (!files || files.length === 0) return 0;
     const slots: ChatAttachment[] = [];
     for (const f of Array.from(files)) {
       if (slots.length >= remaining) {
@@ -919,6 +932,7 @@ export default function AgentWorkspace({
     }
     setAttachments((prev) => [...prev, ...slots].slice(0, maxAttachments));
     if (fileRef.current) fileRef.current.value = "";
+    return slots.length;
   }
 
   async function ensureConversation(

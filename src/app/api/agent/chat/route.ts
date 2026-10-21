@@ -459,41 +459,36 @@ export async function POST(req: NextRequest) {
    * กลางคัน และ arguments ของ tool_call กลายเป็น JSON ไม่สมบูรณ์ (write_file ล้มทั้งวง)
    * ค่ายไหนไม่รับฟิลด์ใดฟิลด์หนึ่ง จะได้ถอยลงแทนที่จะพังไปเลย
    */
-  const attempts: { full: boolean; input: InvokeInput }[] = [
-    {
-      full: true,
-      input: {
-        publicModel: model,
-        messages,
-        stream: true,
-        tools,
-        maxTokens: AGENT_MAX_TOKENS,
-        filter,
-        signal: req.signal,
-      },
-    },
-    {
-      full: false,
-      input: {
-        publicModel: model,
-        messages,
-        stream: true,
-        maxTokens: AGENT_MAX_TOKENS,
-        filter,
-        signal: req.signal,
-      },
-    },
-    {
-      full: false,
-      input: { publicModel: model, messages, stream: true, filter, signal: req.signal },
-    },
-  ];
+  const base = {
+    publicModel: model,
+    messages,
+    stream: true,
+    filter,
+    signal: req.signal,
+    // โมเดลที่บังคับ reasoning (เช่น MiniMax M3.1 Flash บน OpenRouter) ใช้ effort ต่ำ
+    // เพื่อไม่ให้ token หมดไปกับการคิดก่อนเริ่มตอบ
+    reasoningEffort: "low" as const,
+  };
+  // Groq (Qwen3.8) รับ max_tokens ไม่เกิน 16,384 — ถ้าส่ง 32,000 จะได้ 400
+  // จึงลองรูปแบบเต็มก่อน แล้วถอยมาใช้เพดานที่ปลอดภัยก่อนจะตัด max_tokens ออก
+  const SAFE_MAX_TOKENS = 16_384;
+  const attempts: { input: InvokeInput }[] = [];
+  if (tools.length > 0) {
+    attempts.push({ input: { ...base, tools, maxTokens: AGENT_MAX_TOKENS } });
+    if (AGENT_MAX_TOKENS > SAFE_MAX_TOKENS) {
+      attempts.push({ input: { ...base, tools, maxTokens: SAFE_MAX_TOKENS } });
+    }
+  }
+  attempts.push({ input: { ...base, maxTokens: AGENT_MAX_TOKENS } });
+  if (AGENT_MAX_TOKENS > SAFE_MAX_TOKENS) {
+    attempts.push({ input: { ...base, maxTokens: SAFE_MAX_TOKENS } });
+  }
+  attempts.push({ input: { ...base } });
 
   let result: InvokeResult | null = null;
   let usedTools: unknown[] = [];
   let lastError: unknown = null;
   for (const attempt of attempts) {
-    if (attempt.full && tools.length === 0) continue;
     try {
       result = await invokeUpstream(attempt.input);
       usedTools = attempt.input.tools ?? [];

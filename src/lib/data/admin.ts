@@ -326,8 +326,22 @@ export async function updateProviderKey(input: {
 
   if (isDbUnavailable()) return { ok: false, error: "DB ใช้ไม่ได้ชั่วคราว" };
 
-  const patch: { label: string; apiKey?: string } = { label };
-  if (input.apiKey?.trim()) patch.apiKey = input.apiKey.trim();
+  const patch: {
+    label: string;
+    apiKey?: string;
+    failureCount?: number;
+    cooldownUntil?: Date | null;
+    limitUntil?: Date | null;
+    limitReason?: string;
+  } = { label };
+  if (input.apiKey?.trim()) {
+    patch.apiKey = input.apiKey.trim();
+    // เปลี่ยนคีย์ใหม่ = เริ่มสถานะสุขภาพใหม่ทันที ไม่ต้องรอ cooldown ของคีย์เก่า
+    patch.failureCount = 0;
+    patch.cooldownUntil = null;
+    patch.limitUntil = null;
+    patch.limitReason = "";
+  }
   await getDb().update(providerKeys).set(patch).where(eq(providerKeys.id, input.id));
   return { ok: true };
 }

@@ -201,6 +201,12 @@ export type InvokeInput = {
   /** จำกัดเฉพาะปลายทางที่ผู้ใช้มีสิทธิ์ใช้ (เช่น โมเดลที่รับรูปได้) */
   filter?: (t: GatewayTarget) => boolean;
   /**
+   * ระดับ reasoning ที่ขอจากผู้ให้บริการที่รองรับ (OpenRouter)
+   * โมเดลที่บังคับ reasoning (เช่น MiniMax M3.1 Flash) ถ้าไม่ระบุจะใช้ค่า max
+   * ซึ่งกิน token ไปกับการคิดจนคำตอบสั้นหรือว่าง — เอเจนต์จึงขอ "low"
+   */
+  reasoningEffort?: "low" | "medium" | "high";
+  /**
    * ผู้ใช้ปิด connection (กดหยุด) — abort fetch ต้นทางทันที
    * ต้องไม่นับเป็นความล้มเหลวของคีย์/ปลายทาง เพราะคีย์ยังดีอยู่
    */
@@ -218,15 +224,17 @@ function joinUrl(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/${path}`;
 }
 
+function isOpenRouter(baseUrl: string): boolean {
+  try {
+    const host = new URL(baseUrl).host;
+    return host === "openrouter.ai" || host.endsWith(".openrouter.ai");
+  } catch {
+    return false;
+  }
+}
+
 /** กันกรณี provider มีคีย์หลายสิบตัว แล้ว request หนึ่งรอบลากยาวเกินไป */
 const MAX_KEYS_PER_TARGET = 4;
-
-/**
- * สถานะที่แปลว่า "คีย์นี้ใช้ไม่ได้ตอนนี้" ไม่ใช่ "ปลายทางนี้พัง"
- * 401 = คีย์ถูกถอน/ผิด, 402 = เครดิตของคีย์หมด, 429 = rate limit ของคีย์
- * เจอให้พักคีย์นั้นแล้วยิงคีย์ถัดไปของค่ายเดียวกันต่อ
- */
-const KEY_REJECTED_STATUSES = new Set([401, 402, 429]);
 
 /**
  * ข้อมูลภายในของชุดปลายทางหนึ่งroute (ชื่อค่าย + host + id ปลายทาง)
@@ -310,6 +318,10 @@ export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> 
     if (input.maxTokens !== undefined) payload.max_tokens = input.maxTokens;
     if (input.tools?.length) payload.tools = input.tools;
     if (input.stream) payload.stream_options = { include_usage: true };
+    // OpenRouter รองรับ reasoning เป็นพารามิเตอร์กลาง — ค่ายอื่นอาจ 400 ถ้าส่งไป
+    if (input.reasoningEffort && isOpenRouter(target.baseUrl)) {
+      payload.reasoning = { effort: input.reasoningEffort };
+    }
 
     for (const picked of candidates) {
       attempted = true;
@@ -365,14 +377,21 @@ export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> 
         }
       }
 
-      // คีย์ถูกปฏิเสธ (โควต้าหมด / คีย์พัง / rate limit) เป็นปัญหาของคีย์ตัวนั้นตัวเดียว
-      // ค่ายหนึ่งมีหลายคีย์ จึงต้องพักคีย์นี้แล้วยิงคีย์ถัดไปของค่ายเดียวกัน
-      // เดิมจุดนี้ break ไปปลายทางอื่นทันที ทำให้เสียโมเดลดี ๆ ทั้งที่คีย์สำรองยังใช้ได้
-      // (ค่ายที่ไม่ได้ตั้งกฎลิมิตไว้ใน /admin/key-limits จะมาเข้าทางนี้)
-      if (KEY_REJECTED_STATUSES.has(res.status)) {
+      // คีย์ผิด/ถูกถอน/ไม่มีสิทธิ์ — เป็นปัญหาของคีย์ ไม่ใช่โควต้า
+      // อย่าตอบผู้ใช้ว่า "โควต้าหมด" เพราะจะทำให้แก้ผิดจุด
+      if (res.status === 401 || res.status === 403) {
+        sawOtherFailure = true;
+        lastError = "คีย์ของผู้ให้บริการไม่ถูกต้องหรือไม่มีสิทธิ์ใช้โมเดลนี้";
+        await markKey(picked.id, false);
+        invalidateCache("keys:");
+        continue;
+      }
+
+      // 402/429 = เครดิตหมด/ติดลิมิตของคีย์นี้ — ลองคีย์ถัดไปของค่ายเดียวกัน
+      if (res.status === 402 || res.status === 429) {
         sawLimit = true;
         lastError = `โควตาของโมเดลปลายทางครบแล้ว (${res.status}) กำลังลองคีย์อื่นของค่ายเดียวกัน`;
-        await markKey(picked.id, false); // ให้นับเป็นความล้มเหลวของคีย์นี้ (มี cooldown กันยิงซ้ำ)
+        await markKey(picked.id, false);
         invalidateCache("keys:");
         continue;
       }
@@ -380,9 +399,9 @@ export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> 
       sawOtherFailure = true;
       // เก็บแค่สถานะ — รายละเอียดดิบของค่ายเก็บไว้ที่ log ฝั่งเซิร์ฟเวอร์อย่างเดียว
       lastError = `โมเดลปลายทางตอบกลับ ${res.status}`;
-      await markKey(picked.id, res.status !== 400 && res.status !== 404);
-      invalidateCache("keys:");
-      break; // โมเดลไม่มีอยู่จริง / 5xx — เปลี่ยนปลายทางดีกว่าเปลี่ยนคีย์
+      // 400/404/5xx เป็นปัญหาของ "คำขอ/โมเดล/ปลายทาง" ไม่ใช่คีย์
+      // เดิมนับเป็นคีย์เสีย (และพักคีย์) ทำให้แก้คำขอแล้วลองใหม่ไม่ได้ภายในหลายนาที
+      break;
     }
   }
 
