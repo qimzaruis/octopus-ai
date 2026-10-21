@@ -895,6 +895,13 @@ export default function AgentWorkspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filesOpen]);
 
+  // มาจาก sidebar ของหน้าสร้างรูป: /agent?files=1 → เปิดคลังไฟล์ทันที
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("files") !== "1") return;
+    setFilesOpen(true);
+    window.history.replaceState(null, "", window.location.pathname);
+  }, []);
+
   async function fileToAttachment(file: File): Promise<ChatAttachment> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
