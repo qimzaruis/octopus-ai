@@ -376,7 +376,6 @@ export default function AgentWorkspace({
   const pasteSeqRef = useRef(0);
   /** คำค้นในประวัติแชท (กรองฝั่ง client — รายการถูกโหลดมาครบแล้ว) */
   const [historyQuery, setHistoryQuery] = useState("");
-  const [historyOpen, setHistoryOpen] = useState(true);
   const [collapsedHistoryGroups, setCollapsedHistoryGroups] = useState<Set<string>>(new Set());
 
   function toggleHistoryGroup(key: string) {
@@ -1752,23 +1751,10 @@ export default function AgentWorkspace({
 
       {!collapsed && (
         <div className="mt-4 flex min-h-0 flex-1 flex-col">
-          <button
-            type="button"
-            onClick={() => setHistoryOpen((v) => !v)}
-            aria-expanded={historyOpen}
-            className="touch-min flex w-full select-none items-center gap-2 rounded-md px-4 py-2 text-left text-micro font-semibold uppercase tracking-[0.16em] text-fg-subtle transition hover:bg-white/[0.05] hover:text-fg"
-          >
-            <span className="flex-1">{t("ประวัติแชท")}</span>
-            <Icon
-              name="fa-chevron-down"
-              className={`shrink-0 text-micro transition-transform duration-fast ${
-                historyOpen ? "" : "-rotate-90"
-              }`}
-            />
-          </button>
-          {historyOpen && (
-            <>
-              {conversations.length > 0 && (
+          <p className="px-4 pb-2 pt-1 text-micro font-semibold uppercase tracking-[0.16em] text-fg-subtle">
+            {t("ประวัติแชท")}
+          </p>
+          {conversations.length > 0 && (
                 <div className="relative mb-1.5 px-2">
                   <Icon
                     name="fa-magnifying-glass"
@@ -1825,9 +1811,7 @@ export default function AgentWorkspace({
                     );
                   })
                 )}
-              </nav>
-            </>
-          )}
+          </nav>
         </div>
       )}
       {collapsed && <div className="flex-1" />}

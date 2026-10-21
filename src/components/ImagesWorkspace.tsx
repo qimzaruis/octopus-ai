@@ -55,7 +55,6 @@ export default function ImagesWorkspace({
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [historyQuery, setHistoryQuery] = useState("");
-  const [historyOpen, setHistoryOpen] = useState(true);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [filesOpen, setFilesOpen] = useState(false);
   const [files, setFiles] = useState<AgentFile[]>([]);
@@ -284,23 +283,10 @@ export default function ImagesWorkspace({
 
       {!collapsed && (
         <div className="mt-4 flex min-h-0 flex-1 flex-col">
-          <button
-            type="button"
-            onClick={() => setHistoryOpen((v) => !v)}
-            aria-expanded={historyOpen}
-            className="touch-min flex w-full select-none items-center gap-2 rounded-md px-4 py-2 text-left text-micro font-semibold uppercase tracking-[0.16em] text-fg-subtle transition hover:bg-white/[0.05] hover:text-fg"
-          >
-            <span className="flex-1">{t("ประวัติแชท")}</span>
-            <Icon
-              name="fa-chevron-down"
-              className={`shrink-0 text-micro transition-transform duration-fast ${
-                historyOpen ? "" : "-rotate-90"
-              }`}
-            />
-          </button>
-          {historyOpen && (
-            <>
-              {conversations.length > 0 && (
+          <p className="px-4 pb-2 pt-1 text-micro font-semibold uppercase tracking-[0.16em] text-fg-subtle">
+            {t("ประวัติแชท")}
+          </p>
+          {conversations.length > 0 && (
                 <div className="relative mb-1.5 px-2">
                   <Icon
                     name="fa-magnifying-glass"
@@ -370,9 +356,7 @@ export default function ImagesWorkspace({
                     );
                   })
                 )}
-              </nav>
-            </>
-          )}
+          </nav>
         </div>
       )}
       {collapsed && <div className="flex-1" />}
@@ -426,17 +410,17 @@ export default function ImagesWorkspace({
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(5rem_+_env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-[calc(1.25rem_+_env(safe-area-inset-bottom))] sm:pt-5">
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(1.25rem_+_env(safe-area-inset-bottom))] pt-[calc(3.75rem_+_env(safe-area-inset-top))] sm:px-6 lg:pt-5">
           <div className="mx-auto max-w-6xl">{children}</div>
         </div>
 
-        {/* หน้าไม่มี header — ปุ่มเมนูมือถือลอยมุมขวาล่าง */}
+        {/* หน้าไม่มี header — burger ลอยซ้ายบนเหมือนหน้าแชท */}
         <button
           type="button"
           onClick={() => setDrawerOpen(true)}
           aria-label={t("เปิดเมนู")}
           aria-haspopup="dialog"
-          className="fixed bottom-[calc(1rem_+_env(safe-area-inset-bottom))] right-4 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-brand-500 text-fg shadow-floating transition active:scale-95 lg:hidden"
+          className="fixed left-3 top-[calc(0.625rem_+_env(safe-area-inset-top))] z-40 flex h-11 w-11 items-center justify-center rounded-lg bg-white/[0.06] text-fg-muted ring-1 ring-white/[0.08] transition hover:bg-white/[0.10] hover:text-fg active:scale-95 lg:hidden"
         >
           <Icon name="fa-bars" />
         </button>
