@@ -4,16 +4,17 @@ import { useEffect, useState } from "react";
 import Badge from "@/components/Badge";
 import CountUp from "@/components/CountUp";
 import Icon from "@/components/Icon";
-import { siteHost } from "@/lib/config";
 import { useT } from "@/lib/i18n/client";
 
 /**
  * DashboardMock — ภาพจําลองหน้าจอสําหรับ hero
  * สร้างจาก div/SVG ล้วน ไม่มี backdrop-blur ซ้อน (ลดภาระ GPU) และไม่ใช้ gradient text
+ *
+ * host มาจาก DB ตั้งแต่ SSR — หลัง hydrate จะใช้โดเมนที่เปิดอยู่จริง
  */
-export default function DashboardMock() {
+export default function DashboardMock({ host: initialHost }: { host: string }) {
   const t = useT();
-  const [host, setHost] = useState(() => siteHost());
+  const [host, setHost] = useState(initialHost);
   useEffect(() => {
     setHost(window.location.host);
   }, []);

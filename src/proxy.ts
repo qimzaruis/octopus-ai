@@ -34,7 +34,15 @@ const verified = new Map<string, { at: number; signedIn: boolean }>();
 function authCookieKey(request: NextRequest): string | null {
   const parts = request.cookies
     .getAll()
-    .filter((c) => c.name.startsWith("sb-") && c.name.includes("auth-token"))
+    // PKCE verifier ก็ขึ้นต้นด้วย sb- และมี auth-token อยู่ในชื่อ แต่ไม่ใช่ session
+    // ถ้านับมันเป็น session ด้วย ตัว proxy จะเรียก auth.getUser() ฟรีทุกครั้งที่
+    // Google ส่ง code กลับมา (และ cache ผลผิดกุญแจ)
+    .filter(
+      (c) =>
+        c.name.startsWith("sb-") &&
+        c.name.includes("auth-token") &&
+        !c.name.endsWith("-code-verifier"),
+    )
     .map((c) => `${c.name}=${c.value}`);
   return parts.length > 0 ? parts.join(";") : null;
 }

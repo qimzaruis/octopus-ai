@@ -7,6 +7,7 @@ import Icon from "@/components/Icon";
 import ApiUsageTabs from "@/components/ApiUsageTabs";
 import { listPublicRoutes } from "@/lib/data/models";
 import { getRouteHealth } from "@/lib/data/usage";
+import { getSiteUrl } from "@/lib/site-config";
 import { formatNumber, formatUsd } from "@/lib/format";
 import { getT } from "@/lib/i18n/server";
 
@@ -26,9 +27,15 @@ export default async function ModelDetailPage({
 }) {
   const { id } = await params;
   const t = await getT();
-  const [routes, health] = await Promise.all([listPublicRoutes(), getRouteHealth(id)]);
+  const [routes, health, canonicalUrl] = await Promise.all([
+    listPublicRoutes(),
+    getRouteHealth(id),
+    getSiteUrl(),
+  ]);
   const route = routes.find((r) => r.publicModel === id);
   if (!route) notFound();
+
+  const host = canonicalUrl.replace(/^https?:\/\//, "");
 
   const name = route.displayName || route.publicModel;
   const maxContext = route.targets.reduce((s, x) => Math.max(s, x.contextWindow), 0);
@@ -200,7 +207,7 @@ export default async function ModelDetailPage({
           {t("เลือกได้ว่าจะพูดกับระบบด้วยรูปแบบไหน แล้วก๊อปไปใช้ได้เลย — เปลี่ยนเฉพาะคีย์กับชื่อโมเดล")}
         </p>
         <div className="mt-4">
-          <ApiUsageTabs model={route.publicModel} />
+          <ApiUsageTabs model={route.publicModel} defaultHost={host} />
         </div>
         <p className="mt-4 text-caption text-fg-subtle">
           {t("ยังไม่มีคีย์? สร้างที่")}{" "}

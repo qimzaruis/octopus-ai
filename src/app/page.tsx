@@ -10,6 +10,7 @@ import AgentLogoBar from "@/components/AgentLogoBar";
 import Reveal from "@/components/Reveal";
 import CountUp from "@/components/CountUp";
 import { getT } from "@/lib/i18n/server";
+import { getSiteUrl } from "@/lib/site-config";
 import Icon from "@/components/Icon";
 
 const STATS = [
@@ -64,7 +65,8 @@ const FRONTIER = [
 ];
 
 export default async function LandingPage() {
-  const t = await getT();
+  const [t, canonicalUrl] = await Promise.all([getT(), getSiteUrl()]);
+  const host = canonicalUrl.replace(/^https?:\/\//, "");
   return (
     /* overflow-x: clip ไม่ใช่ hidden — clip ไม่สร้าง scroll container จึงรักษา sticky ของ nav ไว้ */
     <div className="relative min-h-dvh overflow-x-clip bg-ink-950">
@@ -154,7 +156,7 @@ export default async function LandingPage() {
       <section className="safe-inline pb-14 lg:pb-20">
         <div className="mx-auto max-w-5xl">
           <Reveal>
-            <DashboardMock />
+            <DashboardMock host={host} />
           </Reveal>
         </div>
       </section>
@@ -303,7 +305,7 @@ export default async function LandingPage() {
 
           <Reveal delay={120} className="min-w-0">
             <div className="rounded-xl bg-ink-900 p-5 shadow-raised ring-1 ring-white/[0.06]">
-              <ApiUsageTabs />
+              <ApiUsageTabs defaultHost={host} />
             </div>
           </Reveal>
         </div>

@@ -66,9 +66,3 @@ const rawSiteUrl =
  * ตัวนี้เป็นค่าที่ bake ตอน build จึงใช้ใน client component และ metadata เริ่มต้น
  */
 export const siteUrl = rawSiteUrl.replace(/\/+$/, "");
-
-/** โดเมนเปล่าสำหรับแสดงในข้อความ (ไม่มี https://) — คืนค่า fallback เมื่อไม่ตั้ง env */
-export function siteHost(fallback = ""): string {
-  if (!siteUrl) return fallback;
-  return siteUrl.replace(/^https?:\/\//, "");
-}

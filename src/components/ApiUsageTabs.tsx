@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Icon from "@/components/Icon";
-import { siteUrl } from "@/lib/config";
 import { useT } from "@/lib/i18n/client";
 
 type Format = "chat" | "messages" | "responses";
@@ -144,13 +143,20 @@ print(reply.output_text)`,
 /**
  * ตัวอย่างโค้ดเรียก Octopus API — เลือกได้ทั้งรูปแบบ API และภาษาโปรแกรม
  *
- * ใช้โดเมนของเว็บที่เปิดอยู่จริง (หรือ NEXT_PUBLIC_APP_URL) เพื่อให้ก๊อปไปวางแล้วยิงได้ทันที
+ * defaultHost มาจาก DB (ตาราง config) จึงไม่ติดโดเมนเก่าที่ bake ไว้ตอน build
+ * หลัง hydrate จะสลับไปใช้โดเมนที่ผู้ใช้เปิดอยู่จริงทันที
  */
-export default function ApiUsageTabs({ model = "octopus-free" }: { model?: string }) {
+export default function ApiUsageTabs({
+  model = "octopus-free",
+  defaultHost,
+}: {
+  model?: string;
+  defaultHost: string;
+}) {
   const t = useT();
   const [format, setFormat] = useState<Format>("chat");
   const [lang, setLang] = useState<Lang>("curl");
-  const [host, setHost] = useState<string>(siteUrl ? siteUrl.replace(/^https?:\/\//, "") : "YOUR_APP_HOST");
+  const [host, setHost] = useState<string>(defaultHost);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {

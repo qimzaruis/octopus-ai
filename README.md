@@ -207,7 +207,9 @@ supabase/migrations/              # SQL migration จาก drizzle-kit
 - **Additional Redirect URLs** = เพิ่ม `https://octopus-ai.isdev.dpdns.org/**`
   (ใส่ `http://localhost:3000/**` ไว้ด้วยถ้ายังพัฒนาในเครื่องต่อ)
 
-แอปสร้าง `redirectTo` จาก `site_url` ในตาราง `config` ([src/components/LoginForm.tsx](src/components/LoginForm.tsx))
+แท็บที่เปิดจากโดเมนอื่น (เช่น แท็บเก่าหรือ preview) จะถูกพาไปหน้า sign-in ของ `site_url` ก่อน
+แล้วแอปจึงสร้าง `redirectTo` จาก origin ปัจจุบัน ซึ่งเป็นโดเมนเดียวกับที่เก็บ PKCE verifier
+([src/components/LoginForm.tsx](src/components/LoginForm.tsx))
 โดเมนที่ไม่อยู่ในรายการนี้จะถูก Supabase ดีดกลับไป Site URL พร้อม `?code=`
 — `src/proxy.ts` ดักกรณีนี้แล้วพาไปแลก session ที่ `/auth/callback` ให้อัตโนมัติ
 

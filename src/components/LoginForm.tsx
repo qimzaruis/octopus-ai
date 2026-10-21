@@ -24,14 +24,19 @@ export default function LoginForm({
     if (!accepted) return;
     setLoading("google");
     setError(null);
-    // Supabase จะใช้ `redirectTo` เฉพาะ origin ที่อยู่ใน Redirect URLs เท่านั้น
-    // นอกนั้นมันดีดกลับ Site URL (เช่น http://localhost:3000) — จึงยึดโดเมนจริงที่
-    // ตั้งไว้เป็นฐาน เว้นแต่กำลังเปิดจากเครื่อง dev ให้ใช้ origin ปัจจุบัน
-    const fromDevMachine = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(
-      window.location.origin,
-    );
-    const authOrigin =
-      !fromDevMachine && canonicalSiteUrl ? canonicalSiteUrl : window.location.origin;
+    // PKCE verifier ถูกเก็บเป็น cookie ของ "โดเมนที่กดล็อกอิน" ถ้าเริ่มจากแท็บ/
+    // โดเมนเก่าแล้ว redirectTo ไปอีกโดเมน one จะหา verifier ไม่เจอและแลก code ไม่สำเร็จ
+    // จึงย้ายไปหน้า signin ของโดเมนจริงก่อน (ยกเว้นเครื่อง dev)
+    const currentOrigin = window.location.origin;
+    const isDevHost = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(currentOrigin);
+    const canonicalOrigin = canonicalSiteUrl.replace(/\/+$/, "");
+    if (!isDevHost && canonicalOrigin && currentOrigin !== canonicalOrigin) {
+      window.location.assign(
+        `${canonicalOrigin}/signin?next=${encodeURIComponent(nextPath)}`,
+      );
+      return;
+    }
+    const authOrigin = currentOrigin;
     try {
       const supabase = createClient();
       const { error: err } = await supabase.auth.signInWithOAuth({
