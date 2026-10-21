@@ -30,4 +30,4 @@ Thumbs.db
 __pycache__/
 
 # สคริปต์ commit/push ส่วนตัว — มี GitHub token อยู่ข้างใน ห้าม commit
-gitcompush.bash
+gitcompush.*
