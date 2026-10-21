@@ -222,6 +222,7 @@ export async function addModelAction(formData: FormData) {
     providerId: Number(str(formData, "providerId")),
     modelId: str(formData, "modelId"),
     displayName: str(formData, "displayName"),
+    kind: str(formData, "kind"),
     contextWindow: Number(str(formData, "contextWindow")) || 128000,
     supportsVision: str(formData, "supportsVision") === "on",
   });

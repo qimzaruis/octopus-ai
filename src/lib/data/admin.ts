@@ -30,6 +30,8 @@ export type ModelDTO = {
   providerId: number;
   modelId: string;
   displayName: string;
+  /** chat = แชท, image = สร้างรูป */
+  kind: string;
   contextWindow: number;
   supportsVision: boolean;
   enabled: boolean;
@@ -162,6 +164,7 @@ export async function listProvidersWithModels(): Promise<ProviderDTO[]> {
           providerId: m.providerId,
           modelId: m.modelId,
           displayName: m.displayName,
+          kind: m.kind,
           contextWindow: m.contextWindow,
           supportsVision: m.supportsVision,
           enabled: m.enabled,
@@ -617,6 +620,7 @@ export async function addModel(input: {
   providerId: number;
   modelId: string;
   displayName: string;
+  kind?: string;
   contextWindow: number;
   supportsVision: boolean;
   logoUrl?: string | null;
@@ -634,6 +638,7 @@ export async function addModel(input: {
       providerId: input.providerId,
       modelId,
       displayName: input.displayName.trim() || modelId,
+      kind: input.kind === "image" ? "image" : "chat",
       contextWindow: input.contextWindow || 128000,
       supportsVision: input.supportsVision,
       logoUrl: input.logoUrl ?? null,

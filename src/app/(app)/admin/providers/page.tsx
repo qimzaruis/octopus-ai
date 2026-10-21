@@ -325,7 +325,14 @@ export default async function AdminProvidersPage({
                     {p.models.map((m) => (
                       <tr key={m.id}>
                         <td className="table-cell">
-                          <span className="font-medium text-fg">{m.modelId}</span>
+                          <span className="flex flex-wrap items-center gap-2">
+                            <span className="font-medium text-fg">{m.modelId}</span>
+                            {m.kind === "image" && (
+                              <span className="rounded bg-brand-500/15 px-1.5 py-0.5 text-micro font-medium text-brand-300">
+                                {t("สร้างรูป")}
+                              </span>
+                            )}
+                          </span>
                           {m.displayName !== m.modelId && (
                             <p className="text-label text-fg-subtle">{m.displayName}</p>
                           )}
@@ -368,7 +375,7 @@ export default async function AdminProvidersPage({
               {/* เพิ่มโมเดล */}
               <form
                 action={addModelAction}
-                className="grid gap-3 rounded-xl border border-dashed border-white/[0.07] p-4 sm:grid-cols-5 sm:items-end"
+                className="grid gap-3 rounded-xl border border-dashed border-white/[0.07] p-4 sm:grid-cols-2 lg:grid-cols-6 lg:items-end"
               >
                 <input type="hidden" name="providerId" value={p.id} />
                 <div>
@@ -378,6 +385,13 @@ export default async function AdminProvidersPage({
                 <div>
                   <label className="label">{t("ชื่อแสดงผล")}</label>
                   <input name="displayName" className="input" placeholder="GPT-4o mini" />
+                </div>
+                <div>
+                  <label className="label">{t("ประเภทโมเดล")}</label>
+                  <select name="kind" className="input" defaultValue="chat">
+                    <option value="chat">{t("แชท / ข้อความ")}</option>
+                    <option value="image">{t("สร้างรูป")}</option>
+                  </select>
                 </div>
                 <div>
                   <label className="label">Context window</label>

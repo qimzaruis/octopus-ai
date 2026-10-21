@@ -82,6 +82,7 @@ function failedTarget(publicModel: string): GatewayTarget {
   return {
     modelRefId: 0,
     modelId: publicModel,
+    kind: "chat",
     providerId: 0,
     providerName: "",
     baseUrl: "",
@@ -131,6 +132,14 @@ export async function POST(req: NextRequest) {
       "invalid_request_error",
       404,
       "model_not_found",
+    );
+  }
+  if (route.kind === "image") {
+    return openaiError(
+      "โมเดลนี้ใช้สำหรับสร้างรูปภาพ — เรียกผ่าน /v1/images/generations",
+      "invalid_request_error",
+      400,
+      "not_a_chat_model",
     );
   }
   if (route.requiredPlanTier != null && route.requiredPlanTier > plan.tier) {

@@ -60,6 +60,8 @@ export type PublicRouteDTO = {
   displayName: string;
   description: string;
   displayMode: string;
+  /** chat = ใช้แชท, image = ใช้ /v1/images/generations */
+  kind: "chat" | "image";
   /** หมวด/แบรนด์ของโมเดล (ชื่อ + รูป) — ใช้จัดกลุ่มในตัวเลือกโมเดล */
   category: PublicRouteCategory | null;
   logoUrl: string | null;
@@ -205,12 +207,18 @@ async function loadPublicRoutes(): Promise<PublicRouteDTO[]> {
     .map((r) => {
       const targets = targetsByRoute.get(r.id) ?? [];
       const category = r.categoryId ? categoryById.get(r.categoryId) ?? null : null;
+      const targetKinds = targets
+        .map((t) => modelById.get(t.modelRefId)?.kind)
+        .filter((kind): kind is string => Boolean(kind));
+      const kind: "chat" | "image" =
+        targetKinds.length > 0 && targetKinds.every((k) => k === "image") ? "image" : "chat";
       return {
         id: r.id,
         publicModel: r.publicModel,
         displayName: r.displayName || r.publicModel,
         description: r.description,
         displayMode: r.displayMode,
+        kind,
         category: category
           ? { id: category.id, name: category.name, logoUrl: category.logoUrl }
           : null,

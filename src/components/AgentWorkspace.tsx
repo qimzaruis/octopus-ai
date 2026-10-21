@@ -1756,7 +1756,7 @@ export default function AgentWorkspace({
             type="button"
             onClick={() => setHistoryOpen((v) => !v)}
             aria-expanded={historyOpen}
-            className="touch-min flex w-full items-center gap-2 px-4 py-2 text-left text-micro font-semibold uppercase tracking-[0.16em] text-fg-subtle transition hover:text-fg"
+            className="touch-min flex w-full select-none items-center gap-2 rounded-md px-4 py-2 text-left text-micro font-semibold uppercase tracking-[0.16em] text-fg-subtle transition hover:bg-white/[0.05] hover:text-fg"
           >
             <span className="flex-1">{t("ประวัติแชท")}</span>
             <Icon
@@ -1808,7 +1808,7 @@ export default function AgentWorkspace({
                           type="button"
                           onClick={() => toggleHistoryGroup(g.key)}
                           aria-expanded={!closed}
-                          className="touch-min flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-micro font-semibold uppercase tracking-[0.14em] text-fg-subtle/80 transition hover:text-fg"
+                          className="touch-min flex w-full select-none items-center gap-1.5 rounded-md px-3 py-1.5 text-left text-micro font-semibold uppercase tracking-[0.14em] text-fg-subtle/80 transition hover:bg-white/[0.05] hover:text-fg"
                         >
                           <span className="flex-1">{g.label}</span>
                           <Icon

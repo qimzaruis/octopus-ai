@@ -290,6 +290,9 @@ CREATE INDEX IF NOT EXISTS "requests_public_model_idx" ON "requests" USING btree
 -- ---------- index สำหรับ uptime 24 ชม. ต่อโมเดล (migration 0009) ----------
 CREATE INDEX IF NOT EXISTS "requests_public_created_idx" ON "requests" USING btree ("public_model", "created_at");
 
+-- ---------- ประเภทโมเดล: chat / image (migration 0010) ----------
+ALTER TABLE "models" ADD COLUMN IF NOT EXISTS "kind" text DEFAULT 'chat' NOT NULL;
+
 -- ---------- ตรวจผล ----------
 SELECT table_name
 FROM information_schema.tables

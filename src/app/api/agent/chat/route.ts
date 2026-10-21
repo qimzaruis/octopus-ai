@@ -295,6 +295,7 @@ function event(value: Record<string, unknown>): Uint8Array {
 const UNKNOWN_TARGET = {
   modelRefId: 0,
   modelId: "",
+  kind: "chat",
   providerId: 0,
   providerName: "",
   baseUrl: "",
@@ -368,6 +369,9 @@ export async function POST(req: NextRequest) {
       return error("ระบบกำลังติดขัดชั่วคราว อ่านรายการโมเดลไม่ได้ กรุณาลองใหม่ในไม่กี่วินาที", 503);
     }
     return error(`ไม่พบโมเดล "${model}" ในรายการที่เปิดใช้`, 400);
+  }
+  if (route.kind === "image") {
+    return error("โมเดลนี้ใช้สำหรับสร้างรูปภาพ ไม่สามารถใช้แชทได้", 400);
   }
   if (route.requiredPlanTier != null && route.requiredPlanTier > plan.tier) {
     return error(`โมเดลนี้ต้องใช้แผน ${route.requiredPlanLabel} ขึ้นไป`, 403);

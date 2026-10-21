@@ -26,7 +26,9 @@ export default async function ModelsPage() {
     getPublicModelHealth24h(),
   ]);
 
-  const models: ExplorerModel[] = routes.map((route) => {
+  const models: ExplorerModel[] = routes
+    .filter((route) => route.kind !== "image")
+    .map((route) => {
     const totals = usage.get(route.publicModel);
     const recent = health.get(route.publicModel);
     return {

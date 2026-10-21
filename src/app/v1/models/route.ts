@@ -43,6 +43,8 @@ export async function GET(req: NextRequest) {
         owned_by: "octopus-ai",
         name: r.displayName,
         description: r.description,
+        /** chat = /v1/chat/completions, image = /v1/images/generations */
+        kind: r.kind,
       })),
   });
 }

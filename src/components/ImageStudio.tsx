@@ -123,26 +123,74 @@ export default function ImageStudio({
     }
   }
 
+  const ideas = [
+    {
+      label: t("ภาพสินค้า"),
+      prompt: t("ภาพสินค้าบนพื้นหลังเรียบ แสงนุ่ม มุมมองด้านหน้า"),
+    },
+    {
+      label: t("ภาพประกอบ"),
+      prompt: t("ภาพประกอบสไตล์มินิมอลสำหรับโพสต์โซเชียล"),
+    },
+    {
+      label: t("อวตาร"),
+      prompt: t("อวตารสไตล์อนิเมะ โทนสีพาสเทล"),
+    },
+  ];
+
   return (
-    <div className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
-      {/* ฝั่งตั้งค่าก่อนสร้าง */}
-      <section className="card p-5 sm:p-6">
-        <label className="label" htmlFor="image-prompt">
-          {t("อธิบายรูปที่ต้องการ")}
-        </label>
-        <textarea
-          id="image-prompt"
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          rows={4}
-          maxLength={2000}
-          placeholder={t("เช่น แมวส้มใส่ชุดอวกาศ ลอยอยู่ในอวกาศ แสงนีออน สไตล์ภาพวาดดิจิทัล")}
-          className="input resize-none leading-relaxed"
-        />
+    <div className="space-y-6">
+      {/* ฝั่งตั้งค่าก่อนสร้าง — การ์ดเดี่ยวกลางหน้า อ่านง่ายกว่าแบ่งสองคอลัมน์ */}
+      <section className="card mx-auto w-full max-w-4xl overflow-visible p-5 sm:p-7">
+        <div className="flex items-start gap-3">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-500/15 text-brand-300">
+            <Icon name="fa-wand-magic-sparkles" />
+          </span>
+          <div className="min-w-0">
+            <h1 className="text-title font-semibold tracking-tight text-fg">
+              {t("สร้างภาพด้วย AI")}
+            </h1>
+            <p className="mt-1 text-caption leading-relaxed text-fg-subtle">
+              {t("อธิบายสิ่งที่อยากเห็น เลือกสัดส่วน และแนบภาพอ้างอิงได้")}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-6">
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <label className="label mb-0" htmlFor="image-prompt">
+              {t("อธิบายรูปที่ต้องการ")}
+            </label>
+            <span className="text-micro tabular-nums text-fg-subtle">
+              {prompt.length}/2000
+            </span>
+          </div>
+          <textarea
+            id="image-prompt"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            rows={5}
+            maxLength={2000}
+            placeholder={t("เช่น แมวส้มใส่ชุดอวกาศ ลอยอยู่ในอวกาศ แสงนีออน สไตล์ภาพวาดดิจิทัล")}
+            className="input min-h-36 resize-none bg-ink-950/60 leading-relaxed"
+          />
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {ideas.map((idea) => (
+              <button
+                key={idea.label}
+                type="button"
+                onClick={() => setPrompt(idea.prompt)}
+                className="rounded-full border border-white/[0.08] bg-white/[0.03] px-3 py-1 text-label text-fg-subtle transition hover:border-brand-400/40 hover:text-fg"
+              >
+                {idea.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <div className="mt-5">
           <p className="label">{t("สัดส่วนรูปภาพ")}</p>
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-5 gap-2">
             {RATIOS.map((r) => {
               const active = r.id === ratio;
               return (
@@ -152,22 +200,20 @@ export default function ImageStudio({
                   onClick={() => setRatio(r.id)}
                   aria-pressed={active}
                   title={t("สัดส่วน {r}", { r: r.id })}
-                  className={`flex h-[5.25rem] w-[4.25rem] flex-col items-center justify-center gap-2 rounded-xl transition ${
+                  className={`flex min-h-[4.5rem] flex-col items-center justify-center gap-1.5 rounded-xl p-2 transition ${
                     active
                       ? "bg-brand-500/10 ring-2 ring-brand-400/70"
                       : "bg-white/[0.04] ring-1 ring-white/[0.07] hover:bg-white/[0.07]"
                   }`}
                 >
                   <span
-                    style={{ width: r.w, height: r.h }}
+                    style={{ width: Math.round(r.w * 0.72), height: Math.round(r.h * 0.72) }}
                     className={`block rounded-[3px] transition ${
-                      active
-                        ? "bg-gradient-to-br from-brand-400 to-aqua"
-                        : "bg-white/[0.14]"
+                      active ? "bg-brand-400" : "bg-white/[0.14]"
                     }`}
                   />
                   <span
-                    className={`flex items-center gap-1 text-label font-medium ${
+                    className={`flex items-center gap-1 text-micro font-medium ${
                       active ? "text-fg" : "text-fg-subtle"
                     }`}
                   >
@@ -223,16 +269,16 @@ export default function ImageStudio({
           </div>
         </div>
 
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.07] pt-5">
+        <div className="mt-6 flex flex-col gap-3 border-t border-white/[0.07] pt-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2.5">
             <span className="text-caption text-fg-subtle">{t("โมเดล")}</span>
-            <ModelPicker models={models} value={model} onChange={setModel} drop="down" />
+            <ModelPicker models={models} value={model} onChange={setModel} drop="up" />
           </div>
           <button
             type="button"
             onClick={create}
             disabled={busy || !prompt.trim() || models.length === 0}
-            className="btn-primary disabled:cursor-not-allowed"
+            className="btn-primary w-full !px-6 !py-3 disabled:cursor-not-allowed sm:w-auto"
           >
             {busy ? (
               <Icon name="fa-circle-notch" className="animate-spin" />
@@ -243,9 +289,15 @@ export default function ImageStudio({
           </button>
         </div>
 
-        <p className="mt-3 text-label leading-relaxed text-amber-glow">
+        {models.length === 0 && (
+          <p className="mt-3 text-label leading-relaxed text-fg-subtle">
+            <Icon name="fa-circle-info" className="mr-1.5" />
+            {t("ยังไม่มีโมเดลสร้างรูป — เพิ่มโมเดลประเภทสร้างรูปที่หน้า Providers ก่อน")}
+          </p>
+        )}
+        <p className="mt-3 text-label leading-relaxed text-fg-subtle">
           <Icon name="fa-hourglass-half" className="mr-1.5" />
-          {t("ระบบกำลังต่อโมเดลสร้างรูปภาพ — งานที่ส่งจะถูกเก็บไว้ในคิวและแสดงที่นี่")}
+          {t("งานที่ส่งจะถูกเก็บในคิวและแสดงในผลงานล่าสุด")}
         </p>
         {notice && (
           <p className="mt-3 rounded-lg border border-white/[0.09] bg-white/[0.04] px-3 py-2 text-caption text-fg-muted">
@@ -255,52 +307,46 @@ export default function ImageStudio({
         )}
       </section>
 
-      {/* ฝั่งงานที่ผ่านมา */}
-      <section className="card p-5 sm:p-6">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-body-sm font-semibold text-fg">{t("งานสร้างรูปของฉัน")}</h2>
-          <span className="text-label text-fg-subtle">{t("{n} งาน", { n: jobs.length })}</span>
+      {/* ผลงานล่าสุด */}
+      <section className="mx-auto w-full max-w-6xl">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="text-body font-semibold text-fg">{t("ผลงานล่าสุด")}</h2>
+          <span className="text-label text-fg-subtle">
+            {t("{n} งาน", { n: jobs.length })}
+          </span>
         </div>
 
         {jobs.length === 0 ? (
-          <p className="mt-10 text-center text-caption text-fg-subtle">
-            <span className="mb-3 flex justify-center text-xl">
-              <Icon name="fa-photo-film" className="text-fg-subtle" />
-            </span>
-            {t("ยังไม่มีงานสร้างรูป — พิมพ์คำอธิบายแล้วกดสร้างได้เลย")}
-          </p>
+          <div className="card p-5">
+            <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-white/[0.10] bg-white/[0.02] px-6 py-14 text-center">
+              <span className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-500/10 text-brand-300">
+                <Icon name="fa-photo-film" className="text-title" />
+              </span>
+              <p className="text-body-sm font-medium text-fg">{t("ยังไม่มีผลงาน")}</p>
+              <p className="mt-1 max-w-sm text-caption leading-relaxed text-fg-subtle">
+                {t("ลองอธิบายภาพแรกด้านบน แล้วผลงานจะมาแสดงที่นี่")}
+              </p>
+            </div>
+          </div>
         ) : (
-          <ul className="mt-4 space-y-2.5">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {jobs.map((j) => (
-              <li
-                key={j.id}
-                className="group/job flex items-start gap-3 rounded-xl border border-white/[0.07] bg-white/[0.03] p-3"
-              >
-                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-brand-500/10 text-brand-300">
-                  <Icon name="fa-wand-magic-sparkles" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="line-clamp-2 text-caption text-fg">{j.prompt}</p>
-                  <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-micro text-fg-subtle">
-                    <span className="rounded bg-white/[0.07] px-1.5 py-0.5 font-mono">{j.ratio}</span>
-                    <span className="truncate">{j.model}</span>
-                    <span>· {formatDateTime(j.createdAt, locale)}</span>
-                    {j.refs.length > 0 && (
-                      <span>
-                        · {t("{n} รูปอ้างอิง", { n: j.refs.length })}
-                      </span>
-                    )}
-                  </p>
-                </div>
-                <div className="flex shrink-0 flex-col items-end gap-1.5">
-                  <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-glow/10 px-2 py-0.5 text-micro font-medium text-amber-glow">
+              <article key={j.id} className="card relative">
+                <div className="relative aspect-[4/3] overflow-hidden rounded-t-lg bg-ink-950/70">
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-fg-subtle">
+                    <Icon name="fa-wand-magic-sparkles" className="text-title text-brand-300/80" />
+                    <span className="text-micro">{t("กำลังรอสร้าง")}</span>
+                  </div>
+                  <span className="absolute left-2.5 top-2.5 inline-flex items-center gap-1 rounded-md bg-amber-glow/10 px-2 py-0.5 text-micro font-medium text-amber-glow">
                     <Icon name="fa-clock" className="text-micro" />
                     {t("ในคิว")}
                   </span>
+                </div>
+                <span className="absolute right-2 top-2 z-10">
                   <Menu
                     label={t("ตัวเลือกงาน")}
                     widthPx={150}
-                    triggerClassName="h-7 w-7 opacity-0 group-hover/job:opacity-100 focus-visible:opacity-100"
+                    triggerClassName="h-8 w-8 rounded-md bg-black/35 text-fg"
                     items={[
                       {
                         icon: "fa-trash",
@@ -310,10 +356,21 @@ export default function ImageStudio({
                       },
                     ]}
                   />
+                </span>
+                <div className="p-3.5">
+                  <p className="line-clamp-2 text-caption leading-relaxed text-fg">{j.prompt}</p>
+                  <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-micro text-fg-subtle">
+                    <span className="rounded bg-white/[0.07] px-1.5 py-0.5 font-mono">{j.ratio}</span>
+                    <span className="truncate">{j.model}</span>
+                    <span>· {formatDateTime(j.createdAt, locale)}</span>
+                    {j.refs.length > 0 && (
+                      <span>· {t("{n} รูปอ้างอิง", { n: j.refs.length })}</span>
+                    )}
+                  </p>
                 </div>
-              </li>
+              </article>
             ))}
-          </ul>
+          </div>
         )}
       </section>
 

@@ -9,6 +9,17 @@ import type { ChatConversation } from "@/lib/chat/db";
 
 const COLLAPSE_KEY = "octopus.agent.sidebar.collapsed";
 
+type AgentFile = {
+  id: string;
+  conversationId: string;
+  name: string;
+  kind: string;
+  sizeBytes: number;
+  shareUrl: string | null;
+  shareExpiresAt: string | null;
+  createdAt: string;
+};
+
 function PanelIcon() {
   return (
     <svg
@@ -46,6 +57,79 @@ export default function ImagesWorkspace({
   const [historyQuery, setHistoryQuery] = useState("");
   const [historyOpen, setHistoryOpen] = useState(true);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [filesOpen, setFilesOpen] = useState(false);
+  const [files, setFiles] = useState<AgentFile[]>([]);
+  const [filesLoading, setFilesLoading] = useState(false);
+  const [filesNotice, setFilesNotice] = useState<string | null>(null);
+  const [sharingId, setSharingId] = useState<string | null>(null);
+
+  async function openFiles() {
+    setDrawerOpen(false);
+    setFilesOpen(true);
+    setFilesLoading(true);
+    setFilesNotice(null);
+    try {
+      const res = await fetch("/api/agent/files", { cache: "no-store" });
+      if (!res.ok) throw new Error(String(res.status));
+      const data = (await res.json()) as { files: AgentFile[] };
+      setFiles(data.files);
+    } catch {
+      setFilesNotice(t("โหลดคลังไฟล์ไม่สำเร็จ"));
+    } finally {
+      setFilesLoading(false);
+    }
+  }
+
+  async function downloadFile(file: AgentFile) {
+    try {
+      const res = await fetch(`/api/agent/files/${file.id}?download=1`);
+      if (!res.ok) throw new Error(String(res.status));
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = file.name || "artifact.html";
+      a.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } catch {
+      setFilesNotice(t("ดาวน์โหลดไม่สำเร็จ ลองอีกครั้ง"));
+    }
+  }
+
+  async function shareFile(file: AgentFile) {
+    setSharingId(file.id);
+    setFilesNotice(null);
+    try {
+      const res = await fetch(`/api/agent/files/${file.id}/share`, { method: "POST" });
+      const data = (await res.json().catch(() => null)) as {
+        shareUrl?: string;
+        expiresAt?: string;
+      } | null;
+      if (!res.ok || !data?.shareUrl) {
+        setFilesNotice(t("แชร์ไม่สำเร็จ ลองอีกครั้ง"));
+        return;
+      }
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.id === file.id
+            ? { ...f, shareUrl: data.shareUrl!, shareExpiresAt: data.expiresAt ?? null }
+            : f,
+        ),
+      );
+    } catch {
+      setFilesNotice(t("แชร์ไม่สำเร็จ ลองอีกครั้ง"));
+    } finally {
+      setSharingId(null);
+    }
+  }
+
+  async function copyShare(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      /* เบราว์เซอร์บล็อก clipboard */
+    }
+  }
 
   function toggleGroup(key: string) {
     setCollapsedGroups((prev) => {
@@ -185,9 +269,9 @@ export default function ImagesWorkspace({
           <Icon name="fa-image" className="h-4 w-4 shrink-0 text-brand-300" />
           {!collapsed && <span>{t("สร้างรูป")}</span>}
         </Link>
-        <Link
-          href="/agent?files=1"
-          onClick={() => setDrawerOpen(false)}
+        <button
+          type="button"
+          onClick={() => void openFiles()}
           title={t("คลังไฟล์")}
           className={`touch-min flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-caption font-medium text-fg-muted transition hover:bg-white/[0.06] hover:text-fg ${
             collapsed ? "justify-center px-0" : ""
@@ -195,7 +279,7 @@ export default function ImagesWorkspace({
         >
           <Icon name="fa-folder-open" className="h-4 w-4 shrink-0 text-brand-300" />
           {!collapsed && <span>{t("คลังไฟล์")}</span>}
-        </Link>
+        </button>
       </div>
 
       {!collapsed && (
@@ -204,7 +288,7 @@ export default function ImagesWorkspace({
             type="button"
             onClick={() => setHistoryOpen((v) => !v)}
             aria-expanded={historyOpen}
-            className="touch-min flex w-full items-center gap-2 px-4 py-2 text-left text-micro font-semibold uppercase tracking-[0.16em] text-fg-subtle transition hover:text-fg"
+            className="touch-min flex w-full select-none items-center gap-2 rounded-md px-4 py-2 text-left text-micro font-semibold uppercase tracking-[0.16em] text-fg-subtle transition hover:bg-white/[0.05] hover:text-fg"
           >
             <span className="flex-1">{t("ประวัติแชท")}</span>
             <Icon
@@ -256,7 +340,7 @@ export default function ImagesWorkspace({
                           type="button"
                           onClick={() => toggleGroup(group.key)}
                           aria-expanded={!closed}
-                          className="touch-min flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-micro font-semibold uppercase tracking-[0.14em] text-fg-subtle/80 transition hover:text-fg"
+                          className="touch-min flex w-full select-none items-center gap-1.5 rounded-md px-3 py-1.5 text-left text-micro font-semibold uppercase tracking-[0.14em] text-fg-subtle/80 transition hover:bg-white/[0.05] hover:text-fg"
                         >
                           <span className="flex-1">{group.label}</span>
                           <Icon
@@ -357,6 +441,135 @@ export default function ImagesWorkspace({
           <Icon name="fa-bars" />
         </button>
       </div>
+
+      {/* คลังไฟล์ — เปิดในหน้านี้เลย ไม่เด้งไปหน้าแชท */}
+      {filesOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div
+            className="absolute inset-0 bg-black/60"
+            onClick={() => setFilesOpen(false)}
+            aria-hidden
+          />
+          <aside className="animate-fade-in relative flex h-full w-full max-w-md flex-col border-l border-white/[0.07] bg-ink-900">
+            <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-white/[0.07] px-4">
+              <Icon name="fa-folder-open" className="text-brand-300" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-body-sm font-semibold text-fg">{t("คลังไฟล์")}</p>
+                <p className="truncate text-micro text-fg-subtle">
+                  {t("ไฟล์ที่ AI สร้างให้ในแชทของคุณ")}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFilesOpen(false)}
+                aria-label={t("ปิดเมนู")}
+                className="touch-min-icon rounded-md p-1.5 text-fg-subtle transition hover:bg-white/[0.08] hover:text-fg"
+              >
+                <Icon name="fa-xmark" />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-3">
+              {filesNotice && (
+                <p className="mb-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-caption text-amber-300">
+                  <Icon name="fa-triangle-exclamation" className="mr-1.5" />
+                  {filesNotice}
+                </p>
+              )}
+              {filesLoading ? (
+                <p className="px-2 py-10 text-center text-caption text-fg-subtle">
+                  <Icon name="fa-circle-notch" className="mr-2 animate-spin" />
+                  {t("กำลังโหลด...")}
+                </p>
+              ) : files.length === 0 ? (
+                <p className="px-2 py-10 text-center text-caption text-fg-subtle">
+                  {t("ยังไม่มีไฟล์ — ลองให้ AI สร้างหน้า HTML หรือ artifact ในแชท")}
+                </p>
+              ) : (
+                <ul className="space-y-2">
+                  {files.map((f) => {
+                    const shareAlive =
+                      Boolean(f.shareUrl) &&
+                      Boolean(f.shareExpiresAt) &&
+                      new Date(f.shareExpiresAt!).getTime() > Date.now();
+                    return (
+                      <li
+                        key={f.id}
+                        className="rounded-xl border border-white/[0.07] bg-white/[0.03] p-3"
+                      >
+                        <div className="flex items-start gap-2.5">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-500/10 text-brand-300">
+                            <Icon name={f.kind === "html" ? "fa-code" : "fa-file"} />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-caption font-medium text-fg">{f.name}</p>
+                            <p className="mt-0.5 text-micro text-fg-subtle">
+                              {f.createdAt.slice(0, 10)} · {(f.sizeBytes / 1024).toFixed(1)} KB
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void downloadFile(f)}
+                            title={t("ดาวน์โหลด")}
+                            className="rounded-md p-1.5 text-fg-subtle transition hover:bg-white/[0.08] hover:text-fg"
+                          >
+                            <Icon name="fa-download" />
+                          </button>
+                        </div>
+
+                        {shareAlive ? (
+                          <div className="mt-2.5 flex flex-wrap items-center gap-2 border-t border-white/[0.07] pt-2.5">
+                            <a
+                              href={f.shareUrl!}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="btn-ghost !py-1.5 text-label"
+                            >
+                              <Icon name="fa-arrow-up-right-from-square" className="text-micro" />{" "}
+                              {t("เปิดลิงก์")}
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() => void copyShare(f.shareUrl!)}
+                              className="btn-ghost !py-1.5 text-label"
+                            >
+                              <Icon name="fa-copy" className="text-micro" /> {t("คัดลอกลิงก์")}
+                            </button>
+                            <span className="ml-auto text-micro text-fg-subtle">
+                              {t("ลิงก์สาธารณะถึง {date}", {
+                                date: f.shareExpiresAt!.slice(0, 10),
+                              })}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="mt-2.5 border-t border-white/[0.07] pt-2.5">
+                            <button
+                              type="button"
+                              onClick={() => void shareFile(f)}
+                              disabled={sharingId === f.id}
+                              className="btn-secondary !py-1.5 text-label disabled:opacity-50"
+                            >
+                              <Icon
+                                name={
+                                  sharingId === f.id
+                                    ? "fa-circle-notch animate-spin"
+                                    : "fa-share-nodes"
+                                }
+                                className="text-micro"
+                              />{" "}
+                              {t("แชร์เป็นลิงก์สาธารณะ")}
+                            </button>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </aside>
+        </div>
+      )}
     </div>
   );
 }

@@ -34,30 +34,45 @@ export const appPages = {
   "ยังไม่มีข้อมูล": "No data yet",
   "จำนวน request วันนี้": "Requests today",
   "Tokens ที่ใช้วันนี้": "Tokens used today",
-  "อญิบรูปที่ต้องการ": "Describe the image you want",
-  "ส่วนตุ่รรูปภาพ": "Aspect ratio",
-  "ส่วนตุ {r}": "{r} ratio",
+  "สร้างภาพด้วย AI": "Create images with AI",
+  "อธิบายสิ่งที่อยากเห็น เลือกสัดส่วน และแนบภาพอ้างอิงได้":
+    "Describe what you want to see, pick an aspect ratio, and attach reference images",
+  "อธิบายรูปที่ต้องการ": "Describe the image you want",
+  "ภาพสินค้า": "Product shot",
+  "ภาพสินค้าบนพื้นหลังเรียบ แสงนุ่ม มุมมองด้านหน้า":
+    "A product on a clean background, soft light, front view",
+  "ภาพประกอบ": "Illustration",
+  "ภาพประกอบสไตล์มินิมอลสำหรับโพสต์โซเชียล":
+    "A minimal illustration for a social post",
+  "อวตาร": "Avatar",
+  "อวตารสไตล์อนิเมะ โทนสีพาสเทล": "An anime-style avatar in pastel tones",
+  "สัดส่วนรูปภาพ": "Aspect ratio",
+  "สัดส่วน {r}": "{r} ratio",
   "รูปอ้างอิง (ไม่บังคับ)": "Reference images (optional)",
-  "แนบรูอ้าง": "Attach reference",
+  "แนบรูปอ้างอิง": "Attach reference",
   "แนบรูป": "Add image",
-  "แนบรูอ้างได้สูงสุด {n} รูป": "You can attach up to {n} reference images",
-  "รับเฉพาะไฟล้หมหารูปภาพ: {name}": "Only image files are accepted: {name}",
-  "ระบบกำลังต่อเชิมมโดเรญสร้างรูปภาพ — งานที่ส่งจะถืกเกบเว้นเครื่องและดำเนนนี่":
-    "Image generation is being connected — submitted jobs are queued and listed here",
-  "บันทึกเข้าคิวแล้ว — ระบบจะแสดงรูปทันที่สร้างเสร็จ":
+  "แนบรูปอ้างอิงได้สูงสุด {n} รูป": "You can attach up to {n} reference images",
+  "รับเฉพาะไฟล์รูปภาพ: {name}": "Only image files are accepted: {name}",
+  "บันทึกเข้าคิวแล้ว — ระบบจะแสดงรูปทันทีที่สร้างเสร็จ":
     "Saved to the queue — the image will appear here once it is ready",
-  "ส่งงานไม่ไปรยกต์ กรุณลองใหม่": "Could not submit the job. Please try again",
-  "งานสร้างรูปของคุณ": "My image jobs",
+  "ส่งงานไม่สำเร็จ กรุณาลองใหม่": "Could not submit the job. Please try again",
+  "ยังไม่มีโมเดลสร้างรูป — เพิ่มโมเดลประเภทสร้างรูปที่หน้า Providers ก่อน":
+    "No image-generation model yet — add an image model in Providers first",
+  "งานที่ส่งจะถูกเก็บในคิวและแสดงในผลงานล่าสุด":
+    "Submitted jobs are queued and shown in recent results",
+  "ผลงานล่าสุด": "Recent results",
+  "ยังไม่มีผลงาน": "No results yet",
+  "ลองอธิบายภาพแรกด้านบน แล้วผลงานจะมาแสดงที่นี่":
+    "Describe your first image above and it will appear here",
+  "กำลังรอสร้าง": "Waiting to be generated",
   "{n} งาน": "{n} jobs",
-  "ยังไม่มีงานสร้างรูป — พิมพ้อคำอธิบัยแล้วกดสร้างได้เลย":
-    "No image jobs yet — describe what you want and press create",
   "ในคิว": "Queued",
   "{n} รูปอ้างอิง": "{n} reference images",
   "ตัวเลือกงาน": "Job options",
   "ลบงานนี้?": "Delete this job?",
-  "รายการงานจะหายไปจากปรวกศาอัน การกระทำนี้ย้อนกลับไม่ได้":
+  "รายการงานจะหายไปจากประวัติ การกระทำนี้ย้อนกลับไม่ได้":
     "The job entry will disappear from your history. This cannot be undone.",
-  "ลบงานไม่ไปรยกต์": "Could not delete the job",
+  "ลบงานไม่สำเร็จ": "Could not delete the job",
   'ยกเลิกคีย์ "{name}" ? การกระทำนี้ไม่สามารถย้อนกลับได้':
     'Revoke key "{name}"? This cannot be undone.',
   // ---------- Agent tools (web search + local workspace) ----------
@@ -514,6 +529,8 @@ export const appPages = {
 
   // ---------- สร้างรูปภาพ ----------
   "สร้างรูปภาพ": "Image generation",
+  "ประเภทโมเดล": "Model type",
+  "แชท / ข้อความ": "Chat / text",
   "สร้างภาพจากข้อความด้วยโมเดล AI": "Create images from text with an AI model",
   "ยังใช้ไม่ได้ในตอนนี้": "Not available yet",
   "ฟีเจอร์สร้างรูปภาพยังเปิดใช้งานไม่ได้": "Image generation is not available yet",

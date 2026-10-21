@@ -48,6 +48,8 @@ export type GatewayTarget = {
   modelRefId: number;
   /** id ที่ต้องส่งให้ค่ายต้นทาง */
   modelId: string;
+  /** chat = แชท/ข้อความ, image = สร้างรูป */
+  kind: string;
   providerId: number;
   providerName: string;
   baseUrl: string;
@@ -128,6 +130,7 @@ async function loadTargets(publicModel: string): Promise<GatewayTarget[]> {
         {
           modelRefId: m.id,
           modelId: m.modelId,
+          kind: m.kind,
           providerId: p.id,
           providerName: p.name,
           baseUrl: p.baseUrl,
@@ -436,6 +439,181 @@ export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> 
   );
 }
 
+// ---------------------------------------------------------------------------
+// สร้างรูปภาพ — /v1/images/generations
+// ---------------------------------------------------------------------------
+
+export type ImageGenerationInput = {
+  publicModel: string;
+  prompt: string;
+  n?: number;
+  size?: string;
+  responseFormat?: "url" | "b64_json";
+  signal?: AbortSignal;
+};
+
+export type ImageGenerationResult = {
+  json: unknown;
+  target: GatewayTarget;
+  httpStatus: number;
+};
+
+/**
+ * เรียก /images/generations ของปลายทางที่เป็นโมเดลสร้างรูป
+ *
+ * ใช้กติกาคีย์/โควต้าเดียวกับแชท: 401/403/402/429 พักเฉพาะคีย์นั้นแล้วลองคีย์ถัดไป
+ * 400/404/5xx เป็นปัญหาของคำขอ/โมเดล ไม่พักคีย์
+ */
+export async function invokeImageGeneration(
+  input: ImageGenerationInput,
+): Promise<ImageGenerationResult> {
+  const all = await resolveTargets(input.publicModel);
+  const targets = all.filter((t) => t.kind === "image");
+  if (all.length === 0) {
+    throw new GatewayError("no_route", `ไม่พบโมเดล "${input.publicModel}"`, 404);
+  }
+  if (targets.length === 0) {
+    throw new GatewayError("no_target", "โมเดลนี้ไม่ได้ตั้งค่าเป็นโมเดลสร้างรูป", 400);
+  }
+
+  let lastError = "";
+  let sawLimit = false;
+  let sawMissing = false;
+  let sawOtherFailure = false;
+  let attempted = false;
+
+  for (const target of targets) {
+    const keys = await keysOf(target.providerId);
+    const usable = keys.filter((k) => k.enabled && k.apiKey.trim());
+    if (usable.length === 0) {
+      console.error(`[gateway] image ${target.providerName}: ยังไม่ได้ตั้งค่า API key`);
+      lastError = "โมเดลสร้างรูปยังไม่ได้เชื่อมต่อ";
+      continue;
+    }
+
+    const candidates = orderedKeys(usable).slice(0, MAX_KEYS_PER_TARGET);
+    if (candidates.length === 0) {
+      sawOtherFailure = true;
+      lastError = usable.every((k) => isKeyLimited(k))
+        ? "โควต้าของโมเดลสร้างรูปครบแล้ว กำลังรอการรีเซต"
+        : "โมเดลสร้างรูปกำลังถูกพักชั่วคราว";
+      continue;
+    }
+
+    const rule = await keyLimitRule(target.providerId);
+    const payload: Record<string, unknown> = {
+      model: target.modelId,
+      prompt: input.prompt,
+    };
+    if (input.n) payload.n = input.n;
+    if (input.size) payload.size = input.size;
+    if (input.responseFormat) payload.response_format = input.responseFormat;
+
+    for (const picked of candidates) {
+      attempted = true;
+      if (input.signal?.aborted) {
+        throw new GatewayError("upstream_error", "client_aborted", 499);
+      }
+
+      let res: Response;
+      try {
+        res = await fetch(joinUrl(target.baseUrl, "images/generations"), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${picked.apiKey}`,
+          },
+          body: JSON.stringify(payload),
+          signal: input.signal,
+        });
+      } catch (err) {
+        if (input.signal?.aborted) {
+          throw new GatewayError("upstream_error", "client_aborted", 499);
+        }
+        sawOtherFailure = true;
+        console.error(
+          `[gateway] image ${target.providerName} (${picked.label}) เรียกไม่สําเร็จ:`,
+          err,
+        );
+        lastError = "โมเดลสร้างรูปเชื่อมต่อไม่ได้";
+        await markKey(picked.id, false);
+        invalidateCache("keys:");
+        break;
+      }
+
+      if (res.ok) {
+        const json = await res.json().catch(() => null);
+        if (!json) {
+          throw new GatewayError("upstream_error", "ค่ายต้นทางตอบกลับไม่ใช่ JSON", 502);
+        }
+        void markKey(picked.id, true);
+        return { json, target, httpStatus: res.status };
+      }
+
+      const detail = await res.text().catch(() => "");
+      console.error(
+        `[gateway] image ${target.providerName} คีย์ "${picked.label}" ตอบกลับ ${res.status}: ${detail.slice(0, 500)}`,
+      );
+
+      if (rule) {
+        const reason = matchKeyLimit(res.status, detail, rule);
+        if (reason) {
+          const until = nextResetAt(rule);
+          sawLimit = true;
+          lastError = `โควต้าของโมเดลสร้างรูปครบแล้ว (${reason})`;
+          await markLimited(picked.id, until, reason);
+          invalidateCache("keys:");
+          continue;
+        }
+      }
+
+      if (res.status === 401 || res.status === 403) {
+        sawOtherFailure = true;
+        lastError = "คีย์ของผู้ให้บริการไม่ถูกต้องหรือไม่มีสิทธิ์ใช้โมเดลนี้";
+        await markKey(picked.id, false);
+        invalidateCache("keys:");
+        continue;
+      }
+      if (res.status === 402 || res.status === 429) {
+        sawLimit = true;
+        lastError = `โควต้าของโมเดลสร้างรูปครบแล้ว (${res.status})`;
+        await markKey(picked.id, false);
+        invalidateCache("keys:");
+        continue;
+      }
+      if (res.status === 404) {
+        sawMissing = true;
+        lastError = "โมเดลสร้างรูปไม่มีอยู่จริง (อาจถูกถอดออกจากผู้ให้บริการ)";
+        break;
+      }
+
+      sawOtherFailure = true;
+      lastError = `โมเดลสร้างรูปตอบกลับ ${res.status}`;
+      break;
+    }
+  }
+
+  const code: GatewayErrorCode =
+    sawLimit && !sawOtherFailure && !sawMissing
+      ? "keys_limited"
+      : sawMissing && !sawOtherFailure
+        ? "model_missing"
+        : attempted
+          ? "upstream_error"
+          : "no_provider_key";
+  throw new GatewayError(
+    code,
+    lastError || "โมเดลสร้างรูปทุกตัวล้มเหลว",
+    code === "keys_limited"
+      ? 429
+      : code === "model_missing"
+        ? 404
+        : code === "upstream_error"
+          ? 502
+          : 503,
+  );
+}
+
 /** คีย์ล้มบ่อยถูกพักอัตโนมัติ — สถิตินี้เขียนลงตาราง provider_keys เท่านั้น */
 async function markKey(keyId: number, ok: boolean): Promise<void> {
   try {
@@ -512,6 +690,7 @@ export function failedTarget(publicModel: string): GatewayTarget {
   return {
     modelRefId: 0,
     modelId: publicModel,
+    kind: "chat",
     providerId: 0,
     providerName: "",
     baseUrl: "",

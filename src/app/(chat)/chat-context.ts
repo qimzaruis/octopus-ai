@@ -33,6 +33,7 @@ export async function loadAgentModels(planKey: string): Promise<AgentModel[]> {
     const plan = await getPlanByKey(planKey);
     const routes = await listPublicRoutes();
     for (const r of routes) {
+      if (r.kind === "image") continue;
       const locked = r.requiredPlanTier != null && r.requiredPlanTier > plan.tier;
       if (locked) continue;
       models.push({
@@ -49,6 +50,34 @@ export async function loadAgentModels(planKey: string): Promise<AgentModel[]> {
     }
   } catch (err) {
     console.error("[agent] โหลดรายชื่อโมเดลไม่สำเร็จ:", err);
+  }
+  return models;
+}
+
+/** route ที่มีปลายทางเป็นโมเดลสร้างรูป — ใช้ในหน้า /images */
+export async function loadImageModels(planKey: string): Promise<AgentModel[]> {
+  const models: AgentModel[] = [];
+  try {
+    const plan = await getPlanByKey(planKey);
+    const routes = await listPublicRoutes();
+    for (const r of routes) {
+      if (r.kind !== "image") continue;
+      const locked = r.requiredPlanTier != null && r.requiredPlanTier > plan.tier;
+      if (locked) continue;
+      models.push({
+        id: r.publicModel,
+        label: r.displayName || r.publicModel,
+        logoUrl: r.logoUrl,
+        category: r.category,
+        description: r.description,
+        inputPricePerM: r.inputPricePerM,
+        outputPricePerM: r.outputPricePerM,
+        contextWindow: r.targets.reduce((s, t) => Math.max(s, t.contextWindow), 0),
+        supportsVision: r.targets.some((t) => t.supportsVision),
+      });
+    }
+  } catch (err) {
+    console.error("[images] โหลดรายชื่อโมเดลสร้างรูปไม่สำเร็จ:", err);
   }
   return models;
 }

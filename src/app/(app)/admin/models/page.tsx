@@ -296,6 +296,7 @@ export default async function AdminModelsPage({
                     {g.models.map((m) => (
                       <option key={m.id} value={m.id}>
                         {m.providerName} / {m.modelId}
+                        {m.kind === "image" ? ` · ${t("สร้างรูป")}` : ""}
                       </option>
                     ))}
                   </optgroup>
@@ -638,6 +639,7 @@ export default async function AdminModelsPage({
                                 {g.models.map((m) => (
                                   <option key={m.id} value={m.id}>
                                     {m.providerName} / {m.modelId}
+                                    {m.kind === "image" ? ` · ${t("สร้างรูป")}` : ""}
                                   </option>
                                 ))}
                               </optgroup>

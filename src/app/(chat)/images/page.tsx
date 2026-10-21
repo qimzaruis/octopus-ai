@@ -2,8 +2,8 @@ import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
 import ImageStudio from "@/components/ImageStudio";
 import ImagesWorkspace from "@/components/ImagesWorkspace";
-import { loadChatContext } from "@/app/(chat)/chat-context";
-import { listImageJobs, type ImageJob } from "@/lib/chat/db";
+import { loadImageModels } from "@/app/(chat)/chat-context";
+import { listConversations, listImageJobs, type ImageJob } from "@/lib/chat/db";
 
 export const dynamic = "force-dynamic";
 
@@ -15,17 +15,21 @@ export default async function ImagesPage() {
   const user = await getSessionUser();
   if (!user) redirect("/signin");
 
-  const [context, jobs] = await Promise.all([
-    loadChatContext(user.id, user.plan),
+  const [imageModels, jobs, conversations] = await Promise.all([
+    loadImageModels(user.plan),
     listImageJobs(user.id).catch((err) => {
       console.error("[images] โหลดคิวไม่สำเร็จ:", err);
       return [] as ImageJob[];
     }),
+    listConversations(user.id).catch((err) => {
+      console.error("[images] โหลดประวัติแชทไม่สำเร็จ:", err);
+      return [];
+    }),
   ]);
 
   return (
-    <ImagesWorkspace userName={user.name} conversations={context.conversations}>
-      <ImageStudio models={context.models} initialJobs={jobs} />
+    <ImagesWorkspace userName={user.name} conversations={conversations}>
+      <ImageStudio models={imageModels} initialJobs={jobs} />
     </ImagesWorkspace>
   );
 }

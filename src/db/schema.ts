@@ -145,6 +145,8 @@ export const models = pgTable(
       .references(() => providers.id, { onDelete: "cascade" }),
     modelId: text("model_id").notNull(),
     displayName: text("display_name").notNull(),
+    /** chat = แชท/ข้อความ, image = สร้างรูปผ่าน /images/generations */
+    kind: text("kind").notNull().default("chat"),
     contextWindow: integer("context_window").notNull().default(128000),
     supportsVision: boolean("supports_vision").notNull().default(false),
     enabled: boolean("enabled").notNull().default(true),

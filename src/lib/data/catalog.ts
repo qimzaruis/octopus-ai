@@ -35,6 +35,8 @@ export type CatalogModel = {
   providerId: number;
   modelId: string;
   displayName: string;
+  /** chat = แชท, image = สร้างรูป */
+  kind: string;
   contextWindow: number;
   supportsVision: boolean;
   enabled: boolean;
@@ -136,6 +138,7 @@ function normalize(row: Record<string, unknown>): Catalog {
       providerId: n(m.provider_id ?? m.providerId),
       modelId: s(m.model_id ?? m.modelId),
       displayName: s(m.display_name ?? m.displayName),
+      kind: s(m.kind) === "image" ? "image" : "chat",
       contextWindow: n(m.context_window ?? m.contextWindow),
       supportsVision: b(m.supports_vision ?? m.supportsVision),
       enabled: b(m.enabled),
