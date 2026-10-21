@@ -361,6 +361,8 @@ export default function AgentWorkspace({
   const [filesLoading, setFilesLoading] = useState(false);
   const [filesNotice, setFilesNotice] = useState<string | null>(null);
   const [sharingId, setSharingId] = useState<string | null>(null);
+  /** ชื่อ artifact ที่ผู้ใช้พิมพ์ในคลังไฟล์ — ว่าง = ให้ระบบสุ่ม */
+  const [shareNames, setShareNames] = useState<Record<string, string>>({});
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   /** ห้องที่กำลังแก้ชื่อ (null = ไม่ได้เปิดกล่องแก้ชื่อ) */
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
@@ -810,17 +812,35 @@ export default function AgentWorkspace({
     }
   }
 
-  async function shareFile(id: string) {
+  async function shareFile(id: string, name?: string) {
     setSharingId(id);
     setFilesNotice(null);
     try {
-      const res = await fetch(`/api/agent/files/${id}/share`, { method: "POST" });
-      const data = (await res.json()) as {
+      const res = await fetch(`/api/agent/files/${id}/share`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name?.trim() || undefined }),
+      });
+      const data = (await res.json().catch(() => null)) as {
         shareUrl?: string;
         expiresAt?: string;
         error?: string;
-      };
-      if (!res.ok || !data.shareUrl) throw new Error(data.error ?? String(res.status));
+      } | null;
+      if (res.status === 409) {
+        setFilesNotice(t("ชื่อลิงก์นี้ถูกใช้แล้ว ลองชื่ออื่น"));
+        return;
+      }
+      if (res.status === 413) {
+        setFilesNotice(t("ไฟล์ใหญ่เกิน 2 MB แชร์ไม่ได้"));
+        return;
+      }
+      if (res.status === 400) {
+        setFilesNotice(
+          t("ชื่อนี้ใช้ไม่ได้ — ใช้ตัวอักษร ตัวเลข - หรือ _ (สระ/วรรณยุกต์ไทยบางตัวยังไม่รองรับ)"),
+        );
+        return;
+      }
+      if (!res.ok || !data?.shareUrl) throw new Error(data?.error ?? String(res.status));
       setFiles((prev) =>
         prev.map((f) =>
           f.id === id
@@ -828,6 +848,12 @@ export default function AgentWorkspace({
             : f,
         ),
       );
+      setShareNames((prev) => {
+        if (!(id in prev)) return prev;
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
     } catch {
       setFilesNotice(t("แชร์ไม่สำเร็จ ลองอีกครั้ง"));
     } finally {
@@ -861,10 +887,6 @@ export default function AgentWorkspace({
       setNotice(t("ยังหาไฟล์นี้ในคลังไม่เจอ — ลองใหม่อีกครั้ง"));
       return null;
     }
-    if (file.shareUrl) {
-      setNotice(t("แชร์ {name} แล้ว", { name: file.name }));
-      return file.shareUrl;
-    }
 
     const id = file.id;
     try {
@@ -873,6 +895,14 @@ export default function AgentWorkspace({
         shareUrl?: string;
         expiresAt?: string;
       } | null;
+      if (res.status === 409) {
+        setNotice(t("ชื่อลิงก์นี้ถูกใช้แล้ว ลองชื่ออื่น"));
+        return null;
+      }
+      if (res.status === 413) {
+        setNotice(t("ไฟล์ใหญ่เกิน 2 MB แชร์ไม่ได้"));
+        return null;
+      }
       const url = data?.shareUrl;
       if (!res.ok || !url || !data) {
         setNotice(t("แชร์ไม่สำเร็จ ลองอีกครั้ง"));
@@ -2347,9 +2377,12 @@ export default function AgentWorkspace({
               ) : (
                 <ul className="space-y-2">
                   {files.map((f) => {
-                    // ลิงก์เก่าของ service ภายนอกเป็น snapshot แก้ตามไม่ได้ → ให้แชร์ใหม่เป็น /s/ ของเรา
+                    // ลิงก์ CDN artifact ใหม่ หรือ /s/ เดิม — ลิงก์ service ภายนอกถือว่าเก่า ให้แชร์ใหม่ได้
                     const shareAlive =
-                      Boolean(f.shareUrl?.includes("/s/")) &&
+                      Boolean(f.shareUrl) &&
+                      Boolean(
+                        f.shareUrl!.includes("/artifacts/") || f.shareUrl!.includes("/s/"),
+                      ) &&
                       Boolean(f.shareExpiresAt) &&
                       new Date(f.shareExpiresAt!).getTime() > Date.now();
                     return (
@@ -2402,10 +2435,25 @@ export default function AgentWorkspace({
                             </span>
                           </div>
                         ) : (
-                          <div className="mt-2.5 border-t border-white/[0.07] pt-2.5">
+                          <div className="mt-2.5 space-y-2 border-t border-white/[0.07] pt-2.5">
+                            {f.kind === "html" && (
+                              <input
+                                type="text"
+                                value={shareNames[f.id] ?? ""}
+                                onChange={(e) =>
+                                  setShareNames((prev) => ({
+                                    ...prev,
+                                    [f.id]: e.target.value,
+                                  }))
+                                }
+                                placeholder={t("ชื่อลิงก์ (ว่าง = สุ่มให้)")}
+                                maxLength={64}
+                                className="w-full rounded-lg border border-white/[0.08] bg-ink-950/60 px-3 py-1.5 text-label text-fg placeholder:text-fg-subtle focus:border-brand-400/50 focus:outline-none"
+                              />
+                            )}
                             <button
                               type="button"
-                              onClick={() => shareFile(f.id)}
+                              onClick={() => shareFile(f.id, shareNames[f.id])}
                               disabled={sharingId === f.id}
                               className="btn-secondary !py-1.5 text-label disabled:opacity-50"
                             >
@@ -2419,6 +2467,11 @@ export default function AgentWorkspace({
                               />{" "}
                               {t("แชร์เป็นลิงก์สาธารณะ")}
                             </button>
+                            {f.kind === "html" && (
+                              <p className="text-micro leading-relaxed text-fg-subtle">
+                                {t("ลิงก์จะหมดอายุใน 7 วันและถูกลบอัตโนมัติ")}
+                              </p>
+                            )}
                           </div>
                         )}
                       </li>

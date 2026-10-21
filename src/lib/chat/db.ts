@@ -76,8 +76,6 @@ const DDL = [
    )`,
   `create index if not exists chat_files_user_idx
      on chat_files(user_id, created_at desc)`,
-  `create index if not exists chat_files_share_token_idx
-     on chat_files(share_token)`,
   `create table if not exists image_jobs (
      id text primary key,
      user_id text not null,
@@ -95,11 +93,19 @@ const DDL = [
 
 /**
  * ตารางเก่าที่ CREATE TABLE IF NOT EXISTS แก้ให้ไม่ได้ — เพิ่มคอลัมน์ให้ฐานข้อมูลที่มีอยู่ก่อน
- * ถ้าคอลัมน์มีอยู่แล้วคำสั่งจะล้มเหลว ซึ่งข้ามได้
+ * SQLite ไม่มี ADD COLUMN IF NOT EXISTS และ ALTER ใน batch เดียวจะ rollback ทั้งชุด
+ * ถ้าคอลัมน์ใดมีอยู่แล้ว จึงต้องรันทีละคำสั่งและข้ามตัวที่ล้ม
  */
 const ALTERS = [
   `alter table chat_conversations add column deleted_at text`,
   `alter table chat_files add column share_token text`,
+  `alter table chat_files add column share_expires_at text`,
+];
+
+/** index ที่อ้างคอลัมน์ใหม่ — ต้องสร้างหลัง ALTER เท่านั้น */
+const INDEXES = [
+  `create index if not exists chat_files_share_token_idx
+     on chat_files(share_token)`,
 ];
 
 /** สร้างตารางทั้งหมดถ้ายังไม่มี — เรียกครั้งเดียวต่อ process */
@@ -110,11 +116,14 @@ export async function ensureChatSchema(): Promise<void> {
       // ส่งเป็น batch เดียว: Turso อยู่คนละเครื่อง แต่ละ statement คิดเป็น ~115ms
       // ถ้าไล่ส่งทีละคำสั่งอย่างเดิม = ค้าง ~2 วินาทีตอน request แรกหลัง server รีสตาร์ท
       await db.batch(DDL.map((stmt) => ({ sql: stmt })));
-      try {
-        await db.batch(ALTERS.map((stmt) => ({ sql: stmt })));
-      } catch {
-        /* คอลัมน์มีอยู่แล้ว — SQLite ไม่มี if not exists ตอน add column */
+      for (const stmt of ALTERS) {
+        try {
+          await db.execute(stmt);
+        } catch {
+          /* คอลัมน์มีอยู่แล้ว */
+        }
       }
+      await db.batch(INDEXES.map((stmt) => ({ sql: stmt })));
     })().catch((err) => {
       // ให้ลองใหม่ในคำขอถัดไปถ้าล้ม
       schemaReady = null;

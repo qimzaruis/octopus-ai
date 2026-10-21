@@ -554,6 +554,13 @@ export const appPages = {
     "Couldn't find this file in your library yet — try again",
   "แชร์เป็นลิงก์สาธารณะ": "Share as a public link",
   "ลิงก์สาธารณะถึง {date}": "Public link until {date}",
+  "ชื่อลิงก์ (ว่าง = สุ่มให้)": "Link name (blank = random)",
+  "ชื่อลิงก์นี้ถูกใช้แล้ว ลองชื่ออื่น": "That link name is taken — try another",
+  "ชื่อนี้ใช้ไม่ได้ — ใช้ตัวอักษร ตัวเลข - หรือ _ (สระ/วรรณยุกต์ไทยบางตัวยังไม่รองรับ)":
+    "That name isn't supported — use letters, numbers, - or _ (some Thai vowel/tone marks aren't accepted yet)",
+  "ไฟล์ใหญ่เกิน 2 MB แชร์ไม่ได้": "Files over 2 MB can't be shared",
+  "ลิงก์จะหมดอายุใน 7 วันและถูกลบอัตโนมัติ":
+    "The link expires in 7 days and is deleted automatically",
   "คัดลอกลิงก์": "Copy link",
   "คัดลอกลิงก์แล้ว": "Link copied",
   "คัดลอกลิงก์แชร์ไฟล์นี้": "Copy this file's share link",

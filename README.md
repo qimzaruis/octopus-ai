@@ -192,6 +192,13 @@ supabase/migrations/              # SQL migration จาก drizzle-kit
 | `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` | จาก Project Settings → API |
 | `DATABASE_URL` | connection string แบบ pooler (port 6543) |
 | `SUPABASE_SERVICE_ROLE_KEY` | ใช้ฝั่ง server เท่านั้น (seed / อ่าน quota) |
+| `CHAT_DATABASE_URL` + `CHAT_DATABASE_TOKEN` | Turso (libSQL) สำหรับประวัติแชทและไฟล์ของ Web Agent |
+| `CDN_API_KEY` | คีย์อัปโหลด HTML artifact ไป CDN (ใช้ฝั่ง server เท่านั้น) |
+| `CDN_BASE_URL` | `https://cdn.octopus-ai.isdev.dpdns.org` (เว้นว่างได้) |
+
+- HTML artifact ที่ผู้ใช้กดแชร์จะอัปโหลดไป CDN ด้วย `CDN_API_KEY`
+  อายุ **7 วัน** (CDN ลบให้หลังหมดอายุ) ตั้งชื่อเองได้ หรือเว้นว่างให้ระบบสุ่ม
+  ส่วนไฟล์ที่ไม่ใช่ HTML ยังใช้ลิงก์ `/s/<token>` บนโดเมนเรา (7 วัน)
 
 - `NEXT_PUBLIC_*` ถูก bake ตอน build — แก้ค่าแล้วต้อง **build ใหม่** ไม่ใช่แค่ restart
 - โดเมนจริงของเว็บเก็บในตาราง `config` (แถว `site_url`) — แก้ใน DB แล้วมีผลภายใน 60 วินาที
