@@ -442,6 +442,15 @@ export const appPages = {
   "ยังไม่มี request วันนี้": "No requests today yet",
   "uptime วันนี้ · {n} requests": "Uptime today · {n} requests",
   "uptime —": "uptime —",
+  "uptime นับจาก request จริงใน 24 ชม.ล่าสุด (ทุกผู้ใช้)":
+    "Uptime is calculated from real requests in the last 24 hours (all users)",
+  "Uptime 24 ชม.ล่าสุด": "Uptime (last 24 hours)",
+  "ยังไม่มี request ใน 24 ชม.ล่าสุด": "No requests in the last 24 hours",
+  "{n} requests · {window}": "{n} requests · {window}",
+  "{n} request · {window}": "{n} request · {window}",
+  "Latency เฉลี่ย 24 ชม.": "Average latency (24h)",
+  "นับจาก request จริงในช่วง 24 ชั่วโมงล่าสุด":
+    "Based on real requests in the last 24 hours",
   "{n} tokens รวมทุกผู้ใช้ · {r} requests": "{n} tokens across all users · {r} requests",
   "ดูรายละเอียด {name}": "View details for {name}",
 
@@ -478,6 +487,7 @@ export const appPages = {
   "ย่อแถบข้าง": "Collapse sidebar",
   "เปิดเมนู": "Open menu",
   "กลับหน้าหลัก": "Back to home",
+  "กลับ Dashboard": "Back to Dashboard",
   "แชทกับ AI พร้อมแนบไฟล์และรูปภาพ": "Chat with AI — file and image attachments",
   "เริ่มบทสนทนากับ OctopusAI ได้เลย": "Start a conversation with the OctopusAI",
   "แนบไฟล์ได้สูงสุด {n} ไฟล์": "You can attach up to {n} files",

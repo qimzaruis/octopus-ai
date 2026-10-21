@@ -287,6 +287,9 @@ WHERE r."category_id" IS NULL
 -- ---------- index สำหรับยอดรวม tokens ต่อโมเดล (migration 0008) ----------
 CREATE INDEX IF NOT EXISTS "requests_public_model_idx" ON "requests" USING btree ("public_model");
 
+-- ---------- index สำหรับ uptime 24 ชม. ต่อโมเดล (migration 0009) ----------
+CREATE INDEX IF NOT EXISTS "requests_public_created_idx" ON "requests" USING btree ("public_model", "created_at");
+
 -- ---------- ตรวจผล ----------
 SELECT table_name
 FROM information_schema.tables

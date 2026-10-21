@@ -71,7 +71,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       {/* Topbar — เบลอเฉพาะแถบเดียว (ไม่ใช่ทั้งหน้า) เพื่อลดภาระ GPU
           min-h-16 + pt(env): ในเบราว์เซอร์ค่าเป็น 0 จึงได้ 64px เท่าเดิม
           แต่บน PWA ติดตั้งที่มีรอยบาก แถบจะไม่ทับ status bar */}
-      <header className="sticky top-0 z-40 flex min-h-16 items-center gap-3 border-b border-white/[0.07] bg-ink-950/85 px-4 pt-[env(safe-area-inset-top)] backdrop-blur-sm lg:ml-64 lg:pl-8 lg:pr-8">
+      <header className="sticky top-0 z-40 flex min-h-16 items-center gap-3 border-b border-white/[0.07] bg-ink-950/85 pl-4 pr-16 pt-[env(safe-area-inset-top)] backdrop-blur-sm lg:ml-64 lg:pl-8 lg:pr-8">
         <div className="lg:hidden">
           <Link href="/dashboard" className="text-body-sm font-semibold text-fg">
             Octopus <span className="text-brand-300">AI</span>
@@ -99,9 +99,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </div>
       </header>
 
-      {/* pb = 6rem + safe-area: ที่ว่างใต้สุดต้องพ้นทั้งปุ่มเปิดเมนู (FAB)
-          และ gesture bar ของ iOS มิฉะนั้นการ์ดใบสุดท้ายกดไม่โดน */}
-      <main className="px-4 pb-[calc(6rem_+_env(safe-area-inset-bottom))] pt-6 sm:px-6 lg:pb-10 lg:pl-72 lg:pr-8">
+      {/* ปุ่มเมนูย้ายไปขวาบนแล้ว — เหลือแค่ระยะพ้น gesture bar ของ iOS */}
+      <main className="px-4 pb-[calc(1.5rem_+_env(safe-area-inset-bottom))] pt-6 sm:px-6 lg:pb-10 lg:pl-72 lg:pr-8">
         {children}
       </main>
     </div>

@@ -13,10 +13,13 @@ import { useT } from "@/lib/i18n/client";
 export default function CopyButton({
   value,
   label,
+  iconOnly = false,
   className = "",
 }: {
   value: string;
   label?: string;
+  /** แสดงเฉพาะไอคอน (ใช้ในรายการที่พื้นที่จำกัด) */
+  iconOnly?: boolean;
   className?: string;
 }) {
   const t = useT();
@@ -38,13 +41,15 @@ export default function CopyButton({
       onClick={copy}
       title={t("คัดลอก {value}", { value })}
       aria-label={t("คัดลอก {value}", { value })}
-      className={`touch-min inline-flex items-center gap-1.5 rounded-md border border-white/[0.07] bg-white/5 px-2 py-1 text-caption text-fg-muted transition hover:bg-white/[0.09] hover:text-fg ${className}`}
+      className={`inline-flex items-center rounded-md border border-white/[0.07] bg-white/5 text-caption text-fg-muted transition hover:bg-white/[0.09] hover:text-fg ${
+        iconOnly ? "touch-min-icon h-8 w-8 justify-center px-0 py-0" : "touch-min gap-1.5 px-2 py-1"
+      } ${className}`}
     >
       <Icon
         name={copied ? "fa-check" : "fa-copy"}
         className={`text-micro ${copied ? "text-leaf" : ""}`}
       />
-      {copied ? t("คัดลอกแล้ว") : (label ?? t("คัดลอก"))}
+      {!iconOnly && (copied ? t("คัดลอกแล้ว") : (label ?? t("คัดลอก")))}
     </button>
   );
 }

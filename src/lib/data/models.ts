@@ -65,11 +65,6 @@ export type PublicRouteDTO = {
   logoUrl: string | null;
   inputPricePerM: number;
   outputPricePerM: number;
-  /** uptime วันนี้ของทุกปลายทางใน route (0–100) — null = ยังไม่มี request วันนี้ */
-  uptime: number | null;
-  uptimeRequests: number;
-  /** tokens ที่ปลายทางของ route นี้ประมวลผลวันนี้ */
-  uptimeTokensToday: number;
   /** โมเดลปลายทาง (fallback) เรียงตามลําดับ — แสดงเมื่อ displayMode = model */
   targets: { label: string; contextWindow: number; supportsVision: boolean }[];
 } & PlanRequirement;
@@ -197,7 +192,6 @@ async function loadPublicRoutes(): Promise<PublicRouteDTO[]> {
   const modelById = new Map(catalog.models.map((m) => [m.id, m]));
   const categoryById = new Map(catalog.categories.map((c) => [c.id, c]));
   const categoryOrder = new Map(catalog.categories.map((c, i) => [c.id, i]));
-  const today = new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10);
   const targetsByRoute = new Map<number, CatalogTarget[]>();
   for (const t of catalog.targets) {
     if (!t.enabled) continue;
@@ -211,17 +205,6 @@ async function loadPublicRoutes(): Promise<PublicRouteDTO[]> {
     .map((r) => {
       const targets = targetsByRoute.get(r.id) ?? [];
       const category = r.categoryId ? categoryById.get(r.categoryId) ?? null : null;
-      const stats = targets.reduce(
-        (acc, t) => {
-          const m = modelById.get(t.modelRefId);
-          if (!m || !m.enabled || m.uptimeDay !== today) return acc;
-          acc.requests += m.uptimeRequests;
-          acc.ok += m.uptimeOk;
-          acc.tokens += m.uptimeTokens;
-          return acc;
-        },
-        { requests: 0, ok: 0, tokens: 0 },
-      );
       return {
         id: r.id,
         publicModel: r.publicModel,
@@ -234,9 +217,6 @@ async function loadPublicRoutes(): Promise<PublicRouteDTO[]> {
         logoUrl: category?.logoUrl ?? r.logoUrl,
         inputPricePerM: r.inputPricePerM,
         outputPricePerM: r.outputPricePerM,
-        uptime: stats.requests > 0 ? (stats.ok / stats.requests) * 100 : null,
-        uptimeRequests: stats.requests,
-        uptimeTokensToday: stats.tokens,
         targets: targets.map((t) => {
           const m = modelById.get(t.modelRefId);
           return {

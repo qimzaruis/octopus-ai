@@ -16,8 +16,8 @@ export const dynamic = "force-dynamic";
  * หน้ารายละเอียดโมเดล (route) — เข้าด้วยการกดชื่อโมเดลในหน้า /models
  *
  * เดิมข้อมูลชุดนี้อยู่ใน popup ที่ต้อง fetch สถิติซ้ำทุกครั้งที่เปิด
- * ย้ายมาเป็นหน้าและอ่าน uptime จากคอลัมน์สถิติในตาราง models ฝั่งเซิร์ฟเวอร์
- * จึงไม่มีจังหวะหมุนโหลดอีก
+ * ย้ายมาเป็นหน้าและคำนวณ uptime จาก request จริงใน 24 ชม.ล่าสุด
+ * (ไม่ใช้คอลัมน์รายวันที่รีเซ็ตเที่ยงคืน เพราะไม่สะท้อนการใช้งานจริง)
  */
 export default async function ModelDetailPage({
   params,
@@ -126,7 +126,7 @@ export default async function ModelDetailPage({
           </div>
           <div className="rounded-lg bg-white/[0.03] px-3.5 py-3">
             <dt className="text-label uppercase tracking-wider text-fg-subtle">
-              {t("Latency เฉลี่ยวันนี้")}
+              {t("Latency เฉลี่ย 24 ชม.")}
             </dt>
             <dd className="tnum mt-1 text-body-sm font-semibold text-fg">
               {health.empty ? "—" : `${(health.avgLatencyMs / 1000).toFixed(2)}s`}
@@ -139,7 +139,7 @@ export default async function ModelDetailPage({
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <p className="text-caption font-medium text-fg">
               <Icon name="fa-signal" className="mr-1.5 text-micro" />
-              {t("Uptime วันนี้")}
+              {t("Uptime 24 ชม.ล่าสุด")}
             </p>
             <p className="text-label text-fg-subtle">
               {health.empty
@@ -158,7 +158,7 @@ export default async function ModelDetailPage({
           </div>
           {!health.empty && (
             <p className="tnum mt-1.5 text-label text-fg-subtle">
-              {uptimePct.toFixed(1)}% · {t("นับตั้งแต่เที่ยงคืนตามเวลากรุงเทพฯ")}
+              {uptimePct.toFixed(1)}% · {t("นับจาก request จริงในช่วง 24 ชั่วโมงล่าสุด")}
             </p>
           )}
         </div>

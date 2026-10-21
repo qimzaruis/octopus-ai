@@ -3,7 +3,6 @@ import { getDb } from "@/db";
 import { cached } from "@/lib/catalog-cache";
 import { isDbUnavailable, markDbUnavailable } from "@/lib/db-circuit";
 import { withDbRetry } from "@/lib/db-retry";
-import { bangkokDay, ensureUptimeColumns } from "@/lib/gateway";
 import { internalIdentities, maskInternals } from "@/lib/public-text";
 
 /** Timezone ที่ใช้ bucket ข้อมูลกราฟ */
@@ -660,6 +659,47 @@ const lastGoodPublicUsage = new Map<
   Map<string, { requests: number; tokens: number; costUsd: number }>
 >();
 
+// ---------------------------------------------------------------------------
+// Uptime 24 ชม.ล่าสุด — นับจาก request จริงในตาราง requests (ทุกผู้ใช้)
+// ---------------------------------------------------------------------------
+
+export type PublicModelHealth = { requests: number; ok: number };
+
+async function getPublicModelHealthReal(): Promise<Map<string, PublicModelHealth>> {
+  const since = new Date(Date.now() - 24 * 3600_000).toISOString();
+  const rows = await rawRows(sql`
+    select public_model,
+           count(*)::int as requests,
+           count(*) filter (where status = 'success')::int as ok
+    from requests
+    where public_model <> ''
+      and created_at >= ${since}
+    group by public_model
+  `);
+  const map = new Map<string, PublicModelHealth>();
+  for (const r of rows) {
+    map.set(String(r.public_model ?? ""), {
+      requests: num(r.requests),
+      ok: num(r.ok),
+    });
+  }
+  return map;
+}
+
+let lastGoodPublicHealth: Map<string, PublicModelHealth> | null = null;
+
+export async function getPublicModelHealth24h(): Promise<Map<string, PublicModelHealth>> {
+  if (isDbUnavailable() && lastGoodPublicHealth) return lastGoodPublicHealth;
+  try {
+    const value = await cached("public-health:24h", 30_000, getPublicModelHealthReal);
+    lastGoodPublicHealth = value;
+    return value;
+  } catch (err) {
+    markDbUnavailable(err);
+    return lastGoodPublicHealth ?? new Map();
+  }
+}
+
 export async function getPublicModelUsage(
   scope: Scope,
 ): Promise<Map<string, { requests: number; tokens: number; costUsd: number }>> {
@@ -734,31 +774,30 @@ export type RouteHealth = {
 };
 
 /**
- * สถิติวันนี้ของ route — อ่านจากคอลัมน์ uptime ในตาราง models ตรง ๆ
+ * สถิติ 24 ชม.ล่าสุดของ route — นับจาก request จริงในตาราง requests
  *
- * logRequest บวกตัวเลขลงคอลัมน์ของโมเดลที่ถูกเรียกจริงทุกรอบ (ทั้ง /v1 และ Web Agent)
- * route หนึ่งมีได้หลายปลายทาง (fallback) จึงรวมตัวเลขจากทุกปลายทางของ route นั้น
- * ถ้าวันนี้อัตราที่ยังไม่เคยถูกเรียกจะคืน empty = "ยังไม่มีข้อมูล" โดยไม่ต้อง scan requests
+ * ต่างจากคอลัมน์รายวันในตาราง models: คอลัมน์นั้นรีเซ็ตเที่ยงคืนและรวมตามโมเดลปลายทาง
+ * ทำให้ route ที่ไม่ได้ถูกเรียกวันนี้ดูเหมือน "ไม่มีข้อมูล" และโมเดลที่สำเร็จครั้งเดียว
+ * ขึ้น 100% โดยไม่เห็นภาพรวม. การอ่านจาก requests โดยตรงทำให้ uptime สะท้อนสิ่งที่
+ * ผู้ใช้เจอจริง (fallback/error ถูกนับรวม) และบอกช่วงเวลา 24 ชม.ได้
  */
 async function getRouteHealthReal(publicModel: string): Promise<RouteHealth> {
-  await ensureUptimeColumns();
+  const since = new Date(Date.now() - 24 * 3600_000).toISOString();
   const rows = await rawRows(sql`
-    select coalesce(sum(m.uptime_requests), 0)::int as requests,
-           coalesce(sum(m.uptime_ok), 0)::int as ok,
-           coalesce(sum(m.uptime_latency_ms), 0)::bigint as latency_sum,
-           coalesce(sum(m.uptime_tokens), 0)::bigint as tokens
-    from routes r
-    join route_targets rt on rt.route_id = r.id
-    join models m on m.id = rt.model_ref_id
-    where r.public_model = ${publicModel}
-      and m.uptime_day = ${bangkokDay()}
+    select count(*)::int as requests,
+           count(*) filter (where status = 'success')::int as ok,
+           coalesce(avg(latency_ms), 0)::int as avg_latency,
+           coalesce(sum(input_tokens + output_tokens), 0)::bigint as tokens
+    from requests
+    where public_model = ${publicModel}
+      and created_at >= ${since}
   `);
   const r = rows[0] ?? {};
   const total = num(r.requests);
   return {
     requests: total,
     successRate: total > 0 ? num(r.ok) / total : 1,
-    avgLatencyMs: total > 0 ? Math.round(num(r.latency_sum) / total) : 0,
+    avgLatencyMs: total > 0 ? Math.round(num(r.avg_latency)) : 0,
     totalTokens: num(r.tokens),
     empty: total === 0,
   };

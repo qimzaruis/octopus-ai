@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { listPublicRoutes } from "@/lib/data/models";
-import { getPublicModelUsage } from "@/lib/data/usage";
+import { getPublicModelHealth24h, getPublicModelUsage } from "@/lib/data/usage";
 import PageHeader from "@/components/PageHeader";
 import Badge from "@/components/Badge";
 import EmptyState from "@/components/EmptyState";
@@ -18,13 +18,17 @@ export const dynamic = "force-dynamic";
  */
 export default async function ModelsPage() {
   const t = await getT();
-  const [routes, usage] = await Promise.all([
+  const windowEnd = new Date();
+  const windowStart = new Date(windowEnd.getTime() - 24 * 3600_000);
+  const [routes, usage, health] = await Promise.all([
     listPublicRoutes(),
     getPublicModelUsage("all"),
+    getPublicModelHealth24h(),
   ]);
 
   const models: ExplorerModel[] = routes.map((route) => {
     const totals = usage.get(route.publicModel);
+    const recent = health.get(route.publicModel);
     return {
       id: route.id,
       publicModel: route.publicModel,
@@ -38,8 +42,9 @@ export default async function ModelsPage() {
       outputPricePerM: route.outputPricePerM,
       contextWindow: route.targets.reduce((top, target) => Math.max(top, target.contextWindow), 0),
       supportsVision: route.targets.some((target) => target.supportsVision),
-      uptime: route.uptime,
-      uptimeRequests: route.uptimeRequests,
+      // uptime จาก request จริง 24 ชม.ล่าสุด ไม่ใช่ค่าสถิติรายวันที่รีเซ็ตเที่ยงคืน
+      uptime: recent && recent.requests > 0 ? (recent.ok / recent.requests) * 100 : null,
+      uptimeRequests: recent?.requests ?? 0,
       tokens: totals?.tokens ?? 0,
       requests: totals?.requests ?? 0,
       requiredPlanLabel: route.requiredPlanLabel,
@@ -69,7 +74,11 @@ export default async function ModelsPage() {
           />
         </div>
       ) : (
-        <ModelsExplorer models={models} />
+        <ModelsExplorer
+          models={models}
+          windowStart={windowStart.toISOString()}
+          windowEnd={windowEnd.toISOString()}
+        />
       )}
 
       <p className="text-caption text-fg-subtle">

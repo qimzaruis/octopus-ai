@@ -5,7 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import CopyButton from "@/components/CopyButton";
 import Icon from "@/components/Icon";
-import { useT } from "@/lib/i18n/client";
+import { useLocale, useT } from "@/lib/i18n/client";
 import { compareCategories } from "@/lib/categories";
 import { formatNumber, formatTokens, formatUsd } from "@/lib/format";
 
@@ -53,15 +53,41 @@ function inPriceBand(model: ExplorerModel, band: PriceBand): boolean {
   }
 }
 
-function uptimeClasses(uptime: number | null): string {
-  if (uptime == null) return "bg-white/[0.06] text-fg-subtle";
-  if (uptime >= 99) return "bg-leaf/10 text-leaf";
-  if (uptime >= 95) return "bg-amber-glow/10 text-amber-glow";
-  return "bg-rose-500/10 text-rose-300";
+function uptimeBarClass(uptime: number | null): string {
+  if (uptime == null) return "bg-white/20";
+  if (uptime >= 99) return "bg-leaf";
+  if (uptime >= 95) return "bg-amber-glow";
+  return "bg-rose-400";
 }
 
-export default function ModelsExplorer({ models }: { models: ExplorerModel[] }) {
+function uptimeTextClass(uptime: number | null): string {
+  if (uptime == null) return "text-fg-subtle";
+  if (uptime >= 99) return "text-leaf";
+  if (uptime >= 95) return "text-amber-glow";
+  return "text-rose-300";
+}
+
+export default function ModelsExplorer({
+  models,
+  windowStart,
+  windowEnd,
+}: {
+  models: ExplorerModel[];
+  /** จุดเริ่ม/สิ้นสุดของหน้าต่าง uptime 24 ชม. (ISO) */
+  windowStart: string;
+  windowEnd: string;
+}) {
   const t = useT();
+  const locale = useLocale();
+  const windowLabel = useMemo(() => {
+    const fmt = new Intl.DateTimeFormat(locale === "en" ? "en-GB" : "th-TH", {
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    return `${fmt.format(new Date(windowStart))} – ${fmt.format(new Date(windowEnd))}`;
+  }, [locale, windowStart, windowEnd]);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
   const [sort, setSort] = useState<SortKey>("popular");
@@ -219,6 +245,10 @@ export default function ModelsExplorer({ models }: { models: ExplorerModel[] }) 
             </button>
           )}
         </div>
+        <p className="text-label text-fg-subtle">
+          <Icon name="fa-circle-info" className="mr-1.5 text-micro" />
+          {t("uptime นับจาก request จริงใน 24 ชม.ล่าสุด (ทุกผู้ใช้)")}
+        </p>
       </div>
 
       {filtered.length === 0 ? (
@@ -284,10 +314,7 @@ export default function ModelsExplorer({ models }: { models: ExplorerModel[] }) 
                       >
                         {model.publicModel}
                       </Link>
-                      <CopyButton value={model.publicModel} />
-                      {model.category && (
-                        <span className="text-label text-fg-subtle">· {model.category.name}</span>
-                      )}
+                      <CopyButton value={model.publicModel} iconOnly />
                     </div>
                   </div>
                 </div>
@@ -298,19 +325,40 @@ export default function ModelsExplorer({ models }: { models: ExplorerModel[] }) 
                   </p>
                 )}
 
-                {/* สถิติ: uptime วันนี้ + tokens รวมทั้งระบบ */}
-                <div className="mt-4 flex flex-wrap items-center gap-1.5">
-                  <span
-                    title={
-                      uptimePct == null
-                        ? t("ยังไม่มี request วันนี้")
-                        : t("uptime วันนี้ · {n} requests", { n: formatNumber(model.uptimeRequests) })
-                    }
-                    className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-label ${uptimeClasses(uptime)}`}
-                  >
-                    <Icon name="fa-signal" className="text-micro" />
-                    {uptimePct == null ? t("uptime —") : `uptime ${uptimePct.toFixed(1)}%`}
-                  </span>
+                {/* Uptime 24 ชม. — หลอดเปอร์เซ็นต์ + ช่วงเวลา/จำนวน request */}
+                <div className="mt-4 rounded-lg bg-white/[0.03] px-3.5 py-3">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <p className="text-label font-medium text-fg-muted">
+                      <Icon name="fa-signal" className="mr-1.5 text-micro text-brand-300" />
+                      {t("Uptime 24 ชม.ล่าสุด")}
+                    </p>
+                    <p className={`tnum text-caption font-semibold ${uptimeTextClass(uptime)}`}>
+                      {uptimePct == null ? "—" : `${uptimePct.toFixed(1)}%`}
+                    </p>
+                  </div>
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/[0.07]">
+                    <div
+                      className={`h-full rounded-full ${uptimeBarClass(uptime)}`}
+                      style={{ width: `${uptimePct ?? 0}%` }}
+                    />
+                  </div>
+                  <p className="mt-1.5 text-label leading-relaxed text-fg-subtle">
+                    {uptimePct == null
+                      ? t("ยังไม่มี request ใน 24 ชม.ล่าสุด")
+                      : t(
+                          model.uptimeRequests === 1
+                            ? "{n} request · {window}"
+                            : "{n} requests · {window}",
+                          {
+                            n: formatNumber(model.uptimeRequests),
+                            window: windowLabel,
+                          },
+                        )}
+                  </p>
+                </div>
+
+                {/* สถิติรวม: tokens/ความสามารถ */}
+                <div className="mt-3 flex flex-wrap items-center gap-1.5">
                   <span
                     title={t("{n} tokens รวมทุกผู้ใช้ · {r} requests", {
                       n: formatNumber(model.tokens),

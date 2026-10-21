@@ -228,13 +228,13 @@ export default function Sidebar({
         {navContent}
       </aside>
 
-      {/* fab-dock = เลื่อนพ้น home indicator และขอบจอแนวนอน (ห้ามใส่ bottom/left ซ้ำ) */}
+      {/* ปุ่มเมนูมือถืออยู่ขวาบนของ topbar — z-50 ให้อยู่เหนือ header ที่ sticky z-40 */}
       <button
         onClick={() => setOpen(true)}
         aria-label={t("เปิดเมนู")}
         aria-expanded={open}
         aria-haspopup="dialog"
-        className="fab-dock fixed z-40 flex h-12 w-12 items-center justify-center rounded-full bg-brand-500 text-fg shadow-floating transition active:scale-95 lg:hidden"
+        className="fixed right-3 top-[calc(0.625rem_+_env(safe-area-inset-top))] z-50 flex h-11 w-11 items-center justify-center rounded-lg bg-white/[0.06] text-fg-muted ring-1 ring-white/[0.08] transition hover:bg-white/[0.10] hover:text-fg active:scale-95 lg:hidden"
       >
         <Icon name="fa-bars" />
       </button>

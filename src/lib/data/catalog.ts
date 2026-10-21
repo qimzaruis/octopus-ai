@@ -41,12 +41,6 @@ export type CatalogModel = {
   inputPricePerM: number;
   outputPricePerM: number;
   logoUrl: string | null;
-  /** สถิติวันนี้ของโมเดลปลายทาง (ใช้รวมเป็น uptime ของ route) */
-  uptimeDay: string | null;
-  uptime: number;
-  uptimeRequests: number;
-  uptimeOk: number;
-  uptimeTokens: number;
 };
 
 export type CatalogCategory = {
@@ -148,14 +142,6 @@ function normalize(row: Record<string, unknown>): Catalog {
       inputPricePerM: n(m.input_price_per_m ?? m.inputPricePerM),
       outputPricePerM: n(m.output_price_per_m ?? m.outputPricePerM),
       logoUrl: m.logo_url == null && m.logoUrl == null ? null : s(m.logo_url ?? m.logoUrl),
-      uptimeDay:
-        m.uptime_day == null && m.uptimeDay == null
-          ? null
-          : s(m.uptime_day ?? m.uptimeDay).slice(0, 10),
-      uptime: n(m.uptime),
-      uptimeRequests: n(m.uptime_requests ?? m.uptimeRequests),
-      uptimeOk: n(m.uptime_ok ?? m.uptimeOk),
-      uptimeTokens: n(m.uptime_tokens ?? m.uptimeTokens),
     })),
     categories: arr(row.route_categories ?? row.categories)
       .map((c) => ({
