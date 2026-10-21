@@ -47,6 +47,8 @@ type UiMessage = {
   steps?: ToolStep[];
   /** สิ่งที่โมเดลบอกก่อนเรียกเครื่องมือแต่ละรอบ (แสดงในกล่อง "กำลังคิด") */
   notes?: string[];
+  /** reasoning ที่โมเดลส่งมาระหว่างคิด — แสดงในกล่อง "กระบวนการคิด" (ไม่บันทึกลงประวัติ) */
+  thought?: string;
   /** เวลาที่ใช้ทั้งรอบ (คิด + เรียกเครื่องมือ) — แสดงในกล่องขั้นตอนหลังจบ */
   thinkingMs?: number;
   /** ผู้ใช้กดหยุดเอง — ข้อความอาจมีคำตอบบางส่วน */
@@ -153,6 +155,7 @@ function ThinkingPanel({
   running,
   notes,
   steps,
+  thought,
   startedAt,
   durationMs,
   /** มีข้อความคำตอบไหลอยู่แล้ว — พับกล่องให้อัตโนมัติ จะได้ไม่บังคำตอบ */
@@ -161,6 +164,8 @@ function ThinkingPanel({
   running: boolean;
   notes: string[];
   steps: ToolStep[];
+  /** reasoning ที่ผ่านการล้างข้อมูลภายในแล้ว (ไม่บันทึกลงประวัติ) */
+  thought?: string;
   startedAt?: number;
   durationMs?: number;
   hasText?: boolean;
@@ -186,7 +191,8 @@ function ThinkingPanel({
       : null;
 
   const activeStep = running ? [...steps].reverse().find((s) => s.state === "running") : undefined;
-  const expandable = notes.length > 0 || steps.length > 0;
+  const hasThought = Boolean(thought?.trim());
+  const expandable = hasThought || notes.length > 0 || steps.length > 0;
   // ไม่มีอะไรให้กาง และคำตอบเริ่มไหลแล้ว → ซ่อนแถว "กำลังคิด" ไม่ให้เกะกะเหนือคำตอบ
   if (!expandable && (!running || hasText)) return null;
 
@@ -195,22 +201,32 @@ function ThinkingPanel({
 
   const title = running
     ? (activeStep?.label ?? (hasText ? t("ขั้นตอนการทำงาน") : t("กำลังคิด...")))
-    : elapsed !== null
-      ? t("ใช้เวลา {n} วิ", { n: elapsed })
-      : t("ขั้นตอนการทำงาน");
+    : hasThought
+      ? t("กระบวนการคิด")
+      : elapsed !== null
+        ? t("ใช้เวลา {n} วิ", { n: elapsed })
+        : t("ขั้นตอนการทำงาน");
   const meta = running
     ? elapsed != null && elapsed > 0
       ? t("{n} วิ", { n: elapsed })
       : null
-    : steps.length > 0
-      ? t("{n} ขั้นตอน", { n: steps.length })
-      : null;
+    : elapsed !== null && hasThought
+      ? t("{n} วิ", { n: elapsed })
+      : steps.length > 0
+        ? t("{n} ขั้นตอน", { n: steps.length })
+        : null;
 
   const head = (
     <>
       <Icon
-        name={running ? "fa-circle-notch" : "fa-lightbulb"}
-        className={`shrink-0 ${running ? "animate-spin text-brand-300" : "text-amber-glow"}`}
+        name={running ? "fa-circle-notch" : hasThought ? "fa-brain" : "fa-lightbulb"}
+        className={`shrink-0 ${
+          running
+            ? "animate-spin text-brand-300"
+            : hasThought
+              ? "text-brand-300"
+              : "text-amber-glow"
+        }`}
       />
       <span className="min-w-0 flex-1 truncate">{title}</span>
       {meta && <span className="shrink-0 text-micro tabular-nums text-fg-subtle">{meta}</span>}
@@ -247,6 +263,19 @@ function ThinkingPanel({
           id={regionId}
           className="space-y-2.5 border-t border-white/[0.06] px-3 py-2.5"
         >
+          {hasThought && (
+            <div>
+              {running && (
+                <p className="mb-1 flex items-center gap-1.5 text-micro font-semibold uppercase tracking-[0.12em] text-fg-subtle">
+                  <Icon name="fa-brain" className="text-micro" />
+                  {t("กระบวนการคิด")}
+                </p>
+              )}
+              <p className="max-h-64 overflow-y-auto whitespace-pre-wrap border-l-2 border-white/[0.10] pl-2.5 text-caption leading-relaxed text-fg-subtle">
+                {thought}
+              </p>
+            </div>
+          )}
           {notes.map((note, i) => (
             <p
               key={`note-${i}`}
@@ -357,6 +386,7 @@ export default function AgentWorkspace({
   const runSeqRef = useRef(0);
   const stepsRef = useRef<ToolStep[]>([]);
   const notesRef = useRef<string[]>([]);
+  const thoughtRef = useRef("");
   /** กันการกดส่งซ้ำก่อน React จะ re-render ด้วย loading = true */
   const busyRef = useRef(false);
   /** ข้อความที่ stream ล่าสุด — ใช้กู้คำตอบบางส่วนตอน error/กดหยุด */
@@ -375,6 +405,8 @@ export default function AgentWorkspace({
 
   /** สิ่งที่โมเดลพิมพ์บอกก่อนเรียกเครื่องมือในรอบนี้ (แสดงในกล่องกำลังคิด) */
   const [notes, setNotes] = useState<string[]>([]);
+  /** reasoning ที่ไหลอยู่ระหว่างรอบนี้ */
+  const [thought, setThought] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   /** index ของข้อความที่กำลังแก้ — ดึงข้อความกลับมาพิมพ์ต่อในกล่องพิมพ์เลย (ไม่มี popup) */
@@ -419,8 +451,10 @@ export default function AgentWorkspace({
     setNotice(null);
     setSteps([]);
     setNotes([]);
+    setThought("");
     stepsRef.current = [];
     notesRef.current = [];
+    thoughtRef.current = "";
     setRunStartedAt(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
@@ -583,8 +617,10 @@ export default function AgentWorkspace({
     setLoading(false);
     setSteps([]);
     setNotes([]);
+    setThought("");
     stepsRef.current = [];
     notesRef.current = [];
+    thoughtRef.current = "";
     answerRef.current = "";
     setRunStartedAt(null);
   }
@@ -1052,6 +1088,7 @@ export default function AgentWorkspace({
     },
     signal: AbortSignal,
     runId: number,
+    onThought: (delta: string) => void,
   ): Promise<{ text: string; calls: AgentToolCall[] }> {
     const current = () => runSeqRef.current === runId && !signal.aborted;
     const res = await fetch("/api/agent/chat", {
@@ -1123,6 +1160,8 @@ export default function AgentWorkspace({
           answerRef.current = text;
           setStreamingText(text);
         }
+      } else if (event.t === "reason" && current()) {
+        onThought(String(event.v ?? ""));
       } else if (event.t === "notice" && current()) {
         setNotice(String(event.v ?? ""));
       } else if (event.t === "files" && current()) {
@@ -1217,13 +1256,22 @@ export default function AgentWorkspace({
     const notesLog: string[] = [];
     stepsRef.current = collected;
     notesRef.current = notesLog;
+    thoughtRef.current = "";
     setSteps(collected);
     setNotes(notesLog);
+    setThought("");
+    /** reasoning ถูกส่งมาเป็นประโยคสั้น ๆ — ต่อท้ายของเดิมเพื่อให้เห็นความคิดทั้งรอบ */
+    const appendThought = (delta: string) => {
+      if (!isCurrent() || !delta) return;
+      thoughtRef.current += delta;
+      setThought(thoughtRef.current);
+    };
 
     type FinishPatch = {
       content: string;
       steps?: ToolStep[];
       notes?: string[];
+      thought?: string;
       thinkingMs?: number;
       stopped?: boolean;
       error?: string;
@@ -1330,6 +1378,7 @@ export default function AgentWorkspace({
           },
           controller.signal,
           runId,
+          appendThought,
         );
         if (!isCurrent() || controller.signal.aborted) return;
         answer = text;
@@ -1373,6 +1422,7 @@ export default function AgentWorkspace({
         content: answer || t("เอเจนต์ไม่ได้ตอบกลับมา"),
         steps: collected,
         notes: notesLog,
+        thought: thoughtRef.current || undefined,
         thinkingMs: Date.now() - startedAt,
       });
     } catch (err) {
@@ -1386,6 +1436,7 @@ export default function AgentWorkspace({
         // เครื่องมือที่ค้างอยู่ตอน error/ถูกตัดconnection ต้องไม่โชว์ spinner หมุนค้าง
         steps: collected.map((s) => (s.state === "running" ? { ...s, state: "error" } : s)),
         notes: notesLog,
+        thought: thoughtRef.current || undefined,
         thinkingMs: Date.now() - startedAt,
       });
     } finally {
@@ -1395,8 +1446,10 @@ export default function AgentWorkspace({
         setLoading(false);
         setSteps([]);
         setNotes([]);
+        setThought("");
         stepsRef.current = [];
         notesRef.current = [];
+        thoughtRef.current = "";
         setRunStartedAt(null);
       }
     }
@@ -1432,6 +1485,7 @@ export default function AgentWorkspace({
     const partial = answerRef.current;
     const stoppedSteps = stepsRef.current;
     const stoppedNotes = notesRef.current;
+    const stoppedThought = thoughtRef.current;
     const started = runStartedAt;
     cancelActiveRun();
     setMessages((prev) => {
@@ -1447,6 +1501,7 @@ export default function AgentWorkspace({
           ? stoppedSteps.map((s) => (s.state === "running" ? { ...s, state: "stopped" } : s))
           : undefined,
         notes: stoppedNotes.length ? [...stoppedNotes] : undefined,
+        thought: stoppedThought || undefined,
         thinkingMs: started ? Date.now() - started : undefined,
         stopped: true,
       };
@@ -1973,6 +2028,7 @@ export default function AgentWorkspace({
                         running={streaming && loading}
                         notes={streaming ? notes : (m.notes ?? [])}
                         steps={streaming ? steps : (m.steps ?? [])}
+                        thought={streaming ? thought : (m.thought ?? "")}
                         startedAt={streaming ? (runStartedAt ?? undefined) : undefined}
                         durationMs={streaming ? undefined : m.thinkingMs}
                         hasText={m.content.length > 0}

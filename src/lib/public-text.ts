@@ -61,6 +61,25 @@ const replaceAll = (text: string, names: string[], token: string) =>
  * รับ identities เป็นพารามิเตอร์เพราะจุดที่เรียกซ้ำ ๆ (loop ไล่คีย์) ควรถ่าย_once
  * แล้วส่งต่อ ไม่ให้ยิง query ใหม่ทุกครั้งที่ลองล้ม
  */
+/**
+ * ตัดชื่อค่าย/host/id ปลายทางออกจากข้อความยาว (เช่น reasoning ที่จะแสดงในแชท)
+ * ต่างจาก maskInternals ตรงที่ไม่ตัดเหลือ 200 ตัวอักษรและไม่ยุ่งกับ stack trace
+ * อ่านรายชื่อค่ายไม่ได้ = คืนค่าว่าง (fail closed) ดีกว่าปล่อยข้อความภายในออก
+ */
+export function maskInternalNames(
+  text: string,
+  ids: InternalIdentities,
+  maxLength = 4000,
+): string {
+  if (ids.brands.length === 0) return "";
+  const out = replaceAll(
+    text.replace(/https?:\/\/\S+/g, "[url]"),
+    ids.brands,
+    "[ค่าย]",
+  );
+  return replaceAll(out, ids.targets, "[ปลายทาง]").slice(0, maxLength).trim();
+}
+
 export function maskInternals(text: string, ids: InternalIdentities): string {
   // ไม่มีรายชื่อค่ายให้บัง (อ่าน DB ไม่สำเร็จ) → ห้ามส่งข้อความดิบออก เพราะชื่อยี่ห้อจะหลุด
   if (ids.brands.length === 0) return "เกิดข้อผิดพลาดจากโมเดลปลายทาง";

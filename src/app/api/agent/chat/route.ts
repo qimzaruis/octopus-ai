@@ -24,6 +24,8 @@ import {
   updateConversation,
   type ChatAttachment,
 } from "@/lib/chat/db";
+import { sanitizeThought } from "@/lib/agent/thought";
+import type { InternalIdentities } from "@/lib/public-text";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -309,6 +311,14 @@ const UNKNOWN_TARGET = {
 const GENERIC_STREAM_ERROR =
   "เกิดข้อผิดพลาดระหว่างการเชื่อมต่อ โมเดลตอบกลับมาไม่ครบ กรุณาส่งข้อความเป็นรอบใหม่";
 
+function hostOf(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return "";
+  }
+}
+
 export async function POST(req: NextRequest) {
   // อ่าน session (ไป Supabase) พร้อมกับการ parse body — ไม่ต้องรอต่อกัน
   const [user, parsed] = await Promise.all([
@@ -524,6 +534,11 @@ export async function POST(req: NextRequest) {
   const acc = createSseAccumulator(() => estimateTokensFromChars(promptChars));
   const decoder = new TextDecoder();
   const upstreamBody = result.body;
+  const thoughtIds: InternalIdentities = {
+    brands: [target.providerName, hostOf(target.baseUrl)].filter(Boolean),
+    // route id (model) ก็ห้ามหลุดใน reasoning
+    targets: [target.modelId, model].filter(Boolean),
+  };
 
   let upstreamReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   let cancelled = false;
@@ -550,6 +565,35 @@ export async function POST(req: NextRequest) {
         }
       };
 
+      /**
+       * reasoning ไหลมาเป็น token ย่อย — รวมเป็นประโยคก่อนค่อยล้างคำต้องห้าม
+       * (ถ้าล้างทีละ token คำว่า system prompt อาจถูกแบ่งจนตัวกรองจับไม่ได้)
+       */
+      let thoughtBuffer = "";
+      let thoughtSent = 0;
+      const flushThought = (final = false) => {
+        if (!thoughtBuffer || thoughtSent >= 4000) return;
+        let cut = final ? thoughtBuffer.length : -1;
+        if (!final) {
+          const boundaries = [...thoughtBuffer.matchAll(/[.!?。\n]/g)];
+          if (boundaries.length > 0) {
+            cut = (boundaries[boundaries.length - 1].index ?? 0) + 1;
+          } else if (thoughtBuffer.length >= 400) {
+            cut = thoughtBuffer.length;
+          }
+          if (cut < 0) return;
+        }
+        const chunk = thoughtBuffer.slice(0, cut);
+        thoughtBuffer = thoughtBuffer.slice(cut);
+        const clean = sanitizeThought(chunk, thoughtIds);
+        if (!clean) return;
+        const room = 4000 - thoughtSent;
+        if (room <= 0) return;
+        const part = clean.slice(0, room);
+        thoughtSent += part.length;
+        safeEnqueue(event({ t: "reason", v: part }));
+      };
+
       if (tools.length > 0 && usedTools.length === 0) {
         safeEnqueue(
           event({ t: "notice", v: "โมเดลนี้ยังไม่รองรับเครื่องมือ — รอบนี้จึงตอบจากข้อมูลที่มี" }),
@@ -564,6 +608,11 @@ export async function POST(req: NextRequest) {
           if (done) break;
           const delta = acc.push(decoder.decode(value, { stream: true }));
           if (delta && !safeEnqueue(event({ t: "d", v: delta }))) break;
+          const reasoning = acc.takeReasoning();
+          if (reasoning) {
+            thoughtBuffer += reasoning;
+            flushThought();
+          }
         }
       } catch (err) {
         // abort จากผู้ใช้ไม่ใช่ความล้มเหลวของค่าย — อย่าเอาไปบันทึกเป็น error
@@ -615,6 +664,7 @@ export async function POST(req: NextRequest) {
       // โมเดลขอใช้เครื่องมือ → ส่งรายการกลับไปให้ client รันบนเครื่องผู้ใช้
       // (ยังไม่บันทึกอะไรลงประวัติ เพราะยังไม่ใช่คำตอบสุดท้าย)
       if (calls.length > 0 && !failed) {
+        flushThought(true);
         safeEnqueue(event({ t: "tool", v: calls, text: answer, fr: reason }));
         void logRequest({
           userId: user.id,
@@ -648,6 +698,7 @@ export async function POST(req: NextRequest) {
       } finally {
         // บอกรายชื่อไฟล์ที่บันทึกเสร็จแล้ว → ปุ่ม "แชร์" บน artifact ใช้ได้ทันทีโดยไม่ต้องโหลดห้องใหม่
         if (saved.length > 0) safeEnqueue(event({ t: "files", v: saved }));
+        flushThought(true);
         safeEnqueue(event({ t: "done", fr: reason }));
         try {
           controller.close();

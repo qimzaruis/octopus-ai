@@ -64,6 +64,7 @@ export type GatewayErrorCode =
   | "no_target"
   | "no_provider_key"
   | "keys_limited"
+  | "model_missing"
   | "upstream_error";
 
 /** ข้อผิดพลาดที่แปลงเป็น status code ตอบลูกค้าได้ทันที */
@@ -279,6 +280,8 @@ export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> 
   let attempted = false;
   /** เจอลิมิตโควต้าในบาง attempt (ไว้ตอบ 429 แทน 502 เมื่อไม่มีสาเหตุอื่น) */
   let sawLimit = false;
+  /** เจอ 404 = โมเดลถูกถอดออกจากปลายทาง (แยกข้อความให้แอดมินแก้ถูกจุด) */
+  let sawMissing = false;
   /** เจอ error แบบอื่นที่ไม่ใช่ลิมิต — ถ้ามี แสดงว่า 429 ไม่ใช่คำตอบที่ตรง */
   let sawOtherFailure = false;
   /** ชื่อค่ายทั้งหมดของ route นี้ ใช้ปิดบังก่อนเก็บ error ลงตาราง requests */
@@ -396,25 +399,40 @@ export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> 
         continue;
       }
 
+      // 404 = โมเดลถูกถอด/เปลี่ยนชื่อที่ปลายทาง ไม่ใช่คีย์หรือคำขอ
+      if (res.status === 404) {
+        sawMissing = true;
+        lastError = "โมเดลปลายทางไม่มีอยู่จริง (อาจถูกถอดออกจากผู้ให้บริการ)";
+        break;
+      }
+
       sawOtherFailure = true;
       // เก็บแค่สถานะ — รายละเอียดดิบของค่ายเก็บไว้ที่ log ฝั่งเซิร์ฟเวอร์อย่างเดียว
       lastError = `โมเดลปลายทางตอบกลับ ${res.status}`;
-      // 400/404/5xx เป็นปัญหาของ "คำขอ/โมเดล/ปลายทาง" ไม่ใช่คีย์
+      // 400/5xx เป็นปัญหาของ "คำขอ/ปลายทาง" ไม่ใช่คีย์
       // เดิมนับเป็นคีย์เสีย (และพักคีย์) ทำให้แก้คำขอแล้วลองใหม่ไม่ได้ภายในหลายนาที
       break;
     }
   }
 
   const code: GatewayErrorCode =
-    sawLimit && !sawOtherFailure
+    sawLimit && !sawOtherFailure && !sawMissing
       ? "keys_limited"
-      : attempted
-        ? "upstream_error"
-        : "no_provider_key";
+      : sawMissing && !sawOtherFailure
+        ? "model_missing"
+        : attempted
+          ? "upstream_error"
+          : "no_provider_key";
   throw new GatewayError(
     code,
     lastError || "ทุกค่ายต้นทางล้มเหลว",
-    code === "keys_limited" ? 429 : code === "upstream_error" ? 502 : 503,
+    code === "keys_limited"
+      ? 429
+      : code === "model_missing"
+        ? 404
+        : code === "upstream_error"
+          ? 502
+          : 503,
   );
 }
 
@@ -456,6 +474,8 @@ export function userSafeMessage(err: unknown): string {
       return "ยังไม่ได้ตั้งค่าการเชื่อมต่อโมเดลนี้ กรุณาแจ้งผู้ดูแลระบบ";
     case "keys_limited":
       return "โควต้าของโมเดลปลายทางครบแล้วสําหรับรอบนี้ กรุณาลองใหม่ภายหลัง";
+    case "model_missing":
+      return "โมเดลนี้ถูกปิดหรือถูกถอดออกจากผู้ให้บริการแล้ว กรุณาแจ้งผู้ดูแลระบบ";
     case "upstream_error":
       return "โมเดลต้นทางตอบกลับผิดพลาด กรุณาลองใหม่";
     default:
@@ -636,6 +656,8 @@ export async function logRequest(input: LogInput): Promise<void> {
 export type SseAccumulator = {
   /** เติม chunk เข้าไป แล้วคืนค่าที่เป็น delta ข้อความของ chunk นั้น (สำหรับโหมดข้อความล้วน) */
   push(chunk: string): string;
+  /** reasoning ของ chunk ล่าสุด (โมเดลที่ส่ง delta.reasoning / reasoning_content) */
+  takeReasoning(): string;
   usage(): GatewayUsage;
   text(): string;
   /** เครื่องมือที่โมเดลขอ (รวม fragment ที่ไหลมาเป็นชิ้น ๆ แล้ว) — ว่างถ้าโมเดลตอบเป็นข้อความ */
@@ -652,6 +674,7 @@ export function createSseAccumulator(estimatePrompt: () => number): SseAccumulat
   let acc = "";
   let finish = "";
   let usage: GatewayUsage | null = null;
+  let lastReasoning = "";
   const slots = new Map<number, ToolCallSlot>();
 
   function collectToolCalls(raw: unknown) {
@@ -677,8 +700,18 @@ export function createSseAccumulator(estimatePrompt: () => number): SseAccumulat
     try {
       const json = JSON.parse(data) as {
         choices?: {
-          delta?: { content?: string; tool_calls?: unknown[] };
-          message?: { content?: string; tool_calls?: unknown[] };
+          delta?: {
+            content?: string;
+            reasoning?: string;
+            reasoning_content?: string;
+            tool_calls?: unknown[];
+          };
+          message?: {
+            content?: string;
+            reasoning?: string;
+            reasoning_content?: string;
+            tool_calls?: unknown[];
+          };
           finish_reason?: string | null;
         }[];
         usage?: { prompt_tokens?: number; completion_tokens?: number };
@@ -687,6 +720,12 @@ export function createSseAccumulator(estimatePrompt: () => number): SseAccumulat
       if (choice?.finish_reason) finish = choice.finish_reason;
       delta = choice?.delta?.content ?? "";
       if (!delta) delta = choice?.message?.content ?? "";
+      const reasoning =
+        choice?.delta?.reasoning ??
+        choice?.delta?.reasoning_content ??
+        choice?.message?.reasoning ??
+        choice?.message?.reasoning_content;
+      if (typeof reasoning === "string") lastReasoning += reasoning;
       collectToolCalls(choice?.delta?.tool_calls ?? choice?.message?.tool_calls);
       if (json.usage) {
         usage = {
@@ -703,6 +742,7 @@ export function createSseAccumulator(estimatePrompt: () => number): SseAccumulat
 
   return {
     push(chunk: string): string {
+      lastReasoning = "";
       buffer += chunk;
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? "";
@@ -714,6 +754,11 @@ export function createSseAccumulator(estimatePrompt: () => number): SseAccumulat
         if (!data || data === "[DONE]") continue;
         out += handleData(data);
       }
+      return out;
+    },
+    takeReasoning() {
+      const out = lastReasoning;
+      lastReasoning = "";
       return out;
     },
     usage() {

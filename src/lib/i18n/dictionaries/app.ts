@@ -141,6 +141,7 @@ export const appPages = {
   "{n} วิ": "{n}s",
   "{n} ขั้นตอน": "{n} steps",
   "กำลังคิด...": "Thinking...",
+  "กระบวนการคิด": "Thought process",
   "ปิดการแจ้งเตือน": "Dismiss notice",
   "บทสนทนา": "Conversation",
 
