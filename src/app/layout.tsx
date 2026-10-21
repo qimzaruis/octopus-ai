@@ -4,7 +4,7 @@ import "./globals.css";
 import { getLocale } from "@/lib/i18n/server";
 import { LocaleProvider } from "@/lib/i18n/client";
 import { HTML_LANG } from "@/lib/i18n/config";
-import { siteUrl } from "@/lib/config";
+import { getSiteUrl } from "@/lib/site-config";
 
 /**
  * ตัวอักษร: IBM Plex Sans (Latin) → IBM Plex Sans Thai (ไทย) → system → JetBrains Mono
@@ -46,19 +46,22 @@ export const viewport: Viewport = {
   interactiveWidget: "resizes-content",
 };
 
-export const metadata: Metadata = {
-  metadataBase: siteUrl ? new URL(siteUrl) : undefined,
-  title: "Octopus AI — One Gateway to Every AI",
-  description:
-    "ศูนย์กลางเรียกใช้ AI ทุกโมเดลผ่าน API เดียว พร้อมแดชบอร์ดวิเคราะห์การใช้งาน จัดการ API key และ routing อัตโนมัติ",
-  icons: { icon: "/logo.png", apple: "/logo.png" },
-  openGraph: {
+export async function generateMetadata(): Promise<Metadata> {
+  const siteUrl = await getSiteUrl();
+  return {
+    metadataBase: siteUrl ? new URL(siteUrl) : undefined,
     title: "Octopus AI — One Gateway to Every AI",
-    description: "เรียกใช้ทุกโมเดล AI ผ่าน API เดียว พร้อมแดชบอร์ดและ routing อัตโนมัติ",
-    url: siteUrl || undefined,
-    siteName: "Octopus AI",
-  },
-};
+    description:
+      "ศูนย์กลางเรียกใช้ AI ทุกโมเดลผ่าน API เดียว พร้อมแดชบอร์ดวิเคราะห์การใช้งาน จัดการ API key และ routing อัตโนมัติ",
+    icons: { icon: "/logo.png", apple: "/logo.png" },
+    openGraph: {
+      title: "Octopus AI — One Gateway to Every AI",
+      description: "เรียกใช้ทุกโมเดล AI ผ่าน API เดียว พร้อมแดชบอร์ดและ routing อัตโนมัติ",
+      url: siteUrl || undefined,
+      siteName: "Octopus AI",
+    },
+  };
+}
 
 export default async function RootLayout({
   children,

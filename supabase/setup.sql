@@ -1,5 +1,5 @@
 -- ============================================================================
--- Octopus AI — สร้างตารางทั้งหมด (8 ตาราง) + foreign keys + indexes
+-- Octopus AI — สร้างตารางทั้งหมด + foreign keys + indexes
 -- วิธีใช้: คัดลอกทั้งไฟล์นี้ไปวางใน Supabase Dashboard > SQL Editor > Run
 -- ปลอดภัยต่อการรันซ้ำ (IF NOT EXISTS / duplicate_object ถูกกลืน)
 --
@@ -292,6 +292,18 @@ CREATE INDEX IF NOT EXISTS "requests_public_created_idx" ON "requests" USING btr
 
 -- ---------- ประเภทโมเดล: chat / image (migration 0010) ----------
 ALTER TABLE "models" ADD COLUMN IF NOT EXISTS "kind" text DEFAULT 'chat' NOT NULL;
+
+-- ---------- ค่าตั้งค่าเว็บ key/value (migration 0011) ----------
+CREATE TABLE IF NOT EXISTS "config" (
+	"key" text PRIMARY KEY NOT NULL,
+	"value" text DEFAULT '' NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+
+-- ค่าเริ่มต้น: โดเมนจริงของเว็บ (เปลี่ยนได้ภายหลังด้วย UPDATE)
+INSERT INTO "config" ("key", "value")
+VALUES ('site_url', 'https://octopus-ai.isdev.dpdns.org')
+ON CONFLICT ("key") DO NOTHING;
 
 -- ---------- ตรวจผล ----------
 SELECT table_name

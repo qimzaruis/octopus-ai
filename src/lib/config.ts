@@ -49,22 +49,21 @@ export const supabaseConfigured = Boolean(
 export const databaseConfigured = Boolean(databaseUrl && !isPlaceholder(databaseUrl));
 
 /**
- * โดเมนที่ deploy จริง — ใช้เมื่อ host ไม่ได้ตั้ง NEXT_PUBLIC_APP_URL
+ * โดเมนสำรองเมื่ออ่านตาราง config ใน DB ไม่ได้
  *
- * ถ้าไม่มีค่า fallback นี้ metadata/OG จะไม่มี URL และ mockup ในหน้า landing จะ
- * แสดง "localhost:3000" ของเครื่อง dev ออกไปบนเว็บจริง
+ * ค่าจริงของเว็บอ่านจากตาราง config (คีย์ site_url) ผ่าน getSiteUrl()
+ * ใน src/lib/site-config.ts — ค่าตรงนี้ใช้เป็น fallback ตอน build/ตอน DB ล่ม
  */
-const PRODUCTION_SITE_URL = "https://octopus-ai.devs.li";
+const PRODUCTION_SITE_URL = "https://octopus-ai.isdev.dpdns.org";
 
 const rawSiteUrl =
   (process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL ?? "").trim() || PRODUCTION_SITE_URL;
 
 /**
- * URL ของเว็บนี้แบบไม่มี slash ท้าย (เช่น https://octopus-ai.devs.li)
+ * URL ของเว็บนี้แบบไม่มี slash ท้าย (เช่น https://octopus-ai.isdev.dpdns.org)
  *
- * ใช้แทนการ hardcode ชื่อโดเมนใน system prompt ของเอเจนต์, ตัวอย่างโค้ดเรียก API
- * และ metadata ของหน้า — ตั้งผ่าน NEXT_PUBLIC_APP_URL (อ่านได้จากทั้งฝั่ง server และ client)
- * ถ้าไม่ตั้ง ใช้โดเมนที่ deploy จริง (PRODUCTION_SITE_URL) แทนที่จะปล่อยว่าง
+ * ฝั่ง server ควรใช้ getSiteUrl() จาก @/lib/site-config เพื่ออ่านค่าล่าสุดจาก DB
+ * ตัวนี้เป็นค่าที่ bake ตอน build จึงใช้ใน client component และ metadata เริ่มต้น
  */
 export const siteUrl = rawSiteUrl.replace(/\/+$/, "");
 

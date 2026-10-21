@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Badge from "@/components/Badge";
 import CountUp from "@/components/CountUp";
 import Icon from "@/components/Icon";
@@ -12,6 +13,10 @@ import { useT } from "@/lib/i18n/client";
  */
 export default function DashboardMock() {
   const t = useT();
+  const [host, setHost] = useState(() => siteHost());
+  useEffect(() => {
+    setHost(window.location.host);
+  }, []);
   const bars = [34, 45, 29, 52, 63, 48, 74, 88];
   const labels = ["08", "10", "12", "14", "16", "18", "20", "22"];
   /** ชื่อ route ที่ผู้ใช้เรียก — ภาพจําลองไม่ให้รู้ว่าข้างหลังเป็นค่ายไหน */
@@ -26,7 +31,7 @@ export default function DashboardMock() {
           <span className="h-2.5 w-2.5 rounded-full bg-amber-glow/50" />
           <span className="h-2.5 w-2.5 rounded-full bg-leaf/50" />
           <span className="ml-3 hidden font-mono text-label text-fg-subtle sm:block">
-            {siteHost()}/dashboard
+            {host}/dashboard
           </span>
           <Badge tone="leaf" dot className="ml-auto !py-0.5 !text-micro">
             live

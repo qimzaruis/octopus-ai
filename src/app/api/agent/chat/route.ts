@@ -25,6 +25,7 @@ import {
   type ChatAttachment,
 } from "@/lib/chat/db";
 import { sanitizeThought } from "@/lib/agent/thought";
+import { getSiteUrl } from "@/lib/site-config";
 import type { InternalIdentities } from "@/lib/public-text";
 
 export const runtime = "nodejs";
@@ -431,6 +432,7 @@ export async function POST(req: NextRequest) {
   });
 
   const system = buildAgentSystemPrompt({
+    siteUrl: await getSiteUrl(),
     routeName: route.displayName || route.publicModel,
     tools: body.toolNames ?? [],
     workspaceReady: Boolean(body.workspaceReady),

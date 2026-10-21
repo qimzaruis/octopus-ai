@@ -10,7 +10,7 @@ import { NextResponse, type NextRequest } from "next/server";
  * ชั้นนี้จึงเป็นชั้นเดียวที่มั่นใจว่าไม่มีข้อมูลหลุดไปกับ request ไม่ล็อกอิน
  */
 const PUBLIC_PAGES = new Set(["/", "/signin", "/terms", "/privacy", "/banned"]);
-const PUBLIC_PREFIXES = ["/auth/", "/api/", "/v1/"];
+const PUBLIC_PREFIXES = ["/auth/", "/api/", "/v1/", "/s/"];
 
 function requiresSession(pathname: string): boolean {
   if (PUBLIC_PAGES.has(pathname)) return false;
@@ -48,7 +48,33 @@ function remember(key: string, signedIn: boolean): void {
 }
 
 export async function proxy(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+  const { pathname, searchParams } = request.nextUrl;
+
+  /**
+   * Supabase ดีดกลับ Site URL (หน้าแรก) พร้อม `?code=` เมื่อ redirectTo
+   * ไม่อยู่ใน Additional Redirect URLs — code ต้องถูกแลกเป็น session ที่
+   * /auth/callback เท่านั้น ไม่อย่างนั้นผู้ใช้จะเห็นหน้าแรกเฉย ๆ ทั้งที่ล็อกอินแล้ว
+   * (เกิดกับโดเมนใหม่ที่ยังไม่ได้ใส่ allowlist)
+   */
+  if (pathname !== "/auth/callback" && !pathname.startsWith("/s/")) {
+    const code = searchParams.get("code");
+    if (code) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/auth/callback";
+      return NextResponse.redirect(url);
+    }
+  }
+
+  // OAuth ถูกปฏิเสธ/ผิดพลาด → Supabase ดีด error มาที่หน้าแรกเช่นกัน
+  if (pathname === "/") {
+    const authError = searchParams.get("error") ?? searchParams.get("error_code");
+    if (authError) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/signin";
+      url.search = "?error=auth";
+      return NextResponse.redirect(url);
+    }
+  }
 
   let response = NextResponse.next({ request });
 

@@ -7,9 +7,9 @@
  * ให้โมเดลรู้) และบอกว่าเครื่องมือที่โมเดลขอใช้ถูกรันที่เครื่องผู้ใช้ ไม่ใช่เซิร์ฟเวอร์
  */
 
-import { siteUrl } from "@/lib/config";
-
 export type AgentPromptInput = {
+  /** โดเมนจริงของเว็บ อ่านจากตาราง config */
+  siteUrl: string;
   /** ชื่อที่แสดงของผู้ใช้เลือก เช่น "Octopus Free" */
   routeName: string;
   /** ชื่อเครื่องมือที่เปิดใช้จริงในเครื่องผู้ใช้รอบนี้ */
@@ -30,12 +30,11 @@ function todayBangkok(): string {
 }
 
 export function buildAgentSystemPrompt({
+  siteUrl,
   routeName,
   tools,
   workspaceReady,
 }: AgentPromptInput): string {
-  // ชื่อโดเมนมาจาก env (NEXT_PUBLIC_APP_URL) — เดิม hardcode "octopus.ai"
-  // ทำให้เอเจนต์บอกลิงก์ผิดเวลาติดตั้งบนโดเมนจริง
   const host = siteUrl ? siteUrl.replace(/^https?:\/\//, "") : "เว็บของ OctopusAI";
   const lines = [
     `คุณคือ OctopusAI ผู้ช่วยบนแพลตฟอร์ม OctopusAI ที่ ${host} ไม่ใช่ช่องส่งข้อความไปโมเดลเปล่า ๆ`,

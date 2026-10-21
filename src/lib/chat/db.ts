@@ -70,11 +70,14 @@ const DDL = [
      content text not null default '',
      size_bytes integer not null default 0,
      share_url text,
+     share_token text,
      share_expires_at text,
      created_at text not null
    )`,
   `create index if not exists chat_files_user_idx
      on chat_files(user_id, created_at desc)`,
+  `create index if not exists chat_files_share_token_idx
+     on chat_files(share_token)`,
   `create table if not exists image_jobs (
      id text primary key,
      user_id text not null,
@@ -94,7 +97,10 @@ const DDL = [
  * ตารางเก่าที่ CREATE TABLE IF NOT EXISTS แก้ให้ไม่ได้ — เพิ่มคอลัมน์ให้ฐานข้อมูลที่มีอยู่ก่อน
  * ถ้าคอลัมน์มีอยู่แล้วคำสั่งจะล้มเหลว ซึ่งข้ามได้
  */
-const ALTERS = [`alter table chat_conversations add column deleted_at text`];
+const ALTERS = [
+  `alter table chat_conversations add column deleted_at text`,
+  `alter table chat_files add column share_token text`,
+];
 
 /** สร้างตารางทั้งหมดถ้ายังไม่มี — เรียกครั้งเดียวต่อ process */
 export async function ensureChatSchema(): Promise<void> {
@@ -499,6 +505,8 @@ export type ChatFile = {
   content: string;
   sizeBytes: number;
   shareUrl: string | null;
+  /** token สำหรับลิงก์ /s/<token> ที่เสิร์ฟเนื้อหาล่าสุดเสมอ */
+  shareToken: string | null;
   shareExpiresAt: string | null;
   createdAt: string;
 };
@@ -512,6 +520,7 @@ function rowToFile(r: Record<string, unknown>): ChatFile {
     content: String(r.content ?? ""),
     sizeBytes: Number(r.size_bytes ?? 0),
     shareUrl: r.share_url ? String(r.share_url) : null,
+    shareToken: r.share_token ? String(r.share_token) : null,
     shareExpiresAt: r.share_expires_at ? String(r.share_expires_at) : null,
     createdAt: String(r.created_at),
   };
@@ -549,6 +558,7 @@ export async function addFiles(
       content: input.content,
       sizeBytes: new TextEncoder().encode(input.content).length,
       shareUrl: null as string | null,
+      shareToken: null as string | null,
       shareExpiresAt: null as string | null,
       createdAt: now,
     } satisfies ChatFile,
@@ -581,7 +591,7 @@ export async function addFiles(
 export async function listFiles(userId: string): Promise<ChatFile[]> {
   await ensureChatSchema();
   const res = await getChatDb().execute({
-    sql: `select id, conversation_id, name, kind, content, size_bytes, share_url, share_expires_at, created_at
+    sql: `select id, conversation_id, name, kind, content, size_bytes, share_url, share_token, share_expires_at, created_at
           from chat_files where user_id = ? order by created_at desc`,
     args: [userId],
   });
@@ -591,7 +601,7 @@ export async function listFiles(userId: string): Promise<ChatFile[]> {
 export async function getFile(userId: string, id: string): Promise<ChatFile | null> {
   await ensureChatSchema();
   const res = await getChatDb().execute({
-    sql: `select id, conversation_id, name, kind, content, size_bytes, share_url, share_expires_at, created_at
+    sql: `select id, conversation_id, name, kind, content, size_bytes, share_url, share_token, share_expires_at, created_at
           from chat_files where id = ? and user_id = ?`,
     args: [id, userId],
   });
@@ -602,13 +612,25 @@ export async function getFile(userId: string, id: string): Promise<ChatFile | nu
 export async function setFileShare(
   userId: string,
   id: string,
-  share: { shareUrl: string; shareExpiresAt: string },
+  share: { shareUrl: string; shareToken: string; shareExpiresAt: string },
 ): Promise<void> {
   await ensureChatSchema();
   await getChatDb().execute({
-    sql: `update chat_files set share_url = ?, share_expires_at = ? where id = ? and user_id = ?`,
-    args: [share.shareUrl, share.shareExpiresAt, id, userId],
+    sql: `update chat_files set share_url = ?, share_token = ?, share_expires_at = ? where id = ? and user_id = ?`,
+    args: [share.shareUrl, share.shareToken, share.shareExpiresAt, id, userId],
   });
+}
+
+/** ไฟล์ที่แชร์สาธารณะ — ค้นด้วย token ที่สุ่มขึ้น ไม่ใช่ id ของไฟล์ */
+export async function getFileByShareToken(token: string): Promise<ChatFile | null> {
+  await ensureChatSchema();
+  const res = await getChatDb().execute({
+    sql: `select id, conversation_id, name, kind, content, size_bytes, share_url, share_token, share_expires_at, created_at
+          from chat_files where share_token = ? limit 1`,
+    args: [token],
+  });
+  if (res.rows.length === 0) return null;
+  return rowToFile(res.rows[0] as Record<string, unknown>);
 }
 
 // ---------------------------------------------------------------------------

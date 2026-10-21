@@ -154,7 +154,8 @@ export default function ApiUsageTabs({ model = "octopus-free" }: { model?: strin
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    if (!siteUrl) setHost(window.location.host);
+    // ใช้โดเมนที่ผู้ใช้เปิดอยู่จริงเสมอ — เปลี่ยนโดเมนแล้วตัวอย่างโค้ดตามทันที
+    setHost(window.location.host);
   }, []);
 
   const code = useMemo(() => snippets(host, model)[format][lang], [host, model, format, lang]);

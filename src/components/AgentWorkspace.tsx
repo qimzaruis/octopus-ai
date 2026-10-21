@@ -2347,8 +2347,9 @@ export default function AgentWorkspace({
               ) : (
                 <ul className="space-y-2">
                   {files.map((f) => {
+                    // ลิงก์เก่าของ service ภายนอกเป็น snapshot แก้ตามไม่ได้ → ให้แชร์ใหม่เป็น /s/ ของเรา
                     const shareAlive =
-                      Boolean(f.shareUrl) &&
+                      Boolean(f.shareUrl?.includes("/s/")) &&
                       Boolean(f.shareExpiresAt) &&
                       new Date(f.shareExpiresAt!).getTime() > Date.now();
                     return (

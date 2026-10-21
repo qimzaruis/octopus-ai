@@ -378,6 +378,19 @@ export const creditTransactions = pgTable(
   }),
 );
 
+/**
+ * ค่าตั้งค่าของเว็บแบบ key/value — แก้ใน DB แล้วมีผลโดยไม่ต้อง deploy ใหม่
+ * คีย์ที่ใช้อยู่: site_url = โดเมนจริงของเว็บ (ใช้สร้าง redirectTo ของ OAuth,
+ * ลิงก์แชร์ไฟล์, system prompt และ metadata)
+ */
+export const config = pgTable("config", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull().default(""),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export type User = typeof users.$inferSelect;
 export type Provider = typeof providers.$inferSelect;
 export type ProviderKey = typeof providerKeys.$inferSelect;

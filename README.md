@@ -95,7 +95,7 @@ npm run dev
    | สภาพแวดล้อม | Site URL | Additional Redirect URLs |
    | --- | --- | --- |
    | dev ในเครื่อง | `http://localhost:3000` | `http://localhost:3000/**` |
-   | production | `https://octopus-ai.devs.li` | `https://octopus-ai.devs.li/**` |
+   | production | `https://octopus-ai.isdev.dpdns.org` | `https://octopus-ai.isdev.dpdns.org/**` |
 
    ตั้งได้ทั้งสองค่าพร้อมกัน (ใส่ `http://localhost:3000/**` ไว้ในรายการ redirect ด้วย
    แอปส่ง `redirectTo` เป็น origin ของหน้าที่เปิดอยู่
@@ -188,22 +188,28 @@ supabase/migrations/              # SQL migration จาก drizzle-kit
 | ตัวแปร | ค่าบนเว็บจริง |
 | --- | --- |
 | `APP_ENV` | `production` |
-| `NEXT_PUBLIC_APP_URL` | `https://octopus-ai.devs.li` |
+| `NEXT_PUBLIC_APP_URL` | `https://octopus-ai.isdev.dpdns.org` (fallback — ค่าจริงอยู่ในตาราง `config`) |
 | `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` | จาก Project Settings → API |
 | `DATABASE_URL` | connection string แบบ pooler (port 6543) |
 | `SUPABASE_SERVICE_ROLE_KEY` | ใช้ฝั่ง server เท่านั้น (seed / อ่าน quota) |
 
 - `NEXT_PUBLIC_*` ถูก bake ตอน build — แก้ค่าแล้วต้อง **build ใหม่** ไม่ใช่แค่ restart
-- ถ้าลืมตั้ง `NEXT_PUBLIC_APP_URL` โค้ดจะใช้โดเมน production เป็นค่าเริ่มต้น
-  (`PRODUCTION_SITE_URL` ใน `src/lib/config.ts`) เพื่อไม่ให้หน้าเว็บโชว์ `localhost:3000`
+- โดเมนจริงของเว็บเก็บในตาราง `config` (แถว `site_url`) — แก้ใน DB แล้วมีผลภายใน 60 วินาที
+  โดยไม่ต้อง deploy ใหม่:
+  ```sql
+  UPDATE "config" SET value = 'https://octopus-ai.isdev.dpdns.org', updated_at = now()
+  WHERE key = 'site_url';
+  ```
+  `NEXT_PUBLIC_APP_URL` เป็นเพียง fallback ตอนอ่าน DB ไม่ได้
 
 **2) Supabase → Authentication → URL Configuration** (นี่คือต้นเหตุที่ login เสร็จแล้วเด้งกลับ localhost)
-- **Site URL** = `https://octopus-ai.devs.li`
-- **Additional Redirect URLs** = เพิ่ม `https://octopus-ai.devs.li/**`
+- **Site URL** = `https://octopus-ai.isdev.dpdns.org`
+- **Additional Redirect URLs** = เพิ่ม `https://octopus-ai.isdev.dpdns.org/**`
   (ใส่ `http://localhost:3000/**` ไว้ด้วยถ้ายังพัฒนาในเครื่องต่อ)
 
-แอปส่ง `redirectTo` เป็น origin ของหน้าที่เปิดอยู่จริง ([src/components/LoginForm.tsx](src/components/LoginForm.tsx))
-โดเมนที่ไม่อยู่ในรายการนี้จะถูก Supabase ดีดกลับไป Site URL ทันที
+แอปสร้าง `redirectTo` จาก `site_url` ในตาราง `config` ([src/components/LoginForm.tsx](src/components/LoginForm.tsx))
+โดเมนที่ไม่อยู่ในรายการนี้จะถูก Supabase ดีดกลับไป Site URL พร้อม `?code=`
+— `src/proxy.ts` ดักกรณีนี้แล้วพาไปแลก session ที่ `/auth/callback` ให้อัตโนมัติ
 
 **3) Schema** — วาง `supabase/setup.sql` ใน Supabase SQL Editor (idempotent) หรือรัน
 migration ใน `supabase/migrations/` ตามลําดับ แล้วตรวจว่าตาราง `provider_key_limits` มีอยู่

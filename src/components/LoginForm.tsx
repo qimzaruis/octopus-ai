@@ -3,11 +3,18 @@
 import { useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { siteUrl, supabaseConfigured } from "@/lib/config";
+import { supabaseConfigured } from "@/lib/config";
 import { useT } from "@/lib/i18n/client";
 import Icon from "@/components/Icon";
 
-export default function LoginForm({ nextPath }: { nextPath: string }) {
+export default function LoginForm({
+  nextPath,
+  canonicalSiteUrl,
+}: {
+  nextPath: string;
+  /** โดเมนจริงจาก DB (ตาราง config) — ใช้เป็นฐานของ redirectTo */
+  canonicalSiteUrl: string;
+}) {
   const t = useT();
   const [loading, setLoading] = useState<"google" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -23,7 +30,8 @@ export default function LoginForm({ nextPath }: { nextPath: string }) {
     const fromDevMachine = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(
       window.location.origin,
     );
-    const authOrigin = !fromDevMachine && siteUrl ? siteUrl : window.location.origin;
+    const authOrigin =
+      !fromDevMachine && canonicalSiteUrl ? canonicalSiteUrl : window.location.origin;
     try {
       const supabase = createClient();
       const { error: err } = await supabase.auth.signInWithOAuth({

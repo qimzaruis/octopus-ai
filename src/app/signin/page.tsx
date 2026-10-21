@@ -6,6 +6,7 @@ import AsciiArt from "@/components/AsciiArt";
 import SiteNav from "@/components/SiteNav";
 import SiteFooter from "@/components/SiteFooter";
 import { getSessionUser } from "@/lib/auth";
+import { getSiteUrl } from "@/lib/site-config";
 import { getT } from "@/lib/i18n/server";
 import Icon from "@/components/Icon";
 
@@ -32,6 +33,7 @@ export default async function SignInPage({
 
   const t = await getT();
   const asciiArt = await loadAsciiArt();
+  const canonicalSiteUrl = await getSiteUrl();
 
   const sp = await searchParams;
   const nextPath =
@@ -76,7 +78,7 @@ export default async function SignInPage({
               )}
 
               <div className="mt-6">
-                <LoginForm nextPath={nextPath} />
+                <LoginForm nextPath={nextPath} canonicalSiteUrl={canonicalSiteUrl} />
               </div>
             </div>
 
