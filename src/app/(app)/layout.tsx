@@ -3,7 +3,6 @@ import Link from "next/link";
 import { getSessionUser } from "@/lib/auth";
 import Sidebar, { type NavSection } from "@/components/Sidebar";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
-import { formatUsd } from "@/lib/format";
 import { getT } from "@/lib/i18n/server";
 import Icon from "@/components/Icon";
 
@@ -88,14 +87,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <Icon name="fa-key" className="text-label" /> API Keys
           </Link>
 
-          <Link
-            href="/credits"
-            className="flex items-center gap-2 rounded-md bg-white/[0.05] px-3.5 py-2 text-caption font-medium text-fg-muted transition-colors duration-fast hover:bg-white/[0.09]"
-          >
-            <Icon name="fa-coins" className="text-amber-glow" />
-            <span className="tnum">{formatUsd(user.credits)}</span>
-            <span className="hidden text-micro text-fg-subtle sm:inline">USD</span>
-          </Link>
         </div>
       </header>
 
