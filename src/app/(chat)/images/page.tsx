@@ -24,11 +24,7 @@ export default async function ImagesPage() {
   ]);
 
   return (
-    <ImagesWorkspace
-      userName={user.name}
-      conversations={context.conversations}
-      modelCount={context.models.length}
-    >
+    <ImagesWorkspace userName={user.name} conversations={context.conversations}>
       <ImageStudio models={context.models} initialJobs={jobs} />
     </ImagesWorkspace>
   );

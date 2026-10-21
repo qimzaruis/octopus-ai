@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Logo from "@/components/Logo";
 import Icon from "@/components/Icon";
-import Badge from "@/components/Badge";
 import { useT } from "@/lib/i18n/client";
 import type { ChatConversation } from "@/lib/chat/db";
 
@@ -35,18 +34,27 @@ function PanelIcon() {
 export default function ImagesWorkspace({
   userName,
   conversations,
-  modelCount,
   children,
 }: {
   userName: string;
   conversations: ChatConversation[];
-  modelCount: number;
   children: ReactNode;
 }) {
   const t = useT();
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [historyQuery, setHistoryQuery] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(true);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+
+  function toggleGroup(key: string) {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
 
   // ใช้ค่าการย่อ/ขยายร่วมกับหน้าแชท (คีย์เดียวกัน)
   useEffect(() => {
@@ -192,64 +200,95 @@ export default function ImagesWorkspace({
 
       {!collapsed && (
         <div className="mt-4 flex min-h-0 flex-1 flex-col">
-          <p className="px-4 pb-2 text-micro font-semibold uppercase tracking-[0.16em] text-fg-subtle">
-            {t("ประวัติแชท")}
-          </p>
-          {conversations.length > 0 && (
-            <div className="relative mb-1.5 px-2">
-              <Icon
-                name="fa-magnifying-glass"
-                className="pointer-events-none absolute left-[1.3rem] top-1/2 -translate-y-1/2 text-micro text-fg-subtle"
-              />
-              <input
-                value={historyQuery}
-                onChange={(e) => setHistoryQuery(e.target.value)}
-                placeholder={t("ค้นหาแชท")}
-                aria-label={t("ค้นหาแชท")}
-                type="search"
-                className="h-10 w-full rounded-md bg-white/[0.04] pl-8 pr-11 text-caption text-fg outline-none transition placeholder:text-fg-subtle hover:bg-white/[0.06] focus:bg-white/[0.06] focus-visible:ring-1 focus-visible:ring-white/[0.14] focus-visible:ring-offset-0 [&::-webkit-search-cancel-button]:hidden"
-              />
-              {historyQuery && (
-                <button
-                  type="button"
-                  onClick={() => setHistoryQuery("")}
-                  aria-label={t("ล้างคำค้น")}
-                  className="touch-min-icon absolute right-0.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded text-micro text-fg-subtle transition hover:bg-white/[0.08] hover:text-fg"
-                >
-                  <Icon name="fa-xmark" />
-                </button>
-              )}
-            </div>
-          )}
-          <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-            {conversations.length === 0 ? (
-              <p className="px-3 py-2 text-label text-fg-subtle">{t("ยังไม่มีประวัติแชท")}</p>
-            ) : historyGroups.length === 0 ? (
-              <p className="px-3 py-2 text-label text-fg-subtle">{t("ไม่พบแชทที่ตรงกัน")}</p>
-            ) : (
-              historyGroups.map((group) => (
-                <div key={group.key} className="mb-2">
-                  <p className="px-3 pb-1 pt-1.5 text-micro font-semibold uppercase tracking-[0.14em] text-fg-subtle/80">
-                    {group.label}
-                  </p>
-                  <ul className="space-y-0.5">
-                    {group.items.map((c) => (
-                      <li key={c.id}>
-                        <Link
-                          href={`/c/${c.id}`}
-                          title={titleOf(c)}
-                          onClick={() => setDrawerOpen(false)}
-                          className="flex min-h-11 items-center rounded-md px-3 py-2 text-caption text-fg-muted transition hover:bg-white/[0.06] hover:text-fg"
-                        >
-                          <span className="truncate">{titleOf(c)}</span>
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
+          <button
+            type="button"
+            onClick={() => setHistoryOpen((v) => !v)}
+            aria-expanded={historyOpen}
+            className="touch-min flex w-full items-center gap-2 px-4 py-2 text-left text-micro font-semibold uppercase tracking-[0.16em] text-fg-subtle transition hover:text-fg"
+          >
+            <span className="flex-1">{t("ประวัติแชท")}</span>
+            <Icon
+              name="fa-chevron-down"
+              className={`shrink-0 text-micro transition-transform duration-fast ${
+                historyOpen ? "" : "-rotate-90"
+              }`}
+            />
+          </button>
+          {historyOpen && (
+            <>
+              {conversations.length > 0 && (
+                <div className="relative mb-1.5 px-2">
+                  <Icon
+                    name="fa-magnifying-glass"
+                    className="pointer-events-none absolute left-[1.3rem] top-1/2 -translate-y-1/2 text-micro text-fg-subtle"
+                  />
+                  <input
+                    value={historyQuery}
+                    onChange={(e) => setHistoryQuery(e.target.value)}
+                    placeholder={t("ค้นหาแชท")}
+                    aria-label={t("ค้นหาแชท")}
+                    type="search"
+                    className="h-10 w-full rounded-md bg-white/[0.04] pl-8 pr-11 text-caption text-fg outline-none transition placeholder:text-fg-subtle hover:bg-white/[0.06] focus:bg-white/[0.06] focus-visible:ring-1 focus-visible:ring-white/[0.14] focus-visible:ring-offset-0 [&::-webkit-search-cancel-button]:hidden"
+                  />
+                  {historyQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setHistoryQuery("")}
+                      aria-label={t("ล้างคำค้น")}
+                      className="touch-min-icon absolute right-0.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded text-micro text-fg-subtle transition hover:bg-white/[0.08] hover:text-fg"
+                    >
+                      <Icon name="fa-xmark" />
+                    </button>
+                  )}
                 </div>
-              ))
-            )}
-          </nav>
+              )}
+              <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+                {conversations.length === 0 ? (
+                  <p className="px-3 py-2 text-label text-fg-subtle">{t("ยังไม่มีประวัติแชท")}</p>
+                ) : historyGroups.length === 0 ? (
+                  <p className="px-3 py-2 text-label text-fg-subtle">{t("ไม่พบแชทที่ตรงกัน")}</p>
+                ) : (
+                  historyGroups.map((group) => {
+                    const closed = collapsedGroups.has(group.key);
+                    return (
+                      <div key={group.key} className="mb-2">
+                        <button
+                          type="button"
+                          onClick={() => toggleGroup(group.key)}
+                          aria-expanded={!closed}
+                          className="touch-min flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-micro font-semibold uppercase tracking-[0.14em] text-fg-subtle/80 transition hover:text-fg"
+                        >
+                          <span className="flex-1">{group.label}</span>
+                          <Icon
+                            name="fa-chevron-down"
+                            className={`shrink-0 text-micro transition-transform duration-fast ${
+                              closed ? "-rotate-90" : ""
+                            }`}
+                          />
+                        </button>
+                        {!closed && (
+                          <ul className="space-y-0.5">
+                            {group.items.map((c) => (
+                              <li key={c.id}>
+                                <Link
+                                  href={`/c/${c.id}`}
+                                  title={titleOf(c)}
+                                  onClick={() => setDrawerOpen(false)}
+                                  className="flex min-h-11 items-center rounded-md px-3 py-2 text-caption text-fg-muted transition hover:bg-white/[0.06] hover:text-fg"
+                                >
+                                  <span className="truncate">{titleOf(c)}</span>
+                                </Link>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </nav>
+            </>
+          )}
         </div>
       )}
       {collapsed && <div className="flex-1" />}
@@ -303,38 +342,20 @@ export default function ImagesWorkspace({
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex min-h-14 shrink-0 items-center gap-1.5 border-b border-white/[0.06] px-3 pt-[env(safe-area-inset-top)] sm:gap-2 sm:px-6">
-          <button
-            type="button"
-            onClick={() => setDrawerOpen(true)}
-            aria-label={t("เปิดเมนู")}
-            aria-haspopup="dialog"
-            className="touch-min-icon flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-fg-muted transition hover:bg-white/[0.08] hover:text-fg lg:hidden"
-          >
-            <Icon name="fa-bars" />
-          </button>
-          <Link
-            href="/dashboard"
-            aria-label={t("กลับ Dashboard")}
-            className="touch-min inline-flex shrink-0 items-center gap-2 rounded-md px-2 text-caption font-medium text-fg-muted transition hover:bg-white/[0.06] hover:text-fg"
-          >
-            <Icon name="fa-arrow-left" className="text-micro" />
-            <span className="hidden text-micro sm:inline sm:text-caption">{t("กลับ Dashboard")}</span>
-          </Link>
-          <div className="min-w-0 flex-1 px-1">
-            <p className="truncate text-body-sm font-semibold text-fg">{t("สร้างรูปภาพ")}</p>
-            <p className="hidden truncate text-label text-fg-subtle sm:block">
-              {t("บอกสิ่งที่ต้องการ เลือกสัดส่วน และแนบรูปเป็นอ้างอิงได้")}
-            </p>
-          </div>
-          <Badge tone="brand" icon="fa-solid fa-wand-magic-sparkles">
-            {t("{n} โมเดล", { n: modelCount })}
-          </Badge>
-        </header>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(1.25rem_+_env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pt-5">
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(5rem_+_env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-[calc(1.25rem_+_env(safe-area-inset-bottom))] sm:pt-5">
           <div className="mx-auto max-w-6xl">{children}</div>
         </div>
+
+        {/* หน้าไม่มี header — ปุ่มเมนูมือถือลอยมุมขวาล่าง */}
+        <button
+          type="button"
+          onClick={() => setDrawerOpen(true)}
+          aria-label={t("เปิดเมนู")}
+          aria-haspopup="dialog"
+          className="fixed bottom-[calc(1rem_+_env(safe-area-inset-bottom))] right-4 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-brand-500 text-fg shadow-floating transition active:scale-95 lg:hidden"
+        >
+          <Icon name="fa-bars" />
+        </button>
       </div>
     </div>
   );

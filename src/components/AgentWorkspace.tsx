@@ -376,6 +376,17 @@ export default function AgentWorkspace({
   const pasteSeqRef = useRef(0);
   /** คำค้นในประวัติแชท (กรองฝั่ง client — รายการถูกโหลดมาครบแล้ว) */
   const [historyQuery, setHistoryQuery] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(true);
+  const [collapsedHistoryGroups, setCollapsedHistoryGroups] = useState<Set<string>>(new Set());
+
+  function toggleHistoryGroup(key: string) {
+    setCollapsedHistoryGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
   /**
    * ลำดับของ run ที่กำลังทำงาน — ทุก async ต้องตรวจว่าตัวเองยังเป็น run ปัจจุบันก่อนเขียน state
    *
@@ -1741,51 +1752,82 @@ export default function AgentWorkspace({
 
       {!collapsed && (
         <div className="mt-4 flex min-h-0 flex-1 flex-col">
-          <p className="px-4 pb-2 text-micro font-semibold uppercase tracking-[0.16em] text-fg-subtle">
-            {t("ประวัติแชท")}
-          </p>
-          {conversations.length > 0 && (
-            <div className="relative mb-1.5 px-2">
-              <Icon
-                name="fa-magnifying-glass"
-                className="pointer-events-none absolute left-[1.3rem] top-1/2 -translate-y-1/2 text-micro text-fg-subtle"
-              />
-              <input
-                value={historyQuery}
-                onChange={(e) => setHistoryQuery(e.target.value)}
-                placeholder={t("ค้นหาแชท")}
-                aria-label={t("ค้นหาแชท")}
-                type="search"
-                className="h-10 w-full rounded-md bg-white/[0.04] pl-8 pr-11 text-caption text-fg outline-none transition placeholder:text-fg-subtle hover:bg-white/[0.06] focus:bg-white/[0.06] focus-visible:ring-1 focus-visible:ring-white/[0.14] focus-visible:ring-offset-0 [&::-webkit-search-cancel-button]:hidden"
-              />
-              {historyQuery && (
-                <button
-                  type="button"
-                  onClick={() => setHistoryQuery("")}
-                  aria-label={t("ล้างคำค้น")}
-                  className="touch-min-icon absolute right-0.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded text-micro text-fg-subtle transition hover:bg-white/[0.08] hover:text-fg"
-                >
-                  <Icon name="fa-xmark" />
-                </button>
-              )}
-            </div>
-          )}
-          <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-            {conversations.length === 0 ? (
-              <p className="px-3 py-2 text-label text-fg-subtle">{t("ยังไม่มีประวัติแชท")}</p>
-            ) : historyGroups.length === 0 ? (
-              <p className="px-3 py-2 text-label text-fg-subtle">{t("ไม่พบแชทที่ตรงกัน")}</p>
-            ) : (
-              historyGroups.map((g) => (
-                <div key={g.key} className="mb-2">
-                  <p className="px-3 pb-1 pt-1.5 text-micro font-semibold uppercase tracking-[0.14em] text-fg-subtle/80">
-                    {g.label}
-                  </p>
-                  <ul className="space-y-0.5">{g.items.map(renderHistoryItem)}</ul>
+          <button
+            type="button"
+            onClick={() => setHistoryOpen((v) => !v)}
+            aria-expanded={historyOpen}
+            className="touch-min flex w-full items-center gap-2 px-4 py-2 text-left text-micro font-semibold uppercase tracking-[0.16em] text-fg-subtle transition hover:text-fg"
+          >
+            <span className="flex-1">{t("ประวัติแชท")}</span>
+            <Icon
+              name="fa-chevron-down"
+              className={`shrink-0 text-micro transition-transform duration-fast ${
+                historyOpen ? "" : "-rotate-90"
+              }`}
+            />
+          </button>
+          {historyOpen && (
+            <>
+              {conversations.length > 0 && (
+                <div className="relative mb-1.5 px-2">
+                  <Icon
+                    name="fa-magnifying-glass"
+                    className="pointer-events-none absolute left-[1.3rem] top-1/2 -translate-y-1/2 text-micro text-fg-subtle"
+                  />
+                  <input
+                    value={historyQuery}
+                    onChange={(e) => setHistoryQuery(e.target.value)}
+                    placeholder={t("ค้นหาแชท")}
+                    aria-label={t("ค้นหาแชท")}
+                    type="search"
+                    className="h-10 w-full rounded-md bg-white/[0.04] pl-8 pr-11 text-caption text-fg outline-none transition placeholder:text-fg-subtle hover:bg-white/[0.06] focus:bg-white/[0.06] focus-visible:ring-1 focus-visible:ring-white/[0.14] focus-visible:ring-offset-0 [&::-webkit-search-cancel-button]:hidden"
+                  />
+                  {historyQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setHistoryQuery("")}
+                      aria-label={t("ล้างคำค้น")}
+                      className="touch-min-icon absolute right-0.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded text-micro text-fg-subtle transition hover:bg-white/[0.08] hover:text-fg"
+                    >
+                      <Icon name="fa-xmark" />
+                    </button>
+                  )}
                 </div>
-              ))
-            )}
-          </nav>
+              )}
+              <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+                {conversations.length === 0 ? (
+                  <p className="px-3 py-2 text-label text-fg-subtle">{t("ยังไม่มีประวัติแชท")}</p>
+                ) : historyGroups.length === 0 ? (
+                  <p className="px-3 py-2 text-label text-fg-subtle">{t("ไม่พบแชทที่ตรงกัน")}</p>
+                ) : (
+                  historyGroups.map((g) => {
+                    const closed = collapsedHistoryGroups.has(g.key);
+                    return (
+                      <div key={g.key} className="mb-2">
+                        <button
+                          type="button"
+                          onClick={() => toggleHistoryGroup(g.key)}
+                          aria-expanded={!closed}
+                          className="touch-min flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-micro font-semibold uppercase tracking-[0.14em] text-fg-subtle/80 transition hover:text-fg"
+                        >
+                          <span className="flex-1">{g.label}</span>
+                          <Icon
+                            name="fa-chevron-down"
+                            className={`shrink-0 text-micro transition-transform duration-fast ${
+                              closed ? "-rotate-90" : ""
+                            }`}
+                          />
+                        </button>
+                        {!closed && (
+                          <ul className="space-y-0.5">{g.items.map(renderHistoryItem)}</ul>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </nav>
+            </>
+          )}
         </div>
       )}
       {collapsed && <div className="flex-1" />}
