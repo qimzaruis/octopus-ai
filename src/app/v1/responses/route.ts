@@ -10,7 +10,7 @@
  */
 
 import { NextRequest } from "next/server";
-import { authorizeCall, promptChars, type ApiError } from "@/lib/api-call";
+import { authorizeCall, fitMaxTokens, promptChars, type ApiError } from "@/lib/api-call";
 import { apiId, responseObject, responsesEvent, responsesToMessages } from "@/lib/api-shapes";
 import {
   createSseAccumulator,
@@ -24,7 +24,7 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 type Body = {
   model?: string;
@@ -59,6 +59,14 @@ export async function POST(req: NextRequest) {
   const guard = await authorizeCall(req, model, messages);
   if (!guard.ok) return fail(guard.error);
   const call = guard.call;
+  const fit = fitMaxTokens(call, body?.max_output_tokens);
+  if (!fit) {
+    return fail({
+      status: 400,
+      kind: "invalid_request_error",
+      message: `prompt ใหญ่เกิน context window ของโมเดล (ประมาณ ${call.inputTokens.toLocaleString()} / ${call.contextWindow.toLocaleString()} tokens)`,
+    });
+  }
 
   let result;
   try {
@@ -66,7 +74,7 @@ export async function POST(req: NextRequest) {
       messages,
       stream,
       temperature: body?.temperature,
-      maxTokens: body?.max_output_tokens,
+      maxTokens: fit.maxTokens,
     });
   } catch (err) {
     const gw = err instanceof GatewayError ? err : null;

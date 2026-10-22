@@ -44,7 +44,7 @@ export async function loadAgentModels(planKey: string): Promise<AgentModel[]> {
         description: r.description,
         inputPricePerM: r.inputPricePerM,
         outputPricePerM: r.outputPricePerM,
-        contextWindow: r.targets.reduce((s, t) => Math.max(s, t.contextWindow), 0),
+        contextWindow: (r.targets.length > 0 ? r.targets.reduce((min, t) => Math.min(min, t.contextWindow), Number.POSITIVE_INFINITY) : 0),
         supportsVision: r.targets.some((t) => t.supportsVision),
       });
     }
@@ -72,7 +72,7 @@ export async function loadImageModels(planKey: string): Promise<AgentModel[]> {
         description: r.description,
         inputPricePerM: r.inputPricePerM,
         outputPricePerM: r.outputPricePerM,
-        contextWindow: r.targets.reduce((s, t) => Math.max(s, t.contextWindow), 0),
+        contextWindow: (r.targets.length > 0 ? r.targets.reduce((min, t) => Math.min(min, t.contextWindow), Number.POSITIVE_INFINITY) : 0),
         supportsVision: r.targets.some((t) => t.supportsVision),
       });
     }

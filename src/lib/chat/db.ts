@@ -72,6 +72,7 @@ const DDL = [
      share_url text,
      share_token text,
      share_expires_at text,
+     share_protected integer not null default 0,
      created_at text not null
    )`,
   `create index if not exists chat_files_user_idx
@@ -85,6 +86,8 @@ const DDL = [
      refs text not null default '[]',
      status text not null default 'queued',
      error text not null default '',
+     image_url text not null default '',
+     revised_prompt text not null default '',
      created_at text not null
    )`,
   `create index if not exists image_jobs_user_idx
@@ -100,6 +103,9 @@ const ALTERS = [
   `alter table chat_conversations add column deleted_at text`,
   `alter table chat_files add column share_token text`,
   `alter table chat_files add column share_expires_at text`,
+  `alter table chat_files add column share_protected integer not null default 0`,
+  `alter table image_jobs add column image_url text not null default ''`,
+  `alter table image_jobs add column revised_prompt text not null default ''`,
 ];
 
 /** index ที่อ้างคอลัมน์ใหม่ — ต้องสร้างหลัง ALTER เท่านั้น */
@@ -197,7 +203,9 @@ export type ChatArtifactRef = {
   kind: string;
   sizeBytes: number;
   shareUrl: string | null;
+  shareToken: string | null;
   shareExpiresAt: string | null;
+  shareProtected: boolean;
 };
 
 /**
@@ -227,7 +235,7 @@ export async function getConversation(
       args: [id],
     },
     {
-      sql: `select id, name, kind, size_bytes, share_url, share_expires_at
+      sql: `select id, name, kind, size_bytes, share_url, share_token, share_expires_at, share_protected
             from chat_files where conversation_id = ? order by created_at`,
       args: [id],
     },
@@ -269,7 +277,9 @@ export async function getConversation(
       kind: String(row.kind ?? "html"),
       sizeBytes: Number(row.size_bytes ?? 0),
       shareUrl: row.share_url ? String(row.share_url) : null,
+      shareToken: row.share_token ? String(row.share_token) : null,
       shareExpiresAt: row.share_expires_at ? String(row.share_expires_at) : null,
+      shareProtected: Number(row.share_protected ?? 0) === 1,
     };
   });
 
@@ -514,9 +524,11 @@ export type ChatFile = {
   content: string;
   sizeBytes: number;
   shareUrl: string | null;
-  /** token สำหรับลิงก์ /s/<token> ที่เสิร์ฟเนื้อหาล่าสุดเสมอ */
+  /** token สำหรับลิงก์ /s/<token> ที่เสิร์ฟเนื้อหาล่าสุดเสมอ (หรือชื่อ artifact บน CDN) */
   shareToken: string | null;
   shareExpiresAt: string | null;
+  /** true = CDN artifact มีรหัสผ่าน */
+  shareProtected: boolean;
   createdAt: string;
 };
 
@@ -531,6 +543,7 @@ function rowToFile(r: Record<string, unknown>): ChatFile {
     shareUrl: r.share_url ? String(r.share_url) : null,
     shareToken: r.share_token ? String(r.share_token) : null,
     shareExpiresAt: r.share_expires_at ? String(r.share_expires_at) : null,
+    shareProtected: Number(r.share_protected ?? 0) === 1,
     createdAt: String(r.created_at),
   };
 }
@@ -546,7 +559,12 @@ export async function addFile(input: {
   return file;
 }
 
-/** เก็บหลายไฟล์ใน request เดียว — โมเดลหนึ่งรอบเขียน artifact พร้อมกันหลายไฟล์ได้ */
+/**
+ * เก็บหลายไฟล์ใน request เดียว — โมเดลหนึ่งรอบเขียน artifact พร้อมกันหลายไฟล์ได้
+ *
+ * ถ้าในห้องเดียวกันมีไฟล์ชื่อเดิมอยู่แล้ว ให้ "อัปเดตแถวเดิม" ไม่สร้างไฟล์ใหม่
+ * เพื่อให้ id และลิงก์แชร์ของเว็บเดิมยังอยู่ (AI แก้ไซต์เดิม = ลิงก์เดิมอัปเดต)
+ */
 export async function addFiles(
   list: {
     userId: string;
@@ -557,50 +575,134 @@ export async function addFiles(
   }[],
 ): Promise<ChatFile[]> {
   await ensureChatSchema();
+  if (list.length === 0) return [];
+  const db = getChatDb();
   const now = new Date().toISOString();
-  const rows = list.map((input) => ({
-    file: {
-      id: crypto.randomUUID(),
-      conversationId: input.conversationId ?? "",
+
+  type Existing = {
+    id: string;
+    createdAt: string;
+    shareUrl: string | null;
+    shareToken: string | null;
+    shareExpiresAt: string | null;
+    shareProtected: boolean;
+  };
+  const byKey = new Map<string, Existing>();
+
+  const groups = new Map<string, { userId: string; conversationId: string }>();
+  for (const input of list) {
+    if (!input.conversationId) continue;
+    groups.set(`${input.userId}\n${input.conversationId}`, {
+      userId: input.userId,
+      conversationId: input.conversationId,
+    });
+  }
+  await Promise.all(
+    [...groups.values()].map(async ({ userId, conversationId }) => {
+      const res = await db.execute({
+        sql: `select id, name, created_at, share_url, share_token, share_expires_at, share_protected
+              from chat_files
+              where user_id = ? and conversation_id = ?
+              order by created_at desc`,
+        args: [userId, conversationId],
+      });
+      for (const row of res.rows) {
+        const r = row as Record<string, unknown>;
+        const key = `${userId}\n${conversationId}\n${String(r.name ?? "")}`;
+        if (byKey.has(key)) continue;
+        byKey.set(key, {
+          id: String(r.id),
+          createdAt: String(r.created_at),
+          shareUrl: r.share_url ? String(r.share_url) : null,
+          shareToken: r.share_token ? String(r.share_token) : null,
+          shareExpiresAt: r.share_expires_at ? String(r.share_expires_at) : null,
+          shareProtected: Number(r.share_protected ?? 0) === 1,
+        });
+      }
+    }),
+  );
+
+  const statements: { sql: string; args: (string | number | null)[] }[] = [];
+  const files: ChatFile[] = [];
+  for (const input of list) {
+    const sizeBytes = new TextEncoder().encode(input.content).length;
+    const conversationId = input.conversationId ?? "";
+    const key = `${input.userId}\n${conversationId}\n${input.name}`;
+    const prev = conversationId ? byKey.get(key) : undefined;
+
+    if (prev) {
+      statements.push({
+        sql: `update chat_files set kind = ?, content = ?, size_bytes = ? where id = ? and user_id = ?`,
+        args: [input.kind, input.content, sizeBytes, prev.id, input.userId],
+      });
+      files.push({
+        id: prev.id,
+        conversationId,
+        name: input.name,
+        kind: input.kind,
+        content: input.content,
+        sizeBytes,
+        shareUrl: prev.shareUrl,
+        shareToken: prev.shareToken,
+        shareExpiresAt: prev.shareExpiresAt,
+        shareProtected: prev.shareProtected,
+        createdAt: prev.createdAt,
+      });
+      continue;
+    }
+
+    const id = crypto.randomUUID();
+    statements.push({
+      sql: `insert into chat_files
+              (id, user_id, conversation_id, name, kind, content, size_bytes, share_url, share_token, share_expires_at, share_protected, created_at)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        id,
+        input.userId,
+        conversationId,
+        input.name,
+        input.kind,
+        input.content,
+        sizeBytes,
+        null,
+        null,
+        null,
+        0,
+        now,
+      ],
+    });
+    files.push({
+      id,
+      conversationId,
       name: input.name,
       kind: input.kind,
       content: input.content,
-      sizeBytes: new TextEncoder().encode(input.content).length,
-      shareUrl: null as string | null,
-      shareToken: null as string | null,
-      shareExpiresAt: null as string | null,
+      sizeBytes,
+      shareUrl: null,
+      shareToken: null,
+      shareExpiresAt: null,
+      shareProtected: false,
       createdAt: now,
-    } satisfies ChatFile,
-    userId: input.userId,
-  }));
-  if (rows.length > 0) {
-    await getChatDb().batch(
-      rows.map(({ file, userId }) => ({
-        sql: `insert into chat_files
-                (id, user_id, conversation_id, name, kind, content, size_bytes, share_url, share_expires_at, created_at)
-              values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        args: [
-          file.id,
-          userId,
-          file.conversationId,
-          file.name,
-          file.kind,
-          file.content,
-          file.sizeBytes,
-          null,
-          null,
-          file.createdAt,
-        ],
-      })),
-    );
+    });
+    // ไฟล์ชื่อเดียวกันที่เหลือในรอบนี้ให้อัปเดตแถวที่เพิ่งสร้าง
+    byKey.set(key, {
+      id,
+      createdAt: now,
+      shareUrl: null,
+      shareToken: null,
+      shareExpiresAt: null,
+      shareProtected: false,
+    });
   }
-  return rows.map((r) => r.file);
+
+  if (statements.length > 0) await db.batch(statements);
+  return files;
 }
 
 export async function listFiles(userId: string): Promise<ChatFile[]> {
   await ensureChatSchema();
   const res = await getChatDb().execute({
-    sql: `select id, conversation_id, name, kind, content, size_bytes, share_url, share_token, share_expires_at, created_at
+    sql: `select id, conversation_id, name, kind, content, size_bytes, share_url, share_token, share_expires_at, share_protected, created_at
           from chat_files where user_id = ? order by created_at desc`,
     args: [userId],
   });
@@ -610,7 +712,7 @@ export async function listFiles(userId: string): Promise<ChatFile[]> {
 export async function getFile(userId: string, id: string): Promise<ChatFile | null> {
   await ensureChatSchema();
   const res = await getChatDb().execute({
-    sql: `select id, conversation_id, name, kind, content, size_bytes, share_url, share_token, share_expires_at, created_at
+    sql: `select id, conversation_id, name, kind, content, size_bytes, share_url, share_token, share_expires_at, share_protected, created_at
           from chat_files where id = ? and user_id = ?`,
     args: [id, userId],
   });
@@ -621,12 +723,24 @@ export async function getFile(userId: string, id: string): Promise<ChatFile | nu
 export async function setFileShare(
   userId: string,
   id: string,
-  share: { shareUrl: string; shareToken: string; shareExpiresAt: string },
+  share: {
+    shareUrl: string;
+    shareToken: string;
+    shareExpiresAt: string;
+    shareProtected?: boolean;
+  },
 ): Promise<void> {
   await ensureChatSchema();
   await getChatDb().execute({
-    sql: `update chat_files set share_url = ?, share_token = ?, share_expires_at = ? where id = ? and user_id = ?`,
-    args: [share.shareUrl, share.shareToken, share.shareExpiresAt, id, userId],
+    sql: `update chat_files set share_url = ?, share_token = ?, share_expires_at = ?, share_protected = ? where id = ? and user_id = ?`,
+    args: [
+      share.shareUrl,
+      share.shareToken,
+      share.shareExpiresAt,
+      share.shareProtected ? 1 : 0,
+      id,
+      userId,
+    ],
   });
 }
 
@@ -634,7 +748,7 @@ export async function setFileShare(
 export async function getFileByShareToken(token: string): Promise<ChatFile | null> {
   await ensureChatSchema();
   const res = await getChatDb().execute({
-    sql: `select id, conversation_id, name, kind, content, size_bytes, share_url, share_token, share_expires_at, created_at
+    sql: `select id, conversation_id, name, kind, content, size_bytes, share_url, share_token, share_expires_at, share_protected, created_at
           from chat_files where share_token = ? limit 1`,
     args: [token],
   });
@@ -656,6 +770,8 @@ export type ImageJob = {
   /** queued | done | failed */
   status: string;
   error: string;
+  /** URL รูปบน CDN หลังสร้างเสร็จ */
+  imageUrl: string;
   createdAt: string;
 };
 
@@ -675,6 +791,7 @@ function rowToJob(r: Record<string, unknown>): ImageJob {
     refs,
     status: String(r.status ?? "queued"),
     error: String(r.error ?? ""),
+    imageUrl: String(r.image_url ?? ""),
     createdAt: String(r.created_at),
   };
 }
@@ -695,11 +812,12 @@ export async function addImageJob(input: {
     refs: input.refs,
     status: "queued",
     error: "",
+    imageUrl: "",
     createdAt: new Date().toISOString(),
   };
   await getChatDb().execute({
-    sql: `insert into image_jobs (id, user_id, prompt, model, ratio, refs, status, error, created_at)
-          values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    sql: `insert into image_jobs (id, user_id, prompt, model, ratio, refs, status, error, image_url, created_at)
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     args: [
       job.id,
       input.userId,
@@ -709,16 +827,38 @@ export async function addImageJob(input: {
       JSON.stringify(job.refs),
       job.status,
       job.error,
+      job.imageUrl,
       job.createdAt,
     ],
   });
   return job;
 }
 
+/** อัปเดตผลลัพธ์ของงานสร้างรูป (สำเร็จ = มี URL จาก CDN, ล้มเหลว = เก็บ error) */
+export async function setImageJobResult(input: {
+  userId: string;
+  id: string;
+  status: "done" | "failed";
+  imageUrl?: string;
+  error?: string;
+}): Promise<void> {
+  await ensureChatSchema();
+  await getChatDb().execute({
+    sql: `update image_jobs set status = ?, image_url = ?, error = ? where id = ? and user_id = ?`,
+    args: [
+      input.status,
+      input.imageUrl ?? "",
+      (input.error ?? "").slice(0, 800),
+      input.id,
+      input.userId,
+    ],
+  });
+}
+
 export async function listImageJobs(userId: string, limit = 24): Promise<ImageJob[]> {
   await ensureChatSchema();
   const res = await getChatDb().execute({
-    sql: `select id, prompt, model, ratio, refs, status, error, created_at
+    sql: `select id, prompt, model, ratio, refs, status, error, image_url, created_at
           from image_jobs where user_id = ? order by created_at desc limit ?`,
     args: [userId, limit],
   });

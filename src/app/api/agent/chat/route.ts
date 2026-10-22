@@ -30,7 +30,7 @@ import type { InternalIdentities } from "@/lib/public-text";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 /** ชื่อ agent ของแชทในเว็บเราเอง — แยกจากแอปภายนอกที่เรียก /v1 */
 const WEB_AGENT = "octopus-web";
@@ -56,6 +56,16 @@ function contentChars(content: unknown): number {
   if (!content) return 0;
   if (Array.isArray(content)) return content.reduce((s, part) => s + JSON.stringify(part).length, 0);
   return JSON.stringify(content).length;
+}
+
+/** นับเฉพาะข้อความ ไม่นับ base64 ของรูป — ใช้ประมาณ token ของ context */
+function textChars(content: unknown): number {
+  if (typeof content === "string") return content.length;
+  if (!Array.isArray(content)) return 0;
+  return content.reduce((n, part) => {
+    const text = (part as { text?: unknown })?.text;
+    return n + (typeof text === "string" ? text.length : 0);
+  }, 0);
 }
 
 function trimToCharBudget(messages: UpstreamMessage[], budget: number): UpstreamMessage[] {
@@ -438,32 +448,96 @@ export async function POST(req: NextRequest) {
     workspaceReady: Boolean(body.workspaceReady),
   });
 
-  const messages: UpstreamMessage[] = [
-    { role: "system", content: system },
-    ...trimToCharBudget(history.slice(-40), HISTORY_CHAR_BUDGET),
-    ...sanitizeTranscript(body.messages ?? []),
+  const tools = Array.isArray(body.tools) ? body.tools : [];
+  const historyMessages = trimToCharBudget(history.slice(-40), HISTORY_CHAR_BUDGET);
+  const clientMessages = sanitizeTranscript(body.messages ?? []);
+  const currentMessage: UpstreamMessage | null = isFirstRound
+    ? {
+        role: "user",
+        content:
+          attachments.length > 0
+            ? [
+                { type: "text", text: content },
+                ...attachments.map((a) => attachmentPart(a)),
+              ]
+            : content,
+      }
+    : null;
+
+  /**
+   * context window ที่ใช้ได้จริง = ตัวที่เล็กที่สุดใน targets
+   * (fallback อาจไปจบที่ตัวไหนก็ได้ จึงต้องไม่เกินตัวที่เล็กที่สุด)
+   */
+  const contextWindow =
+    route.targets.length > 0
+      ? route.targets.reduce(
+          (min, t) => Math.min(min, t.contextWindow),
+          Number.POSITIVE_INFINITY,
+        )
+      : 0;
+
+  const historyImageCount = conversation.messages.reduce(
+    (n, m, mi) =>
+      n + (keepImage.has(mi) ? m.attachments.filter((a) => a.mime.startsWith("image/")).length : 0),
+    0,
+  );
+  const imageTokens =
+    (attachments.filter((a) => a.mime.startsWith("image/")).length + historyImageCount) * 1000;
+  const systemChars = textChars(system);
+  const toolsChars = tools.length > 0 ? JSON.stringify(tools).length : 0;
+  const hardOutput = Math.min(AGENT_MAX_TOKENS, 32_000);
+
+  const restChars = (msgs: UpstreamMessage[]) =>
+    msgs.reduce((sum, m) => sum + textChars(m.content), 0);
+  let restMessages: UpstreamMessage[] = [
+    ...historyMessages,
+    ...clientMessages,
+    ...(currentMessage ? [currentMessage] : []),
   ];
-  if (isFirstRound) {
-    messages.push({
-      role: "user",
-      content:
-        attachments.length > 0
-          ? [
-              { type: "text", text: content },
-              ...attachments.map((a) => attachmentPart(a)),
-            ]
-          : content,
-    });
+  const estimateInput = () =>
+    estimateTokensFromChars(systemChars + restChars(restMessages) + toolsChars) + imageTokens;
+
+  let inputTokens = estimateInput();
+  let maxOutput =
+    contextWindow > 0
+      ? Math.max(0, Math.min(hardOutput, contextWindow - inputTokens - 512))
+      : hardOutput;
+
+  // ถ้า prompt + output ที่ตั้งใจจะขอเกิน context → ตัดข้อความเก่าออกก่อน
+  if (contextWindow > 0 && maxOutput < 256) {
+    const maxInputTokens = contextWindow - 768; // safety 512 + output ขั้นต่ำ 256
+    const maxRestChars = Math.max(
+      4000,
+      Math.floor(maxInputTokens * 3.5) - systemChars - toolsChars - imageTokens * 3.5,
+    );
+    restMessages = trimToCharBudget(restMessages, maxRestChars);
+    inputTokens = estimateInput();
+    maxOutput = Math.max(0, Math.min(hardOutput, contextWindow - inputTokens - 512));
   }
 
-  // นับเฉพาะตัวอักษรข้อความ (ไม่นับ base64 ของรูปแนบ) เพื่อประมาณ token ตอน log
-  const promptChars = messages.reduce((sum, m) => {
-    if (typeof m.content === "string") return sum + m.content.length;
-    const parts = Array.isArray(m.content) ? (m.content as { text?: string }[]) : [];
-    return sum + parts.reduce((n, p) => n + (p?.text?.length ?? 0), 0);
-  }, 0);
+  if (contextWindow > 0 && maxOutput < 256) {
+    return error(
+      `บริบทใหญ่เกิน context window ของโมเดล (ประมาณ ${inputTokens.toLocaleString()} / ${contextWindow.toLocaleString()} tokens) — เริ่มแชทใหม่หรือล้างประวัติแล้วลองอีกครั้ง`,
+      400,
+    );
+  }
 
-  const tools = Array.isArray(body.tools) ? body.tools : [];
+  const messages: UpstreamMessage[] = [{ role: "system", content: system }, ...restMessages];
+
+  const contextInfo = {
+    contextWindow,
+    maxOutput,
+    inputTokens,
+    breakdown: {
+      system: estimateTokensFromChars(systemChars),
+      history: estimateTokensFromChars(restChars(historyMessages)),
+      client: estimateTokensFromChars(restChars(clientMessages)),
+      current: currentMessage ? estimateTokensFromChars(textChars(currentMessage.content)) : 0,
+      tools: estimateTokensFromChars(toolsChars),
+      images: imageTokens,
+    },
+    estimated: true,
+  };
   const wantsVision = attachments.some((a) => a.mime.startsWith("image/"));
   const startedAt = Date.now();
   const filter = wantsVision ? (t: GatewayTarget) => t.supportsVision : undefined;
@@ -490,13 +564,13 @@ export async function POST(req: NextRequest) {
   const SAFE_MAX_TOKENS = 16_384;
   const attempts: { input: InvokeInput }[] = [];
   if (tools.length > 0) {
-    attempts.push({ input: { ...base, tools, maxTokens: AGENT_MAX_TOKENS } });
-    if (AGENT_MAX_TOKENS > SAFE_MAX_TOKENS) {
+    attempts.push({ input: { ...base, tools, maxTokens: maxOutput } });
+    if (maxOutput > SAFE_MAX_TOKENS) {
       attempts.push({ input: { ...base, tools, maxTokens: SAFE_MAX_TOKENS } });
     }
   }
-  attempts.push({ input: { ...base, maxTokens: AGENT_MAX_TOKENS } });
-  if (AGENT_MAX_TOKENS > SAFE_MAX_TOKENS) {
+  attempts.push({ input: { ...base, maxTokens: maxOutput } });
+  if (maxOutput > SAFE_MAX_TOKENS) {
     attempts.push({ input: { ...base, maxTokens: SAFE_MAX_TOKENS } });
   }
   attempts.push({ input: { ...base } });
@@ -537,7 +611,7 @@ export async function POST(req: NextRequest) {
   }
 
   const target = result.target;
-  const acc = createSseAccumulator(() => estimateTokensFromChars(promptChars));
+  const acc = createSseAccumulator(() => inputTokens);
   const decoder = new TextDecoder();
   const upstreamBody = result.body;
   const thoughtIds: InternalIdentities = {
@@ -606,6 +680,8 @@ export async function POST(req: NextRequest) {
         );
       }
 
+      safeEnqueue(event({ t: "context", v: contextInfo }));
+
       const reader = (upstreamReader = upstreamBody.getReader());
       let failed = "";
       try {
@@ -631,6 +707,13 @@ export async function POST(req: NextRequest) {
       const answer = acc.text();
       const calls = acc.toolCalls();
       const reason = acc.finishReason();
+      const usage = acc.usage();
+      const contextNow = {
+        ...contextInfo,
+        inputTokens: usage.inputTokens || contextInfo.inputTokens,
+        outputTokens: usage.outputTokens,
+        estimated: !usage.inputTokens,
+      };
 
       if (cancelled || req.signal.aborted) {
         /* กดหยุดแล้ว: เก็บเฉพาะคำตอบบางส่วนที่ผู้ใช้เห็นไปแล้ว (ถ้ามี)
@@ -671,7 +754,16 @@ export async function POST(req: NextRequest) {
       // (ยังไม่บันทึกอะไรลงประวัติ เพราะยังไม่ใช่คำตอบสุดท้าย)
       if (calls.length > 0 && !failed) {
         flushThought(true);
-        safeEnqueue(event({ t: "tool", v: calls, text: answer, fr: reason }));
+        safeEnqueue(
+          event({
+            t: "tool",
+            v: calls,
+            text: answer,
+            fr: reason,
+            usage,
+            context: contextNow,
+          }),
+        );
         void logRequest({
           userId: user.id,
           target,
@@ -705,7 +797,7 @@ export async function POST(req: NextRequest) {
         // บอกรายชื่อไฟล์ที่บันทึกเสร็จแล้ว → ปุ่ม "แชร์" บน artifact ใช้ได้ทันทีโดยไม่ต้องโหลดห้องใหม่
         if (saved.length > 0) safeEnqueue(event({ t: "files", v: saved }));
         flushThought(true);
-        safeEnqueue(event({ t: "done", fr: reason }));
+        safeEnqueue(event({ t: "done", fr: reason, usage, context: contextNow }));
         try {
           controller.close();
         } catch {

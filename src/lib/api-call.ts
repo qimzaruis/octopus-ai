@@ -12,6 +12,7 @@ import { detectAgent } from "@/lib/agent-detect";
 import { getPlanByKey } from "@/lib/data/plans";
 import { getQuotaState, listPublicRoutes } from "@/lib/data/models";
 import {
+  estimateTokensFromChars,
   invokeUpstream,
   logRequest,
   type GatewayTarget,
@@ -37,6 +38,10 @@ export type ApiError = {
 export type ApiCall = {
   principal: ApiPrincipal;
   model: string;
+  /** context window ที่ใช้ได้จริง (min ของ targets) — 0 = ไม่รู้ */
+  contextWindow: number;
+  /** ประมาณ token ของ prompt + tools + รูป */
+  inputTokens: number;
   invoke: (input: Omit<InvokeInput, "publicModel">) => Promise<InvokeResult>;
   /** เขียนประวัติลงตาราง requests แบบไม่รอ (ทุก path ต้อง log แม้ล้มก่อนถึงค่าย) */
   log: (input: {
@@ -47,6 +52,45 @@ export type ApiCall = {
     error?: string;
   }) => void;
 };
+
+/** context window ที่ใช้ได้จริง = ตัวที่เล็กที่สุดใน targets (fallback ต้องรอดทุกตัว) */
+export function effectiveContextWindow(targets: { contextWindow: number }[]): number {
+  return targets.length > 0
+    ? targets.reduce((min, t) => Math.min(min, t.contextWindow), Number.POSITIVE_INFINITY)
+    : 0;
+}
+
+/** จำนวนรูปใน messages — ใช้คิด token ประมาณแบบหยาบ */
+export function imageCount(messages: UpstreamMessage[]): number {
+  let count = 0;
+  for (const m of messages) {
+    if (!Array.isArray(m.content)) continue;
+    count += m.content.filter(
+      (part) =>
+        typeof part === "object" &&
+        part !== null &&
+        (part as { type?: string }).type === "image_url",
+    ).length;
+  }
+  return count;
+}
+
+/**
+ * จำกัด max_tokens ให้ prompt + output ไม่เกิน context window
+ * คืน null เมื่อ prompt ใหญ่เกินจนเหลือที่ให้ output ไม่ถึงขั้นต่ำ
+ */
+export function fitMaxTokens(
+  call: Pick<ApiCall, "contextWindow" | "inputTokens">,
+  requested: number | undefined,
+): { maxTokens: number | undefined; clamped: boolean } | null {
+  if (call.contextWindow <= 0) return { maxTokens: requested, clamped: false };
+  const remaining = call.contextWindow - call.inputTokens - 256;
+  if (remaining < 1) return null;
+  if (requested && requested > remaining) {
+    return { maxTokens: remaining, clamped: true };
+  }
+  return { maxTokens: requested, clamped: false };
+}
 
 /** จำนวนอักขระใน prompt ทั้งหมด — ใช้ประมาณ token เมื่อค่ายต้นทางไม่ส่ง usage มา */
 export function promptChars(messages: UpstreamMessage[]): number {
@@ -77,6 +121,7 @@ export async function authorizeCall(
   req: NextRequest,
   model: string,
   messages: UpstreamMessage[],
+  tools?: unknown[],
 ): Promise<{ ok: true; call: ApiCall } | { ok: false; error: ApiError }> {
   const principal = await authenticateApiKey(req);
   if (!principal) {
@@ -142,12 +187,29 @@ export async function authorizeCall(
 
   const chars = promptChars(messages);
   const startedAt = Date.now();
+  const contextWindow = effectiveContextWindow(route.targets);
+  const toolsChars = tools && tools.length > 0 ? JSON.stringify(tools).length : 0;
+  const inputTokens =
+    estimateTokensFromChars(chars + toolsChars) + imageCount(messages) * 1000;
+
+  if (contextWindow > 0 && inputTokens >= contextWindow - 256) {
+    return {
+      ok: false,
+      error: {
+        status: 400,
+        kind: "invalid_request_error",
+        message: `prompt ใหญ่เกิน context window ของโมเดล (ประมาณ ${inputTokens.toLocaleString()} / ${contextWindow.toLocaleString()} tokens)`,
+      },
+    };
+  }
 
   return {
     ok: true,
     call: {
       principal,
       model,
+      contextWindow,
+      inputTokens,
       invoke: (input) =>
         invokeUpstream({
           publicModel: model,

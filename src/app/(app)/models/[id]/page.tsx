@@ -38,7 +38,7 @@ export default async function ModelDetailPage({
   const host = canonicalUrl.replace(/^https?:\/\//, "");
 
   const name = route.displayName || route.publicModel;
-  const maxContext = route.targets.reduce((s, x) => Math.max(s, x.contextWindow), 0);
+  const maxContext = (route.targets.length > 0 ? route.targets.reduce((min, x) => Math.min(min, x.contextWindow), Number.POSITIVE_INFINITY) : 0);
   const supportsVision = route.targets.some((x) => x.supportsVision);
   const hasPrice = route.inputPricePerM > 0 || route.outputPricePerM > 0;
   const uptimePct = Math.round(health.successRate * 1000) / 10;

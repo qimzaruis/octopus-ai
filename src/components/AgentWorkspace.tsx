@@ -53,8 +53,26 @@ type UiMessage = {
   thinkingMs?: number;
   /** ผู้ใช้กดหยุดเอง — ข้อความอาจมีคำตอบบางส่วน */
   stopped?: boolean;
+  /** คำตอบจบเพราะชน max output/connection หลุด — ให้กดทำต่อได้ */
+  truncated?: boolean;
   /** ข้อความ error ที่อ่านรู้เรื่อง (เก็บแยกจากเนื้อคำตอบ เพื่อแสดงกล่องแจ้งเตือน) */
   error?: string;
+};
+
+type ContextInfo = {
+  contextWindow: number;
+  maxOutput: number;
+  inputTokens: number;
+  outputTokens?: number;
+  breakdown: {
+    system: number;
+    history: number;
+    client: number;
+    current: number;
+    tools: number;
+    images: number;
+  };
+  estimated?: boolean;
 };
 
 export type AgentUiMessage = UiMessage;
@@ -66,7 +84,9 @@ type AgentFile = {
   kind: string;
   sizeBytes: number;
   shareUrl: string | null;
+  shareToken: string | null;
   shareExpiresAt: string | null;
+  shareProtected: boolean;
   createdAt: string;
 };
 
@@ -80,7 +100,9 @@ export type AgentArtifact = {
   kind: string;
   sizeBytes: number;
   shareUrl: string | null;
+  shareToken: string | null;
   shareExpiresAt: string | null;
+  shareProtected: boolean;
 };
 
 /**
@@ -120,10 +142,82 @@ const COLLAPSE_KEY = "octopus.agent.sidebar.collapsed";
 const AUTOWRITE_KEY = "octopus.agent.autowrite";
 
 /** จำนวนรอบสูงสุดที่เอเจนต์จะเรียกเครื่องมือต่อหนึ่งคำถาม — กันวนไม่จบ */
-const MAX_TOOL_ROUNDS = 6;
+const MAX_TOOL_ROUNDS = 10;
 
 function titleOf(c: ChatConversation) {
   return c.title?.trim() || "แชทใหม่";
+}
+
+function formatTokens(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "0";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(Math.round(n));
+}
+
+function ContextMeter({
+  info,
+  open,
+  onToggle,
+}: {
+  info: ContextInfo;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const t = useT();
+  const used = Math.max(0, info.inputTokens + (info.outputTokens ?? 0));
+  const pct = Math.min(100, Math.round((used / Math.max(1, info.contextWindow)) * 100));
+  const tone = pct >= 90 ? "bg-rose-400" : pct >= 70 ? "bg-amber-glow" : "bg-brand-400";
+  const rows: [string, number][] = [
+    [t("คำสั่งระบบ"), info.breakdown.system],
+    [t("ประวัติแชท"), info.breakdown.history],
+    [t("ข้อความล่าสุด"), info.breakdown.current],
+    [t("ผลลัพธ์เครื่องมือ"), info.breakdown.client],
+    [t("สคีมาเครื่องมือ"), info.breakdown.tools],
+    [t("รูปภาพ"), info.breakdown.images],
+    [t("เอาต์พุต"), info.outputTokens ?? 0],
+  ];
+
+  return (
+    <div className="mx-auto mb-2 w-full max-w-4xl">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 rounded-lg border border-white/[0.07] bg-white/[0.03] px-3 py-1.5 text-micro text-fg-subtle transition hover:bg-white/[0.05]"
+      >
+        <Icon name="fa-chart-simple" className="text-brand-300" />
+        <span className="font-medium text-fg-muted">{t("บริบท")}</span>
+        <span className="font-mono text-fg">
+          {formatTokens(used)} / {formatTokens(info.contextWindow)}
+        </span>
+        <span className="h-1.5 min-w-16 flex-1 overflow-hidden rounded-full bg-white/[0.08]">
+          <span className={`block h-full rounded-full ${tone}`} style={{ width: `${pct}%` }} />
+        </span>
+        <span className="tabular-nums">{pct}%</span>
+        <Icon name={open ? "fa-chevron-up" : "fa-chevron-down"} className="text-micro" />
+      </button>
+      {open && (
+        <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg border border-white/[0.07] bg-ink-950/80 px-3 py-2 text-micro text-fg-subtle sm:grid-cols-3">
+          {rows.map(([label, value]) => (
+            <span key={label} className="flex items-center justify-between gap-2">
+              <span className="truncate">{label}</span>
+              <span className="font-mono text-fg-muted">{formatTokens(value)}</span>
+            </span>
+          ))}
+          <span className="flex items-center justify-between gap-2">
+            <span className="truncate">{t("max output ที่ขอ")}</span>
+            <span className="font-mono text-fg-muted">{formatTokens(info.maxOutput)}</span>
+          </span>
+          <span className="col-span-2 text-fg-subtle/70 sm:col-span-3">
+            {info.estimated
+              ? t("ตัวเลขเป็นประมาณการจากข้อความ")
+              : t("ยอดรวมจาก usage ของผู้ให้บริการ ส่วน breakdown เป็นประมาณการ")}
+          </span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** รูปสี่เหลี่ยมมีเส้นแบ่งฝั่งซ้าย — ไอคอนย่อ/ขยาย sidebar (ไม่มีในชุด react-icons ที่ใช้อยู่) */
@@ -361,8 +455,32 @@ export default function AgentWorkspace({
   const [filesLoading, setFilesLoading] = useState(false);
   const [filesNotice, setFilesNotice] = useState<string | null>(null);
   const [sharingId, setSharingId] = useState<string | null>(null);
-  /** ชื่อ artifact ที่ผู้ใช้พิมพ์ในคลังไฟล์ — ว่าง = ให้ระบบสุ่ม */
-  const [shareNames, setShareNames] = useState<Record<string, string>>({});
+  /** dialog แชร์/อัปเดต artifact (ชื่อ + รหัสผ่าน) */
+  const [shareTarget, setShareTarget] = useState<{
+    id: string;
+    name: string;
+    kind: string;
+    existing: boolean;
+    protected: boolean;
+  } | null>(null);
+  const [shareName, setShareName] = useState("");
+  const [sharePassword, setSharePassword] = useState("");
+  const [shareCurrentPassword, setShareCurrentPassword] = useState("");
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [shareResult, setShareResult] = useState<{
+    url: string;
+    password: string;
+    updated: boolean;
+    protected: boolean;
+  } | null>(null);
+  const [shareCopied, setShareCopied] = useState(false);
+  const [contextInfo, setContextInfo] = useState<ContextInfo | null>(null);
+  const [contextOpen, setContextOpen] = useState(false);
+  useEffect(() => {
+    setContextInfo(null);
+    setContextOpen(false);
+  }, [activeId]);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   /** ห้องที่กำลังแก้ชื่อ (null = ไม่ได้เปิดกล่องแก้ชื่อ) */
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
@@ -378,6 +496,7 @@ export default function AgentWorkspace({
   const pasteSeqRef = useRef(0);
   /** คำค้นในประวัติแชท (กรองฝั่ง client — รายการถูกโหลดมาครบแล้ว) */
   const [historyQuery, setHistoryQuery] = useState("");
+  const historyInputRef = useRef<HTMLInputElement>(null);
   const [collapsedHistoryGroups, setCollapsedHistoryGroups] = useState<Set<string>>(new Set());
 
   function toggleHistoryGroup(key: string) {
@@ -812,48 +931,43 @@ export default function AgentWorkspace({
     }
   }
 
-  async function shareFile(id: string, name?: string) {
+  /** แชร์ตรง ๆ สำหรับไฟล์ที่ไม่ใช่ HTML — ยังใช้ลิงก์ /s/ เดิม */
+  async function shareFile(id: string) {
     setSharingId(id);
     setFilesNotice(null);
     try {
       const res = await fetch(`/api/agent/files/${id}/share`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name?.trim() || undefined }),
+        body: "{}",
       });
       const data = (await res.json().catch(() => null)) as {
         shareUrl?: string;
+        shareToken?: string;
         expiresAt?: string;
+        passwordProtected?: boolean;
         error?: string;
       } | null;
-      if (res.status === 409) {
-        setFilesNotice(t("ชื่อลิงก์นี้ถูกใช้แล้ว ลองชื่ออื่น"));
-        return;
-      }
       if (res.status === 413) {
         setFilesNotice(t("ไฟล์ใหญ่เกิน 2 MB แชร์ไม่ได้"));
         return;
       }
-      if (res.status === 400) {
-        setFilesNotice(
-          t("ชื่อนี้ใช้ไม่ได้ — ใช้ตัวอักษร ตัวเลข - หรือ _ (สระ/วรรณยุกต์ไทยบางตัวยังไม่รองรับ)"),
-        );
-        return;
-      }
       if (!res.ok || !data?.shareUrl) throw new Error(data?.error ?? String(res.status));
+      const shareUrl = data.shareUrl;
+      const expiresAt = data.expiresAt ?? null;
       setFiles((prev) =>
         prev.map((f) =>
           f.id === id
-            ? { ...f, shareUrl: data.shareUrl!, shareExpiresAt: data.expiresAt ?? null }
+            ? {
+                ...f,
+                shareUrl,
+                shareExpiresAt: expiresAt,
+                shareToken: data.shareToken ?? f.shareToken,
+                shareProtected: Boolean(data.passwordProtected),
+              }
             : f,
         ),
       );
-      setShareNames((prev) => {
-        if (!(id in prev)) return prev;
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
     } catch {
       setFilesNotice(t("แชร์ไม่สำเร็จ ลองอีกครั้ง"));
     } finally {
@@ -861,14 +975,159 @@ export default function AgentWorkspace({
     }
   }
 
+  function openShareDialog(file: {
+    id: string;
+    name: string;
+    kind: string;
+    shareUrl: string | null;
+    shareToken: string | null;
+    shareProtected: boolean;
+  }) {
+    const existing =
+      Boolean(file.shareUrl?.includes("/artifacts/")) && Boolean(file.shareToken);
+    setShareTarget({
+      id: file.id,
+      name: file.name,
+      kind: file.kind,
+      existing,
+      protected: existing ? file.shareProtected : false,
+    });
+    setShareName(existing ? file.shareToken ?? "" : file.name.replace(/\.[^.]+$/, ""));
+    setSharePassword("");
+    setShareCurrentPassword("");
+    setShareError(null);
+    setShareResult(null);
+    setShareCopied(false);
+  }
+
+  function closeShareDialog() {
+    setShareTarget(null);
+    setShareResult(null);
+    setShareError(null);
+    setSharePassword("");
+    setShareCurrentPassword("");
+    setShareBusy(false);
+    setShareCopied(false);
+  }
+
+  async function submitShare() {
+    const target = shareTarget;
+    if (!target || shareBusy) return;
+    if (target.existing && target.protected && !shareCurrentPassword) {
+      setShareError(t("ใส่รหัสผ่านเดิมเพื่ออัปเดตลิงก์"));
+      return;
+    }
+    setShareBusy(true);
+    setShareError(null);
+    try {
+      const res = await fetch(`/api/agent/files/${target.id}/share`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: target.existing ? undefined : shareName.trim() || undefined,
+          password: sharePassword || undefined,
+          currentPassword: shareCurrentPassword || undefined,
+        }),
+      });
+      const data = (await res.json().catch(() => null)) as {
+        shareUrl?: string;
+        shareToken?: string;
+        expiresAt?: string;
+        passwordProtected?: boolean;
+        updated?: boolean;
+        error?: string;
+      } | null;
+      if (res.status === 409) {
+        setShareError(t("ชื่อลิงก์นี้ถูกใช้แล้ว ลองชื่ออื่น"));
+        return;
+      }
+      if (res.status === 413) {
+        setShareError(t("ไฟล์ใหญ่เกิน 2 MB แชร์ไม่ได้"));
+        return;
+      }
+      if (res.status === 401) {
+        setShareError(
+          data?.error === "wrong_password"
+            ? t("รหัสผ่านเดิมไม่ถูกต้อง")
+            : t("กรุณาใส่รหัสผ่านเดิม"),
+        );
+        return;
+      }
+      if (res.status === 400) {
+        setShareError(
+          t("ชื่อนี้ใช้ไม่ได้ — ใช้ตัวอักษร ตัวเลข - หรือ _ (สระ/วรรณยุกต์ไทยบางตัวยังไม่รองรับ)"),
+        );
+        return;
+      }
+      if (!res.ok || !data?.shareUrl) {
+        setShareError(t("แชร์ไม่สำเร็จ ลองอีกครั้ง"));
+        return;
+      }
+      const shareUrl = data.shareUrl;
+      const expiresAt = data.expiresAt ?? null;
+      const protectedNow = Boolean(data.passwordProtected);
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.id === target.id
+            ? {
+                ...f,
+                shareUrl,
+                shareExpiresAt: expiresAt,
+                shareToken: data.shareToken ?? f.shareToken,
+                shareProtected: protectedNow,
+              }
+            : f,
+        ),
+      );
+      setArtifacts((prev) =>
+        prev.map((a) =>
+          a.id === target.id
+            ? {
+                ...a,
+                shareUrl,
+                shareExpiresAt: expiresAt,
+                shareToken: data.shareToken ?? a.shareToken,
+                shareProtected: protectedNow,
+              }
+            : a,
+        ),
+      );
+      setShareTarget((prev) =>
+        prev ? { ...prev, existing: true, protected: protectedNow } : prev,
+      );
+      setShareResult({
+        url: shareUrl,
+        password: sharePassword,
+        updated: Boolean(data.updated),
+        protected: protectedNow,
+      });
+      setShareCurrentPassword("");
+    } catch {
+      setShareError(t("แชร์ไม่สำเร็จ ลองอีกครั้ง"));
+    } finally {
+      setShareBusy(false);
+    }
+  }
+
+  async function copyText(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setShareCopied(true);
+      window.setTimeout(() => setShareCopied(false), 1600);
+    } catch {
+      /* clipboard ต้อง https — ผู้ใช้เลือกคัดลอกเองได้ */
+    }
+  }
+
   /**
-   * แชร์ artifact จากในข้อความเลย ไม่ต้องเปิดคลังไฟล์ก่อน
-   *
-   * กล่องโค้ดในข้อความมีแค่ชื่อที่โมเดลพิมพ์หลัง ``` (บ่อย kali ไม่พิมพ์) ขณะที่ไฟล์ในคลัง
-   * ถูกตั้งชื่อจาก <title>/<h1> ของโค้ด จึงต้องจับตัวอื่นด้วย: ตรงชื่อ → มีคำในชื่อซึ่งกัน
-   * → ขนาดใกล้สุดในกลุ่มชนิดเดียวกัน และแจ้งชื่อไฟล์ที่แชร์ให้ผู้ใช้เห็น จะได้รู้ว่าลิงก์คือไฟล์ไหน
+   * แชร์ artifact จากในข้อความ — เปิด dialog เพื่อตั้งชื่อ/รหัส
+   * ถ้าไฟล์นี้เคยแชร์แล้ว dialog จะเข้าโหมดอัปเดตลิงก์เดิม
    */
-  async function shareArtifact(block: { name: string; lang: string; bytes: number }): Promise<string | null> {
+  async function shareArtifact(block: {
+    name: string;
+    lang: string;
+    bytes: number;
+  }): Promise<string | null> {
     if (!activeId) return null;
     let file = pickArtifact(artifacts, block);
     if (!file) {
@@ -887,39 +1146,8 @@ export default function AgentWorkspace({
       setNotice(t("ยังหาไฟล์นี้ในคลังไม่เจอ — ลองใหม่อีกครั้ง"));
       return null;
     }
-
-    const id = file.id;
-    try {
-      const res = await fetch(`/api/agent/files/${id}/share`, { method: "POST" });
-      const data = (await res.json().catch(() => null)) as {
-        shareUrl?: string;
-        expiresAt?: string;
-      } | null;
-      if (res.status === 409) {
-        setNotice(t("ชื่อลิงก์นี้ถูกใช้แล้ว ลองชื่ออื่น"));
-        return null;
-      }
-      if (res.status === 413) {
-        setNotice(t("ไฟล์ใหญ่เกิน 2 MB แชร์ไม่ได้"));
-        return null;
-      }
-      const url = data?.shareUrl;
-      if (!res.ok || !url || !data) {
-        setNotice(t("แชร์ไม่สำเร็จ ลองอีกครั้ง"));
-        return null;
-      }
-      const expiresAt = data.expiresAt ?? null;
-      setArtifacts((prev) =>
-        prev.map((a) =>
-          a.id === id ? { ...a, shareUrl: url, shareExpiresAt: expiresAt } : a,
-        ),
-      );
-      setNotice(t("แชร์ {name} แล้ว", { name: file.name }));
-      return url;
-    } catch {
-      setNotice(t("แชร์ไม่สำเร็จ ลองอีกครั้ง"));
-      return null;
-    }
+    openShareDialog(file);
+    return null;
   }
 
   async function copyShare(url: string) {
@@ -1136,7 +1364,13 @@ export default function AgentWorkspace({
     signal: AbortSignal,
     runId: number,
     onThought: (delta: string) => void,
-  ): Promise<{ text: string; calls: AgentToolCall[] }> {
+  ): Promise<{
+    text: string;
+    calls: AgentToolCall[];
+    finishReason: string;
+    context: ContextInfo | null;
+    gotDone: boolean;
+  }> {
     const current = () => runSeqRef.current === runId && !signal.aborted;
     const res = await fetch("/api/agent/chat", {
       method: "POST",
@@ -1148,7 +1382,9 @@ export default function AgentWorkspace({
       const data = (await res.json().catch(() => null)) as { error?: string } | null;
       throw new Error(data?.error || `HTTP ${res.status}`);
     }
-    if (!current()) return { text: "", calls: [] };
+    if (!current()) {
+      return { text: "", calls: [], finishReason: "", context: null, gotDone: false };
+    }
 
     const newTitle = res.headers.get("x-conversation-title");
     if (newTitle) {
@@ -1162,6 +1398,9 @@ export default function AgentWorkspace({
     let buffer = "";
     let text = "";
     let calls: AgentToolCall[] = [];
+    let finishReason = "";
+    let roundContext: ContextInfo | null = null;
+    let gotDone = false;
 
     /* วาดข้อความรวมเป็นเฟรมเดียว: upstream ส่ง chunk ถี่มาก ถ้าอัปเดต state
        ทุก chunk จะ re-render ข้อความทั้งแชทหลายสิบครั้งต่อวินาที */
@@ -1185,14 +1424,27 @@ export default function AgentWorkspace({
 
     const handleLine = (line: string) => {
       if (!line) return;
-      let event: { t?: string; v?: unknown; text?: string; fr?: string };
+      let event: {
+        t?: string;
+        v?: unknown;
+        text?: string;
+        fr?: string;
+        usage?: { inputTokens?: number; outputTokens?: number };
+        context?: ContextInfo;
+      };
       try {
         event = JSON.parse(line) as typeof event;
       } catch {
         return;
       }
+      if (event.fr) finishReason = event.fr;
+      if (event.context) {
+        roundContext = event.context;
+        if (current()) setContextInfo(event.context);
+      }
+      if (event.t === "done" || event.t === "tool") gotDone = true;
       if (event.fr === "length" && current()) {
-        setNotice(t("คำตอบถูกตัดเพราะยาวเกินจำกัด — ให้เอเจนต์เขียนต่อเป็นท่อน ๆ ได้"));
+        setNotice(t("คำตอบถูกตัดเพราะยาวเกินจำกัด — กดทำต่อเพื่อให้เขียนส่วนที่เหลือ"));
       }
       if (event.t === "d") {
         text += String(event.v ?? "");
@@ -1219,13 +1471,17 @@ export default function AgentWorkspace({
           setArtifacts((prev) => {
             const byName = new Map(prev.map((a) => [a.name.toLowerCase(), a]));
             for (const f of created) {
+              const before = byName.get(f.name.toLowerCase());
+              const sameFile = before?.id === f.id;
               byName.set(f.name.toLowerCase(), {
                 id: f.id,
                 name: f.name,
                 kind: f.kind,
                 sizeBytes: f.sizeBytes,
-                shareUrl: null,
-                shareExpiresAt: null,
+                shareUrl: sameFile ? before.shareUrl : null,
+                shareToken: sameFile ? before.shareToken : null,
+                shareExpiresAt: sameFile ? before.shareExpiresAt : null,
+                shareProtected: sameFile ? before.shareProtected : false,
               });
             }
             return [...byName.values()];
@@ -1255,7 +1511,13 @@ export default function AgentWorkspace({
       if (buffer.trim()) handleLine(buffer.trim());
       cancelPaint();
       if (current()) setStreamingText(text);
-      return { text, calls };
+      return {
+        text,
+        calls,
+        finishReason,
+        context: roundContext,
+        gotDone,
+      };
     } finally {
       cancelPaint();
     }
@@ -1321,6 +1583,7 @@ export default function AgentWorkspace({
       thought?: string;
       thinkingMs?: number;
       stopped?: boolean;
+      truncated?: boolean;
       error?: string;
     };
     const finish = (patch: FinishPatch) => {
@@ -1400,6 +1663,9 @@ export default function AgentWorkspace({
     const sentAttachments = files;
     const runMessages: AgentChatMessage[] = [];
     let answer = "";
+    let lastFinish = "";
+    let lastGotDone = true;
+    let exhausted = true;
     try {
       for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
         if (!isCurrent() || controller.signal.aborted) return;
@@ -1413,7 +1679,7 @@ export default function AgentWorkspace({
           },
         };
         const tools = toolDefinitions(ctx);
-        const { text, calls } = await streamRound(
+        const roundResult = await streamRound(
           convId,
           {
             content: round === 0 ? question : "",
@@ -1428,8 +1694,14 @@ export default function AgentWorkspace({
           appendThought,
         );
         if (!isCurrent() || controller.signal.aborted) return;
+        const { text, calls, finishReason, gotDone } = roundResult;
+        lastFinish = finishReason || lastFinish;
+        lastGotDone = gotDone;
         answer = text;
-        if (calls.length === 0) break;
+        if (calls.length === 0) {
+          exhausted = false;
+          break;
+        }
 
         // สิ่งที่โมเดลพิมพ์ก่อนเรียกเครื่องมือ คือ "ความคิด" ที่ผู้ใช้อยากเห็น
         if (text.trim()) {
@@ -1465,12 +1737,21 @@ export default function AgentWorkspace({
         setStreamingText("");
       }
 
+      if (exhausted && !controller.signal.aborted) {
+        setNotice(
+          t("ถึงขีดจำกัดรอบเครื่องมือ — พิมพ์ \"ทำต่อ\" เพื่อให้เอเจนต์ทำงานส่วนที่เหลือ"),
+        );
+      }
+      if (!lastGotDone && !controller.signal.aborted) {
+        setNotice(t("การเชื่อมต่อหลุดกลางทาง — คำตอบอาจไม่ครบ กดทำต่อหรือลองใหม่"));
+      }
       finish({
         content: answer || t("เอเจนต์ไม่ได้ตอบกลับมา"),
         steps: collected,
         notes: notesLog,
         thought: thoughtRef.current || undefined,
         thinkingMs: Date.now() - startedAt,
+        truncated: lastFinish === "length" || !lastGotDone,
       });
     } catch (err) {
       if (!isCurrent()) return;
@@ -1752,8 +2033,22 @@ export default function AgentWorkspace({
           <Icon name="fa-square-pen" className="h-4 w-4 shrink-0" />
           {!collapsed && <span>{t("แชทใหม่")}</span>}
         </button>
-        <Link
-          href="/images"
+          {collapsed && (
+            <button
+              type="button"
+              onClick={() => {
+                setCollapsed(false);
+                window.setTimeout(() => historyInputRef.current?.focus(), 120);
+              }}
+              title={t("ค้นหาแชท")}
+              aria-label={t("ค้นหาแชท")}
+              className="touch-min flex w-full items-center justify-center rounded-lg px-0 py-2.5 text-caption font-medium text-fg-muted transition hover:bg-white/[0.06] hover:text-fg"
+            >
+              <Icon name="fa-magnifying-glass" className="h-4 w-4 shrink-0 text-brand-300" />
+            </button>
+          )}
+          <Link
+            href="/images"
           onClick={() => setDrawerOpen(false)}
           title={t("สร้างรูปภาพ")}
           className={`touch-min flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-caption font-medium text-fg-muted transition hover:bg-white/[0.06] hover:text-fg ${
@@ -1784,13 +2079,13 @@ export default function AgentWorkspace({
           <p className="px-4 pb-2 pt-1 text-micro font-semibold uppercase tracking-[0.16em] text-fg-subtle">
             {t("ประวัติแชท")}
           </p>
-          {conversations.length > 0 && (
-                <div className="relative mb-1.5 px-2">
+          <div className="relative mb-1.5 px-2">
                   <Icon
                     name="fa-magnifying-glass"
                     className="pointer-events-none absolute left-[1.3rem] top-1/2 -translate-y-1/2 text-micro text-fg-subtle"
                   />
                   <input
+                    ref={historyInputRef}
                     value={historyQuery}
                     onChange={(e) => setHistoryQuery(e.target.value)}
                     placeholder={t("ค้นหาแชท")}
@@ -1809,7 +2104,6 @@ export default function AgentWorkspace({
                     </button>
                   )}
                 </div>
-              )}
               <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
                 {conversations.length === 0 ? (
                   <p className="px-3 py-2 text-label text-fg-subtle">{t("ยังไม่มีประวัติแชท")}</p>
@@ -1936,7 +2230,10 @@ export default function AgentWorkspace({
         <header className="flex h-11 shrink-0 items-center gap-2 px-3 sm:px-5">
           <button
             type="button"
-            onClick={() => setDrawerOpen(true)}
+            onClick={() => {
+              setDrawerOpen(true);
+              setCollapsed(false);
+            }}
             aria-label={t("เปิดเมนู")}
             className="touch-min-icon flex h-9 w-9 items-center justify-center rounded-md text-fg-muted transition hover:bg-white/[0.08] hover:text-fg lg:hidden"
           >
@@ -2145,6 +2442,22 @@ export default function AgentWorkspace({
                           <Icon name="fa-pen" />
                         </button>
                       )}
+                      {isLastAssistant && m.truncated && !loading && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void startTurn(
+                              t("ทำต่อจากคำตอบล่าสุดให้จบ โดยไม่ต้องเริ่มใหม่หรือพูดซ้ำ"),
+                              [],
+                              null,
+                            )
+                          }
+                          className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-label text-amber-300 transition hover:bg-white/[0.07]"
+                        >
+                          <Icon name="fa-arrow-rotate-right" className="text-micro" />{" "}
+                          {t("ทำต่อ")}
+                        </button>
+                      )}
                       {isLastAssistant && !loading && lastUserIndex >= 0 && (
                         <button
                           type="button"
@@ -2202,6 +2515,14 @@ export default function AgentWorkspace({
                 <Icon name="fa-xmark" className="text-micro" />
               </button>
             </div>
+          )}
+
+          {contextInfo && contextInfo.contextWindow > 0 && (
+            <ContextMeter
+              info={contextInfo}
+              open={contextOpen}
+              onToggle={() => setContextOpen((v) => !v)}
+            />
           )}
 
           {/* กรอบเดียวเท่านั้น: ring ของการ์ด — textarea ห้ามใส่ ring ของตัวเอง
@@ -2412,15 +2733,21 @@ export default function AgentWorkspace({
 
                         {shareAlive ? (
                           <div className="mt-2.5 flex flex-wrap items-center gap-2 border-t border-white/[0.07] pt-2.5">
-                            <a
-                              href={f.shareUrl!}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="btn-ghost !py-1.5 text-label"
-                            >
-                              <Icon name="fa-arrow-up-right-from-square" className="text-micro" />{" "}
-                              {t("เปิดลิงก์")}
-                            </a>
+                            {f.shareProtected ? (
+                              <span className="inline-flex items-center gap-1.5 rounded-md bg-white/[0.04] px-2 py-1 text-micro text-fg-subtle">
+                                <Icon name="fa-lock" className="text-micro" /> {t("มีรหัสผ่าน")}
+                              </span>
+                            ) : (
+                              <a
+                                href={f.shareUrl!}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="btn-ghost !py-1.5 text-label"
+                              >
+                                <Icon name="fa-arrow-up-right-from-square" className="text-micro" />{" "}
+                                {t("เปิดลิงก์")}
+                              </a>
+                            )}
                             <button
                               type="button"
                               onClick={() => copyShare(f.shareUrl!)}
@@ -2428,6 +2755,15 @@ export default function AgentWorkspace({
                             >
                               <Icon name="fa-copy" className="text-micro" /> {t("คัดลอกลิงก์")}
                             </button>
+                            {f.kind === "html" && f.shareUrl?.includes("/artifacts/") && (
+                              <button
+                                type="button"
+                                onClick={() => openShareDialog(f)}
+                                className="btn-ghost !py-1.5 text-label"
+                              >
+                                <Icon name="fa-pen" className="text-micro" /> {t("อัปเดต")}
+                              </button>
+                            )}
                             <span className="ml-auto text-micro text-fg-subtle">
                               {t("ลิงก์สาธารณะถึง {date}", {
                                 date: f.shareExpiresAt!.slice(0, 10),
@@ -2436,24 +2772,11 @@ export default function AgentWorkspace({
                           </div>
                         ) : (
                           <div className="mt-2.5 space-y-2 border-t border-white/[0.07] pt-2.5">
-                            {f.kind === "html" && (
-                              <input
-                                type="text"
-                                value={shareNames[f.id] ?? ""}
-                                onChange={(e) =>
-                                  setShareNames((prev) => ({
-                                    ...prev,
-                                    [f.id]: e.target.value,
-                                  }))
-                                }
-                                placeholder={t("ชื่อลิงก์ (ว่าง = สุ่มให้)")}
-                                maxLength={64}
-                                className="w-full rounded-lg border border-white/[0.08] bg-ink-950/60 px-3 py-1.5 text-label text-fg placeholder:text-fg-subtle focus:border-brand-400/50 focus:outline-none"
-                              />
-                            )}
                             <button
                               type="button"
-                              onClick={() => shareFile(f.id, shareNames[f.id])}
+                              onClick={() =>
+                                f.kind === "html" ? openShareDialog(f) : shareFile(f.id)
+                              }
                               disabled={sharingId === f.id}
                               className="btn-secondary !py-1.5 text-label disabled:opacity-50"
                             >
@@ -2483,6 +2806,192 @@ export default function AgentWorkspace({
           </aside>
         </div>
       )}
+
+      {/* dialog แชร์/อัปเดต artifact — ตั้งชื่อและรหัสผ่านได้ */}
+      <Dialog
+        open={Boolean(shareTarget)}
+        onClose={closeShareDialog}
+        title={
+          shareResult
+            ? shareResult.updated
+              ? t("อัปเดตลิงก์แล้ว")
+              : t("สร้างลิงก์แล้ว")
+            : shareTarget?.existing
+              ? t("อัปเดตลิงก์ที่แชร์")
+              : t("แชร์ลิงก์")
+        }
+        description={
+          shareResult
+            ? undefined
+            : shareTarget?.existing
+              ? t("ไฟล์นี้เชื่อมกับเว็บเดิม — บันทึกแล้วลิงก์เดิมจะแสดงเนื้อหาล่าสุด")
+              : t("สร้างลิงก์สาธารณะอายุ 7 วัน")
+        }
+        icon="fa-share-nodes"
+        size="sm"
+        footer={
+          shareResult ? (
+            <button type="button" className="btn-primary" onClick={closeShareDialog}>
+              {t("เสร็จสิ้น")}
+            </button>
+          ) : (
+            <>
+              <button type="button" className="btn-quiet" onClick={closeShareDialog}>
+                {t("ยกเลิก")}
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={shareBusy}
+                onClick={submitShare}
+              >
+                {shareBusy && <Icon name="fa-circle-notch" className="animate-spin" />}
+                {shareTarget?.existing ? t("อัปเดตลิงก์") : t("สร้างลิงก์")}
+              </button>
+            </>
+          )
+        }
+      >
+        {shareResult ? (
+          <div className="space-y-3">
+            <div>
+              <label className="label">{t("ลิงก์สาธารณะ")}</label>
+              <div className="flex gap-2">
+                <input
+                  readOnly
+                  value={shareResult.url}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="input min-w-0 flex-1"
+                />
+                <button
+                  type="button"
+                  className="btn-secondary shrink-0"
+                  onClick={() => copyText(shareResult.url)}
+                >
+                  <Icon name={shareCopied ? "fa-check" : "fa-copy"} />
+                  {shareCopied ? t("คัดลอกแล้ว") : t("คัดลอก")}
+                </button>
+              </div>
+            </div>
+
+            {shareResult.password ? (
+              <div>
+                <label className="label">{t("รหัสผ่าน")}</label>
+                <div className="flex gap-2">
+                  <input
+                    readOnly
+                    value={shareResult.password}
+                    onFocus={(e) => e.currentTarget.select()}
+                    className="input min-w-0 flex-1"
+                  />
+                  <button
+                    type="button"
+                    className="btn-secondary shrink-0"
+                    onClick={() =>
+                      copyText(
+                        `${shareResult.url}\n${t("รหัสผ่าน")}: ${shareResult.password}`,
+                      )
+                    }
+                  >
+                    <Icon name="fa-copy" /> {t("คัดลอกลิงก์ + รหัส")}
+                  </button>
+                </div>
+                <p className="mt-1 text-micro leading-relaxed text-fg-subtle">
+                  {t("ส่งรหัสให้ผู้รับแยกจากลิงก์")}
+                </p>
+              </div>
+            ) : shareResult.protected ? (
+              <p className="text-micro leading-relaxed text-fg-subtle">
+                {t("ลิงก์นี้ใช้รหัสผ่านเดิม")}
+              </p>
+            ) : (
+              <p className="text-micro leading-relaxed text-fg-subtle">
+                {t("ลิงก์จะหมดอายุใน 7 วันและถูกลบอัตโนมัติ")}
+              </p>
+            )}
+
+            {shareResult.updated && (
+              <p className="text-micro leading-relaxed text-leaf">
+                {t("เนื้อหาล่าสุดอัปเดตไปยังลิงก์เดิมแล้ว")}
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {shareError && (
+              <p
+                role="alert"
+                className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-caption text-rose-300"
+              >
+                {shareError}
+              </p>
+            )}
+
+            <div>
+              <label className="label" htmlFor="share-name">
+                {t("ชื่อลิงก์")}
+              </label>
+              <input
+                id="share-name"
+                value={shareName}
+                onChange={(e) => setShareName(e.target.value)}
+                disabled={shareTarget?.existing}
+                maxLength={64}
+                placeholder={t("ชื่อลิงก์ (ว่าง = สุ่มให้)")}
+                className="input disabled:opacity-60"
+              />
+              <p className="mt-1 text-micro leading-relaxed text-fg-subtle">
+                {shareTarget?.existing
+                  ? t("ชื่อลิงก์แก้ไม่ได้หลังแชร์แล้ว")
+                  : t("ใช้ตัวอักษร ตัวเลข - หรือ _")}
+              </p>
+            </div>
+
+            {shareTarget?.existing && shareTarget.protected && (
+              <div>
+                <label className="label" htmlFor="share-current-password">
+                  {t("รหัสผ่านเดิม")}
+                </label>
+                <input
+                  id="share-current-password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={shareCurrentPassword}
+                  onChange={(e) => setShareCurrentPassword(e.target.value)}
+                  className="input"
+                />
+                <p className="mt-1 text-micro leading-relaxed text-fg-subtle">
+                  {t("ต้องใส่รหัสเดิมเพื่ออัปเดตลิงก์")}
+                </p>
+              </div>
+            )}
+
+            <div>
+              <label className="label" htmlFor="share-password">
+                {shareTarget?.protected
+                  ? t("รหัสผ่านใหม่ (เว้นว่าง = ใช้รหัสเดิม)")
+                  : t("รหัสผ่าน (ไม่บังคับ)")}
+              </label>
+              <input
+                id="share-password"
+                type="password"
+                autoComplete="new-password"
+                value={sharePassword}
+                onChange={(e) => setSharePassword(e.target.value)}
+                maxLength={128}
+                className="input"
+              />
+              <p className="mt-1 text-micro leading-relaxed text-fg-subtle">
+                {t("ผู้รับต้องใช้รหัสนี้เปิดลิงก์")}
+              </p>
+            </div>
+
+            <p className="text-micro leading-relaxed text-fg-subtle">
+              {t("ลิงก์จะหมดอายุใน 7 วันและถูกลบอัตโนมัติ")}
+            </p>
+          </div>
+        )}
+      </Dialog>
 
       {/* กล่องแก้ชื่อแชท */}
       <Dialog

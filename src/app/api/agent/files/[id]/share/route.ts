@@ -19,20 +19,38 @@ export const dynamic = "force-dynamic";
 /** ไฟล์ที่ไม่ใช่ HTML ยังใช้ /s/<token> แบบเดิม (อ่านเนื้อหาล่าสุดจาก DB) */
 const LEGACY_SHARE_DAYS = 7;
 
-type ShareBody = { name?: unknown };
+type ShareBody = { name?: unknown; password?: unknown; currentPassword?: unknown };
 
 function looksLikeHtml(content: string): boolean {
   return /^\s*(?:<!doctype\s+html|<html[\s>])/i.test(content);
 }
 
-async function readName(req: Request): Promise<{ name?: string; error?: string }> {
+async function readShareBody(req: Request): Promise<{
+  name?: string;
+  password?: string;
+  currentPassword?: string;
+  error?: string;
+}> {
   const parsed = (await req.json().catch(() => null)) as ShareBody | null;
   const body: ShareBody = parsed && typeof parsed === "object" ? parsed : {};
+
   const raw = typeof body.name === "string" ? body.name.trim() : "";
-  if (!raw) return {};
-  const name = sanitizeArtifactName(raw);
-  if (!name) return { error: "invalid_name" };
-  return { name };
+  let name: string | undefined;
+  if (raw) {
+    const clean = sanitizeArtifactName(raw);
+    if (!clean) return { error: "invalid_name" };
+    name = clean;
+  }
+
+  const password = typeof body.password === "string" ? body.password.slice(0, 128) : "";
+  const currentPassword =
+    typeof body.currentPassword === "string" ? body.currentPassword.slice(0, 128) : "";
+
+  return {
+    name,
+    password: password || undefined,
+    currentPassword: currentPassword || undefined,
+  };
 }
 
 function expiresAtOrFallback(value: string | null | undefined): string {
@@ -42,7 +60,12 @@ function expiresAtOrFallback(value: string | null | undefined): string {
 async function saveShare(
   userId: string,
   fileId: string,
-  share: { shareUrl: string; shareToken: string; shareExpiresAt: string },
+  share: {
+    shareUrl: string;
+    shareToken: string;
+    shareExpiresAt: string;
+    shareProtected?: boolean;
+  },
 ): Promise<void> {
   try {
     await setFileShare(userId, fileId, share);
@@ -64,6 +87,9 @@ function errorResponse(err: unknown): Response {
     if (err.code === "invalid_name") {
       return Response.json({ error: "invalid_name" }, { status: 400 });
     }
+    if (err.code === "password_required" || err.code === "wrong_password") {
+      return Response.json({ error: err.code }, { status: 401 });
+    }
     return Response.json({ error: "cdn_unavailable" }, { status: 502 });
   }
   console.error("[agent] share failed:", err);
@@ -77,8 +103,9 @@ function errorResponse(err: unknown): Response {
 async function shareOnCdn(
   userId: string,
   file: ChatFile,
-  requestedName?: string,
+  fields: { name?: string; password?: string; currentPassword?: string },
 ): Promise<Response> {
+  const requestedName = fields.name;
   const bytes = Buffer.byteLength(file.content, "utf8");
   if (bytes > MAX_ARTIFACT_BYTES) {
     return Response.json({ error: "html_too_large" }, { status: 413 });
@@ -93,22 +120,34 @@ async function shareOnCdn(
 
   // ลิงก์ CDN เดิมยังไม่หมดอายุ → อัปเดต HTML และต่ออายุ 7 วันจากตอนนี้
   if (existingValid && (!requestedName || sameName)) {
+    if (file.shareProtected && !fields.currentPassword) {
+      return Response.json({ error: "password_required" }, { status: 401 });
+    }
     try {
-      const updated = await updateArtifact({ name: file.shareToken!, html: file.content });
+      const updated = await updateArtifact({
+        name: file.shareToken!,
+        html: file.content,
+        password: fields.password,
+        currentPassword: fields.currentPassword,
+      });
       const expiresAt = expiresAtOrFallback(updated.expiresAt);
+      const protectedNow = updated.passwordProtected ?? file.shareProtected;
       await saveShare(userId, file.id, {
         shareUrl: updated.url,
         shareToken: updated.name,
         shareExpiresAt: expiresAt,
+        shareProtected: protectedNow,
       });
       return Response.json({
         shareUrl: updated.url,
         shareToken: updated.name,
         expiresAt,
+        passwordProtected: protectedNow,
+        updated: true,
       });
     } catch (err) {
-      // 404 = หมดอายุ/ถูกลบไปแล้ว, 401 = มีรหัสจากที่อื่น → สร้าง artifact ใหม่
-      if (!(err instanceof CdnError) || (err.status !== 404 && err.status !== 401)) {
+      // 404 = หมดอายุ/ถูกลบไปแล้ว, 401 = รหัสเดิมไม่ถูก → ให้ผู้ใช้แก้รหัสก่อน
+      if (!(err instanceof CdnError) || err.status !== 404) {
         return errorResponse(err);
       }
     }
@@ -121,13 +160,18 @@ async function shareOnCdn(
   try {
     let artifact;
     try {
-      artifact = await createArtifact({ name, html: file.content });
+      artifact = await createArtifact({
+        name,
+        html: file.content,
+        password: fields.password,
+      });
     } catch (err) {
       // ชื่อสุ่ม/ชื่อเดิมชนกัน → ลองสุ่มใหม่ (ชื่อที่ผู้ใช้เลือกเองให้รายงาน 409 กลับไป)
       if (err instanceof CdnError && err.code === "name_taken" && !requestedName) {
         artifact = await createArtifact({
           name: randomArtifactName(file.name),
           html: file.content,
+          password: fields.password,
         });
       } else {
         throw err;
@@ -135,15 +179,19 @@ async function shareOnCdn(
     }
 
     const expiresAt = expiresAtOrFallback(artifact.expiresAt);
+    const protectedNow = artifact.passwordProtected ?? Boolean(fields.password);
     await saveShare(userId, file.id, {
       shareUrl: artifact.url,
       shareToken: artifact.name,
       shareExpiresAt: expiresAt,
+      shareProtected: protectedNow,
     });
     return Response.json({
       shareUrl: artifact.url,
       shareToken: artifact.name,
       expiresAt,
+      passwordProtected: protectedNow,
+      updated: false,
     });
   } catch (err) {
     return errorResponse(err);
@@ -193,9 +241,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return Response.json({ error: "not_found" }, { status: 404 });
   }
 
-  const { name, error } = await readName(req);
-  if (error) {
-    return Response.json({ error }, { status: 400 });
+  const fields = await readShareBody(req);
+  if (fields.error) {
+    return Response.json({ error: fields.error }, { status: 400 });
   }
 
   const isHtml = file.kind === "html" || looksLikeHtml(file.content);
@@ -203,5 +251,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return shareLegacy(user.id, file);
   }
 
-  return shareOnCdn(user.id, file, name);
+  return shareOnCdn(user.id, file, fields);
 }

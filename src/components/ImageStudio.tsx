@@ -92,14 +92,22 @@ export default function ImageStudio({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: text, model, ratio, refs: refs.map((r) => r.name) }),
       });
-      const data = (await res.json()) as { job?: ImageJob; error?: string };
-      if (!res.ok || !data.job) {
-        throw new Error(data.error ?? String(res.status));
+      const data = (await res.json().catch(() => null)) as {
+        job?: ImageJob;
+        error?: string;
+      } | null;
+      if (!data?.job) {
+        throw new Error(data?.error ?? String(res.status));
       }
-      setJobs((prev) => [data.job as ImageJob, ...prev]);
+      const job = data.job;
+      setJobs((prev) => [job, ...prev]);
       setPrompt("");
       setRefs([]);
-      setNotice(t("บันทึกเข้าคิวแล้ว — ระบบจะแสดงรูปทันทีที่สร้างเสร็จ"));
+      if (job.status === "failed" || data.error) {
+        setNotice(job.error || data.error || t("สร้างไม่สำเร็จ"));
+      } else {
+        setNotice(t("สร้างรูปเสร็จแล้ว"));
+      }
     } catch {
       setNotice(t("ส่งงานไม่สำเร็จ กรุณาลองใหม่"));
     } finally {
@@ -297,7 +305,7 @@ export default function ImageStudio({
         )}
         <p className="mt-3 text-label leading-relaxed text-fg-subtle">
           <Icon name="fa-hourglass-half" className="mr-1.5" />
-          {t("งานที่ส่งจะถูกเก็บในคิวและแสดงในผลงานล่าสุด")}
+          {t("รูปที่สร้างเสร็จจะถูกเก็บไว้ในผลงานล่าสุด")}
         </p>
         {notice && (
           <p className="mt-3 rounded-lg border border-white/[0.09] bg-white/[0.04] px-3 py-2 text-caption text-fg-muted">
@@ -333,13 +341,58 @@ export default function ImageStudio({
             {jobs.map((j) => (
               <article key={j.id} className="card relative">
                 <div className="relative aspect-[4/3] overflow-hidden rounded-t-lg bg-ink-950/70">
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-fg-subtle">
-                    <Icon name="fa-wand-magic-sparkles" className="text-title text-brand-300/80" />
-                    <span className="text-micro">{t("กำลังรอสร้าง")}</span>
-                  </div>
-                  <span className="absolute left-2.5 top-2.5 inline-flex items-center gap-1 rounded-md bg-amber-glow/10 px-2 py-0.5 text-micro font-medium text-amber-glow">
-                    <Icon name="fa-clock" className="text-micro" />
-                    {t("ในคิว")}
+                  {j.imageUrl ? (
+                    <a
+                      href={j.imageUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block h-full w-full"
+                      title={t("เปิดรูป")}
+                    >
+                      <img
+                        src={j.imageUrl}
+                        alt={j.prompt}
+                        loading="lazy"
+                        className="h-full w-full object-contain"
+                      />
+                    </a>
+                  ) : (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-fg-subtle">
+                      <Icon
+                        name={j.status === "failed" ? "fa-triangle-exclamation" : "fa-wand-magic-sparkles"}
+                        className={`text-title ${
+                          j.status === "failed" ? "text-rose-300" : "text-brand-300/80"
+                        }`}
+                      />
+                      <span className="text-micro">
+                        {j.status === "failed" ? t("สร้างไม่สำเร็จ") : t("กำลังรอสร้าง")}
+                      </span>
+                    </div>
+                  )}
+                  <span
+                    className={`absolute left-2.5 top-2.5 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-micro font-medium ${
+                      j.status === "done"
+                        ? "bg-leaf/10 text-leaf"
+                        : j.status === "failed"
+                          ? "bg-rose-500/10 text-rose-300"
+                          : "bg-amber-glow/10 text-amber-glow"
+                    }`}
+                  >
+                    <Icon
+                      name={
+                        j.status === "done"
+                          ? "fa-check"
+                          : j.status === "failed"
+                            ? "fa-triangle-exclamation"
+                            : "fa-clock"
+                      }
+                      className="text-micro"
+                    />
+                    {j.status === "done"
+                      ? t("เสร็จแล้ว")
+                      : j.status === "failed"
+                        ? t("ไม่สำเร็จ")
+                        : t("ในคิว")}
                   </span>
                 </div>
                 <span className="absolute right-2 top-2 z-10">
@@ -359,6 +412,9 @@ export default function ImageStudio({
                 </span>
                 <div className="p-3.5">
                   <p className="line-clamp-2 text-caption leading-relaxed text-fg">{j.prompt}</p>
+                  {j.status === "failed" && j.error && (
+                    <p className="mt-1.5 text-micro leading-relaxed text-rose-300">{j.error}</p>
+                  )}
                   <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-micro text-fg-subtle">
                     <span className="rounded bg-white/[0.07] px-1.5 py-0.5 font-mono">{j.ratio}</span>
                     <span className="truncate">{j.model}</span>

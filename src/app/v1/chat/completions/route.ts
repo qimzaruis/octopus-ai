@@ -29,10 +29,11 @@ import {
   type UpstreamMessage,
 } from "@/lib/gateway";
 import { createPublicSseFilter, publicCompletion } from "@/lib/public-response";
+import { effectiveContextWindow, imageCount } from "@/lib/api-call";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 type Body = {
   model?: string;
@@ -162,6 +163,35 @@ export async function POST(req: NextRequest) {
   }
 
   const chars = promptChars(messages);
+  const contextWindow = effectiveContextWindow(route.targets);
+  const toolsChars =
+    body?.tools && Array.isArray(body.tools) ? JSON.stringify(body.tools).length : 0;
+  const inputTokens = estimateTokensFromChars(chars + toolsChars) + imageCount(messages) * 1000;
+  if (contextWindow > 0 && inputTokens >= contextWindow - 256) {
+    return openaiError(
+      `prompt ใหญ่เกิน context window ของโมเดล (ประมาณ ${inputTokens.toLocaleString()} / ${contextWindow.toLocaleString()} tokens)`,
+      "invalid_request_error",
+      400,
+      "context_length_exceeded",
+    );
+  }
+  const requestedMax = Number(body?.max_tokens);
+  let maxTokens =
+    Number.isFinite(requestedMax) && requestedMax > 0 ? requestedMax : undefined;
+  let clamped = false;
+  if (contextWindow > 0) {
+    const remaining = contextWindow - inputTokens - 256;
+    if (maxTokens && maxTokens > remaining) {
+      maxTokens = Math.max(1, remaining);
+      clamped = true;
+    }
+  }
+  const contextHeaders = {
+    "x-context-window": String(contextWindow),
+    "x-context-used": String(inputTokens),
+    "x-context-max-output": String(maxTokens ?? 0),
+    ...(clamped ? { "x-context-clamped": "1" } : {}),
+  };
   const startedAt = Date.now();
   const log = (input: {
     target: GatewayTarget;
@@ -190,7 +220,7 @@ export async function POST(req: NextRequest) {
       messages,
       stream,
       temperature: body?.temperature,
-      maxTokens: body?.max_tokens,
+      maxTokens,
       tools: body?.tools,
       filter: hasImage(messages) ? (t) => t.supportsVision : undefined,
     });
@@ -244,7 +274,7 @@ export async function POST(req: NextRequest) {
         };
     log({ target: result.target, status: "success", httpStatus: 200, usage });
     // ไม่ส่งฟิลด์อื่นของต้นทางออกมาเลย (id/metadata ของค่ายจะไม่โผล่ให้ผู้ใช้เห็น)
-    return Response.json(publicCompletion(json, model));
+    return Response.json(publicCompletion(json, model), { headers: contextHeaders });
   }
 
   // stream: แปลง SSE ของต้นทางให้เหลือเฉพาะฟิลด์มาตรฐานก่อนถึงลูกค้า พร้อมนับ usage ไปด้วย
@@ -287,6 +317,7 @@ export async function POST(req: NextRequest) {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      ...contextHeaders,
     },
   });
 }

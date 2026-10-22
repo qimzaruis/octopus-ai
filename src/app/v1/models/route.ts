@@ -6,6 +6,7 @@
 
 import { NextRequest } from "next/server";
 import { authenticateApiKey } from "@/lib/api-auth";
+import { effectiveContextWindow } from "@/lib/api-call";
 import { getPlanByKey } from "@/lib/data/plans";
 import { listPublicRoutes } from "@/lib/data/models";
 
@@ -45,6 +46,9 @@ export async function GET(req: NextRequest) {
         description: r.description,
         /** chat = /v1/chat/completions, image = /v1/images/generations */
         kind: r.kind,
+        /** เพดาน context ที่ใช้ได้จริง (min ของ targets) — ใช้เช็คก่อนส่ง request */
+        context_window: effectiveContextWindow(r.targets) || null,
+        max_output_tokens: 32_000,
       })),
   });
 }

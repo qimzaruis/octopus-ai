@@ -42,7 +42,7 @@ export default async function ModelsPage() {
         : null,
       inputPricePerM: route.inputPricePerM,
       outputPricePerM: route.outputPricePerM,
-      contextWindow: route.targets.reduce((top, target) => Math.max(top, target.contextWindow), 0),
+      contextWindow: (route.targets.length > 0 ? route.targets.reduce((min, target) => Math.min(min, target.contextWindow), Number.POSITIVE_INFINITY) : 0),
       supportsVision: route.targets.some((target) => target.supportsVision),
       // uptime จาก request จริง 24 ชม.ล่าสุด ไม่ใช่ค่าสถิติรายวันที่รีเซ็ตเที่ยงคืน
       uptime: recent && recent.requests > 0 ? (recent.ok / recent.requests) * 100 : null,

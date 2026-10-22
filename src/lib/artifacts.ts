@@ -85,27 +85,128 @@ async function requestArtifact(path: string, init: ArtifactRequest): Promise<Cdn
   return data;
 }
 
-export function createArtifact(input: { name: string; html: string }): Promise<CdnArtifact> {
+export function createArtifact(input: {
+  name: string;
+  html: string;
+  password?: string;
+}): Promise<CdnArtifact> {
+  const body: Record<string, unknown> = {
+    name: input.name,
+    html: input.html,
+    ttlDays: ARTIFACT_TTL_DAYS,
+  };
+  if (input.password) body.password = input.password;
   return requestArtifact("/artifacts", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      name: input.name,
-      html: input.html,
-      ttlDays: ARTIFACT_TTL_DAYS,
-    }),
+    body: JSON.stringify(body),
   });
 }
 
-export function updateArtifact(input: { name: string; html: string }): Promise<CdnArtifact> {
+export function updateArtifact(input: {
+  name: string;
+  html: string;
+  /** ไม่ส่ง = คงรหัสเดิม; ส่ง "" = ถอดรหัส */
+  password?: string;
+  /** ต้องส่งเมื่อ artifact เดิมมีรหัสอยู่ */
+  currentPassword?: string;
+}): Promise<CdnArtifact> {
+  const body: Record<string, unknown> = {
+    html: input.html,
+    ttlDays: ARTIFACT_TTL_DAYS,
+  };
+  if (input.password !== undefined) body.password = input.password || null;
+  if (input.currentPassword) body.currentPassword = input.currentPassword;
   return requestArtifact(`/artifacts/${encodeURIComponent(input.name)}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      html: input.html,
-      ttlDays: ARTIFACT_TTL_DAYS,
-    }),
+    body: JSON.stringify(body),
   });
+}
+
+export type CdnImage = {
+  id: string;
+  url: string;
+  path?: string;
+  mime: string;
+  size: number;
+};
+
+/** ตรวจชนิดรูปจาก magic bytes — CDN ไม่เชื่อ Content-Type ที่ส่งไป */
+export function detectImageMime(bytes: Uint8Array): string | null {
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+    return "image/png";
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (bytes.length >= 6 && String.fromCharCode(...bytes.slice(0, 3)) === "GIF") {
+    return "image/gif";
+  }
+  if (
+    bytes.length >= 12 &&
+    String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" &&
+    String.fromCharCode(...bytes.slice(8, 12)) === "WEBP"
+  ) {
+    return "image/webp";
+  }
+  if (
+    bytes.length >= 12 &&
+    String.fromCharCode(...bytes.slice(4, 8)) === "ftyp" &&
+    String.fromCharCode(...bytes.slice(8, 12)) === "avif"
+  ) {
+    return "image/avif";
+  }
+  return null;
+}
+
+/** อัปโหลดรูปที่สร้างเสร็จขึ้น CDN — คืน URL ถาวรสำหรับเก็บใน chat DB */
+export async function uploadImage(input: {
+  bytes: Uint8Array;
+  mime?: string;
+  filename?: string;
+}): Promise<CdnImage> {
+  if (input.bytes.byteLength > 5 * 1024 * 1024) {
+    throw new CdnError("image_too_large", 413);
+  }
+  const mime = input.mime || detectImageMime(input.bytes);
+  if (!mime) {
+    throw new CdnError("unsupported_image_type", 415);
+  }
+  const ext = mime.split("/")[1] || "png";
+  const form = new FormData();
+  const bytes = new Uint8Array(input.bytes);
+  form.append(
+    "image",
+    new Blob([bytes], { type: mime }),
+    input.filename || `image.${ext}`,
+  );
+
+  let res: Response;
+  try {
+    res = await fetch(`${cdnBaseUrl()}/images`, {
+      method: "POST",
+      headers: { "x-api-key": apiKey() },
+      body: form,
+      cache: "no-store",
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (err) {
+    if (err instanceof CdnError) throw err;
+    throw new CdnError(
+      "cdn_unreachable",
+      502,
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+
+  const data = (await res.json().catch(() => null)) as
+    | (CdnImage & { error?: string; message?: string })
+    | null;
+  if (!res.ok || !data?.url) {
+    throw new CdnError(data?.error ?? "cdn_error", res.status, data?.message);
+  }
+  return data;
 }
 
 /**
