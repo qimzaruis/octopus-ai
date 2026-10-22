@@ -496,6 +496,8 @@ export default function AgentWorkspace({
   const pasteSeqRef = useRef(0);
   /** คำค้นในประวัติแชท (กรองฝั่ง client — รายการถูกโหลดมาครบแล้ว) */
   const [historyQuery, setHistoryQuery] = useState("");
+  /** ซ่อนช่องค้นหาไว้ก่อน เหลือแค่ไอคอนในหัวข้อประวัติแชท */
+  const [historySearchOpen, setHistorySearchOpen] = useState(false);
   const historyInputRef = useRef<HTMLInputElement>(null);
   const [collapsedHistoryGroups, setCollapsedHistoryGroups] = useState<Set<string>>(new Set());
 
@@ -1370,6 +1372,7 @@ export default function AgentWorkspace({
     finishReason: string;
     context: ContextInfo | null;
     gotDone: boolean;
+    error: string;
   }> {
     const current = () => runSeqRef.current === runId && !signal.aborted;
     const res = await fetch("/api/agent/chat", {
@@ -1383,7 +1386,14 @@ export default function AgentWorkspace({
       throw new Error(data?.error || `HTTP ${res.status}`);
     }
     if (!current()) {
-      return { text: "", calls: [], finishReason: "", context: null, gotDone: false };
+      return {
+        text: "",
+        calls: [],
+        finishReason: "",
+        context: null,
+        gotDone: false,
+        error: "",
+      };
     }
 
     const newTitle = res.headers.get("x-conversation-title");
@@ -1400,6 +1410,7 @@ export default function AgentWorkspace({
     let calls: AgentToolCall[] = [];
     let finishReason = "";
     let roundContext: ContextInfo | null = null;
+    let roundError = "";
     let gotDone = false;
 
     /* วาดข้อความรวมเป็นเฟรมเดียว: upstream ส่ง chunk ถี่มาก ถ้าอัปเดต state
@@ -1429,6 +1440,7 @@ export default function AgentWorkspace({
         v?: unknown;
         text?: string;
         fr?: string;
+        error?: string;
         usage?: { inputTokens?: number; outputTokens?: number };
         context?: ContextInfo;
       };
@@ -1438,6 +1450,7 @@ export default function AgentWorkspace({
         return;
       }
       if (event.fr) finishReason = event.fr;
+      if (event.error) roundError = event.error;
       if (event.context) {
         roundContext = event.context;
         if (current()) setContextInfo(event.context);
@@ -1517,6 +1530,7 @@ export default function AgentWorkspace({
         finishReason,
         context: roundContext,
         gotDone,
+        error: roundError,
       };
     } finally {
       cancelPaint();
@@ -1665,6 +1679,7 @@ export default function AgentWorkspace({
     let answer = "";
     let lastFinish = "";
     let lastGotDone = true;
+    let lastError = "";
     let exhausted = true;
     try {
       for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
@@ -1694,9 +1709,10 @@ export default function AgentWorkspace({
           appendThought,
         );
         if (!isCurrent() || controller.signal.aborted) return;
-        const { text, calls, finishReason, gotDone } = roundResult;
+        const { text, calls, finishReason, gotDone, error: roundError } = roundResult;
         lastFinish = finishReason || lastFinish;
         lastGotDone = gotDone;
+        if (roundError) lastError = roundError;
         answer = text;
         if (calls.length === 0) {
           exhausted = false;
@@ -1746,7 +1762,8 @@ export default function AgentWorkspace({
         setNotice(t("การเชื่อมต่อหลุดกลางทาง — คำตอบอาจไม่ครบ กดทำต่อหรือลองใหม่"));
       }
       finish({
-        content: answer || t("เอเจนต์ไม่ได้ตอบกลับมา"),
+        content: answer || (lastError ? "" : t("เอเจนต์ไม่ได้ตอบกลับมา")),
+        error: lastError || undefined,
         steps: collected,
         notes: notesLog,
         thought: thoughtRef.current || undefined,
@@ -2033,20 +2050,6 @@ export default function AgentWorkspace({
           <Icon name="fa-square-pen" className="h-4 w-4 shrink-0" />
           {!collapsed && <span>{t("แชทใหม่")}</span>}
         </button>
-          {collapsed && (
-            <button
-              type="button"
-              onClick={() => {
-                setCollapsed(false);
-                window.setTimeout(() => historyInputRef.current?.focus(), 120);
-              }}
-              title={t("ค้นหาแชท")}
-              aria-label={t("ค้นหาแชท")}
-              className="touch-min flex w-full items-center justify-center rounded-lg px-0 py-2.5 text-caption font-medium text-fg-muted transition hover:bg-white/[0.06] hover:text-fg"
-            >
-              <Icon name="fa-magnifying-glass" className="h-4 w-4 shrink-0 text-brand-300" />
-            </button>
-          )}
           <Link
             href="/images"
           onClick={() => setDrawerOpen(false)}
@@ -2076,34 +2079,52 @@ export default function AgentWorkspace({
 
       {!collapsed && (
         <div className="mt-4 flex min-h-0 flex-1 flex-col">
-          <p className="px-4 pb-2 pt-1 text-micro font-semibold uppercase tracking-[0.16em] text-fg-subtle">
-            {t("ประวัติแชท")}
-          </p>
-          <div className="relative mb-1.5 px-2">
-                  <Icon
-                    name="fa-magnifying-glass"
-                    className="pointer-events-none absolute left-[1.3rem] top-1/2 -translate-y-1/2 text-micro text-fg-subtle"
-                  />
-                  <input
-                    ref={historyInputRef}
-                    value={historyQuery}
-                    onChange={(e) => setHistoryQuery(e.target.value)}
-                    placeholder={t("ค้นหาแชท")}
-                    aria-label={t("ค้นหาแชท")}
-                    type="search"
-                    className="h-10 w-full rounded-md bg-white/[0.04] pl-8 pr-11 text-caption text-fg outline-none transition placeholder:text-fg-subtle hover:bg-white/[0.06] focus:bg-white/[0.06] focus-visible:ring-1 focus-visible:ring-white/[0.14] focus-visible:ring-offset-0 [&::-webkit-search-cancel-button]:hidden"
-                  />
-                  {historyQuery && (
-                    <button
-                      type="button"
-                      onClick={() => setHistoryQuery("")}
-                      aria-label={t("ล้างคำค้น")}
-                      className="touch-min-icon absolute right-0.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded text-micro text-fg-subtle transition hover:bg-white/[0.08] hover:text-fg"
-                    >
-                      <Icon name="fa-xmark" />
-                    </button>
-                  )}
-                </div>
+          <div className="flex items-center gap-2 px-4 pb-2 pt-1">
+            <p className="flex-1 text-micro font-semibold uppercase tracking-[0.16em] text-fg-subtle">
+              {t("ประวัติแชท")}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                if (historySearchOpen) setHistoryQuery("");
+                setHistorySearchOpen((v) => !v);
+              }}
+              title={historySearchOpen ? t("ปิดการค้นหา") : t("ค้นหาแชท")}
+              aria-label={historySearchOpen ? t("ปิดการค้นหา") : t("ค้นหาแชท")}
+              aria-expanded={historySearchOpen}
+              className="touch-min-icon -mr-1 flex h-6 w-6 items-center justify-center rounded text-micro text-fg-subtle transition hover:bg-white/[0.08] hover:text-fg"
+            >
+              <Icon name={historySearchOpen ? "fa-xmark" : "fa-magnifying-glass"} />
+            </button>
+          </div>
+          {historySearchOpen && (
+            <div className="relative mb-1.5 px-2">
+              <Icon
+                name="fa-magnifying-glass"
+                className="pointer-events-none absolute left-[1.3rem] top-1/2 -translate-y-1/2 text-micro text-fg-subtle"
+              />
+              <input
+                ref={historyInputRef}
+                autoFocus
+                value={historyQuery}
+                onChange={(e) => setHistoryQuery(e.target.value)}
+                placeholder={t("ค้นหาแชท")}
+                aria-label={t("ค้นหาแชท")}
+                type="search"
+                className="h-10 w-full rounded-md bg-white/[0.04] pl-8 pr-11 text-caption text-fg outline-none transition placeholder:text-fg-subtle hover:bg-white/[0.06] focus:bg-white/[0.06] focus-visible:ring-1 focus-visible:ring-white/[0.14] focus-visible:ring-offset-0 [&::-webkit-search-cancel-button]:hidden"
+              />
+              {historyQuery && (
+                <button
+                  type="button"
+                  onClick={() => setHistoryQuery("")}
+                  aria-label={t("ล้างคำค้น")}
+                  className="touch-min-icon absolute right-0.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded text-micro text-fg-subtle transition hover:bg-white/[0.08] hover:text-fg"
+                >
+                  <Icon name="fa-xmark" />
+                </button>
+              )}
+            </div>
+          )}
               <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
                 {conversations.length === 0 ? (
                   <p className="px-3 py-2 text-label text-fg-subtle">{t("ยังไม่มีประวัติแชท")}</p>

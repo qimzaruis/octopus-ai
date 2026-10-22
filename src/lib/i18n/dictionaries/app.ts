@@ -194,6 +194,7 @@ export const appPages = {
   "7 วันล่าสุด": "Previous 7 days",
   "เก่ากว่า": "Older",
   "ค้นหาแชท": "Search chats",
+  "ปิดการค้นหา": "Close search",
   "ล้างคำค้น": "Clear search",
   "ไม่พบแชทที่ตรงกัน": "No matching chats",
 

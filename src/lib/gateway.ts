@@ -237,6 +237,15 @@ function isOpenRouter(baseUrl: string): boolean {
   }
 }
 
+/** Vercel AI Gateway รองรับ reasoning object แบบเดียวกับ OpenRouter */
+function isVercelGateway(baseUrl: string): boolean {
+  try {
+    return new URL(baseUrl).host === "ai-gateway.vercel.sh";
+  } catch {
+    return false;
+  }
+}
+
 /** กันกรณี provider มีคีย์หลายสิบตัว แล้ว request หนึ่งรอบลากยาวเกินไป */
 const MAX_KEYS_PER_TARGET = 4;
 
@@ -324,8 +333,12 @@ export async function invokeUpstream(input: InvokeInput): Promise<InvokeResult> 
     if (input.maxTokens !== undefined) payload.max_tokens = input.maxTokens;
     if (input.tools?.length) payload.tools = input.tools;
     if (input.stream) payload.stream_options = { include_usage: true };
-    // OpenRouter รองรับ reasoning เป็นพารามิเตอร์กลาง — ค่ายอื่นอาจ 400 ถ้าส่งไป
-    if (input.reasoningEffort && isOpenRouter(target.baseUrl)) {
+    // OpenRouter/Vercel AI Gateway รองรับ reasoning เป็นพารามิเตอร์กลาง —
+    // ค่ายอื่นอาจ 400 ถ้าส่งไป; โมเดล reasoning (เช่น MiniMax M3.1) ต้องได้ low
+    if (
+      input.reasoningEffort &&
+      (isOpenRouter(target.baseUrl) || isVercelGateway(target.baseUrl))
+    ) {
       payload.reasoning = { effort: input.reasoningEffort };
     }
 
@@ -843,6 +856,8 @@ export type SseAccumulator = {
   toolCalls(): UpstreamToolCall[];
   /** เหตุผลที่ต้นทางหยุด: stop | tool_calls | length (length = ถูกตัดเพราะครบ token) */
   finishReason(): string;
+  /** error ที่ค่ายส่งมาใน stream (เช่น empty_completion) — ว่างถ้าไม่มี */
+  error(): string;
 };
 
 /** ชิ้นส่วน tool_call ที่ไหลมาคนละ chunk ต้องรวมตาม index ก่อนจึงใช้ได้ */
@@ -852,6 +867,7 @@ export function createSseAccumulator(estimatePrompt: () => number): SseAccumulat
   let buffer = "";
   let acc = "";
   let finish = "";
+  let streamError = "";
   let usage: GatewayUsage | null = null;
   let lastReasoning = "";
   const slots = new Map<number, ToolCallSlot>();
@@ -878,6 +894,7 @@ export function createSseAccumulator(estimatePrompt: () => number): SseAccumulat
     let delta = "";
     try {
       const json = JSON.parse(data) as {
+        error?: { message?: string; code?: string };
         choices?: {
           delta?: {
             content?: string;
@@ -896,6 +913,9 @@ export function createSseAccumulator(estimatePrompt: () => number): SseAccumulat
         usage?: { prompt_tokens?: number; completion_tokens?: number };
       };
       const choice = json.choices?.[0];
+      if (json.error) {
+        streamError = json.error.message || json.error.code || "upstream_error";
+      }
       if (choice?.finish_reason) finish = choice.finish_reason;
       delta = choice?.delta?.content ?? "";
       if (!delta) delta = choice?.message?.content ?? "";
@@ -950,6 +970,9 @@ export function createSseAccumulator(estimatePrompt: () => number): SseAccumulat
     },
     finishReason() {
       return finish;
+    },
+    error() {
+      return streamError;
     },
     toolCalls() {
       return [...slots.entries()]

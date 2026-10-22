@@ -316,13 +316,6 @@ const UNKNOWN_TARGET = {
   contextWindow: 0,
 } satisfies GatewayTarget;
 
-/**
- * ข้อความที่บันทึกแทน error ในประวัติแชทของผู้ใช้ — ห้ามเอาข้อความดิบมาเก็บ
- * เพราะมันพาค่ายที่ระบบส่งต่อออกไปกับผู้ใช้อ่านได้
- */
-const GENERIC_STREAM_ERROR =
-  "เกิดข้อผิดพลาดระหว่างการเชื่อมต่อ โมเดลตอบกลับมาไม่ครบ กรุณาส่งข้อความเป็นรอบใหม่";
-
 function hostOf(baseUrl: string): string {
   try {
     return new URL(baseUrl).host;
@@ -707,6 +700,13 @@ export async function POST(req: NextRequest) {
       const answer = acc.text();
       const calls = acc.toolCalls();
       const reason = acc.finishReason();
+      const streamError = acc.error();
+      if (streamError && !failed) failed = streamError;
+      const failedMessage = failed
+        ? /empty completion|empty_completion/i.test(failed)
+          ? "โมเดลต้นทางตอบกลับว่างเปล่า (empty completion) — ลองเปลี่ยนโมเดลหรือส่งคำขอใหม่"
+          : "การเชื่อมต่อกับโมเดลขาดกลางทาง — ลองส่งใหม่หรือเปลี่ยนโมเดล"
+        : "";
       const usage = acc.usage();
       const contextNow = {
         ...contextInfo,
@@ -717,7 +717,7 @@ export async function POST(req: NextRequest) {
 
       if (cancelled || req.signal.aborted) {
         /* กดหยุดแล้ว: เก็บเฉพาะคำตอบบางส่วนที่ผู้ใช้เห็นไปแล้ว (ถ้ามี)
-           ห้ามเขียน GENERIC_STREAM_ERROR ลงประวัติ เพราะผู้ใช้ไม่ได้เห็นข้อความนั้น
+           ห้ามเขียนข้อความ error ลงประวัติ เพราะผู้ใช้ไม่ได้เห็นข้อความนั้น
            และอย่า enqueue/close อะไรอีก — ฝั่ง client ตัด connection ไปแล้ว */
         // ถ้ามี tool_calls ข้อความนั้นคือ "ความคิดก่อนเรียกเครื่องมือ" ไม่ใช่คำตอบ
         if (answer.trim() && calls.length === 0) {
@@ -784,8 +784,8 @@ export async function POST(req: NextRequest) {
       }
 
       // ข้อความ error ดิบของค่าย/ของ bundler ห้ามถูกบันทึกค้างในประวัติแชทของผู้ใช้
-      // เก็บไว้แค่ข้อความกลาง ๆ ส่วนรายละเอียดเต็มไปอยู่ใน log เซิร์ฟเวอร์กับตาราง requests
-      const toStore = answer || (failed ? GENERIC_STREAM_ERROR : "");
+      // เก็บเฉพาะคำตอบจริง ส่วน error แสดงให้ผู้ใช้เห็นในรอบนี้และ log ไว้ที่ requests
+      const toStore = answer;
       let saved: Awaited<ReturnType<typeof saveAssistantMessage>> = [];
       try {
         if (toStore) {
@@ -797,7 +797,15 @@ export async function POST(req: NextRequest) {
         // บอกรายชื่อไฟล์ที่บันทึกเสร็จแล้ว → ปุ่ม "แชร์" บน artifact ใช้ได้ทันทีโดยไม่ต้องโหลดห้องใหม่
         if (saved.length > 0) safeEnqueue(event({ t: "files", v: saved }));
         flushThought(true);
-        safeEnqueue(event({ t: "done", fr: reason, usage, context: contextNow }));
+        safeEnqueue(
+          event({
+            t: "done",
+            fr: reason,
+            usage,
+            context: contextNow,
+            error: failedMessage || undefined,
+          }),
+        );
         try {
           controller.close();
         } catch {
